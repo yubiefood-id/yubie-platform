@@ -1,0 +1,28 @@
+{
+  "name": "yubie-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @yubie/web --",
+    "dev:api": "npm run dev --workspace @yubie/api",
+    "build": "npm run build --workspace @yubie/domain && npm run build --workspace @yubie/validation && npm run build --workspace @yubie/commerce && npm run build --workspace @yubie/ui && npm run build --workspace @yubie/api && npm run build --workspace @yubie/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspace @yubie/domain && npm run test --workspace @yubie/validation && npm run test --workspace @yubie/commerce && npm run test --workspace @yubie/api && npm run test --workspace @yubie/web",
+    "check": "npm run lint && npm run typecheck && npm run test"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "fast-uri": "3.1.5"
+  }
+}

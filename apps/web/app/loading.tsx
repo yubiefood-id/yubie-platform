@@ -1,0 +1,1 @@
+export default function Loading() { return <main className="loading-page" aria-live="polite"><span className="eyebrow">YUBIE</span><div className="loading-line" /><p>Menumbuhkan halaman…</p></main>; }
