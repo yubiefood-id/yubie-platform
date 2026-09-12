@@ -6,6 +6,12 @@ export const newsletterSubmissionSchema = z.object({
   consent: z.literal(true),
 });
 
+export const productWaitlistSchema = z.object({
+  email: z.email(),
+  productId: z.enum(["shake", "ppang"]),
+  consent: z.literal(true),
+});
+
 export const b2bLeadSchema = z.object({
   name: z.string().trim().min(2).max(80),
   business: z.string().trim().min(2).max(120),
@@ -31,5 +37,6 @@ export const checkoutRequestSchema = z.object({
 });
 
 export type NewsletterSubmission = z.infer<typeof newsletterSubmissionSchema>;
+export type ProductWaitlistSubmission = z.infer<typeof productWaitlistSchema>;
 export type B2BLead = z.infer<typeof b2bLeadSchema>;
 export type CheckoutRequest = z.infer<typeof checkoutRequestSchema>;
