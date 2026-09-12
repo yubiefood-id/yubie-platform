@@ -23,3 +23,18 @@ test("invalid newsletter submissions are rejected", async () => {
   }));
   assert.equal(response.status, 400);
 });
+
+test("waitlist accepts only scoped coming-soon product interest", async () => {
+  const accepted = await handleRequest(new Request("https://api.yubiefood.id/v1/waitlist", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "hello@yubiefood.id", productId: "shake", consent: true })
+  }));
+  const rejected = await handleRequest(new Request("https://api.yubiefood.id/v1/waitlist", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "hello@yubiefood.id", productId: "flour", consent: true })
+  }));
+  assert.equal(accepted.status, 202);
+  assert.equal(rejected.status, 400);
+});

@@ -40,6 +40,7 @@ This directory translates Yubie's production requirements into buildable softwar
 | [`16_TESTING_CI_CD_AND_DEV_EXPERIENCE.md`](./16_TESTING_CI_CD_AND_DEV_EXPERIENCE.md) | How does a change move safely from laptop to production? |
 | [`17_DELIVERY_PLAN_EPICS_AND_DEPENDENCIES.md`](./17_DELIVERY_PLAN_EPICS_AND_DEPENDENCIES.md) | In what order should the platform be built? |
 | [`18_DEFINITION_OF_DONE_AND_PR_TEMPLATE.md`](./18_DEFINITION_OF_DONE_AND_PR_TEMPLATE.md) | What evidence is required before a development slice is complete? |
+| [`CURRENT_STATE_REVISION_REPORT.md`](./CURRENT_STATE_REVISION_REPORT.md) | What changed in the root → format → application → recipe product-discovery revision? |
 
 ## C4 modeling policy
 

@@ -26,6 +26,9 @@ export interface Product {
   story: string;
   sizes: ProductSize[];
   verificationStatus?: VerificationStatus;
+  positioning?: string;
+  format?: "flour" | "shake" | "ppang";
+  usageSteps?: string[];
 }
 
 export interface CartItem {
@@ -61,8 +64,13 @@ export interface ProductClaim {
   approvalStatus: ClaimStatus;
   publicVisibility: boolean;
   verificationNote?: string;
+  scopeType?: "brand" | "product" | "root" | "offering";
+  scopeId?: string;
+  evidenceReference?: string;
 }
 
 export function calculateSubtotal(items: readonly CartItem[]): number {
   return items.reduce((total, item) => total + item.unitPrice * item.quantity, 0);
 }
+
+export * from "./product-discovery.js";

@@ -1,5 +1,5 @@
 import { PreviewCommerceProvider } from "@yubie/commerce";
-import { b2bLeadSchema, checkoutRequestSchema, newsletterSubmissionSchema } from "@yubie/validation";
+import { b2bLeadSchema, checkoutRequestSchema, newsletterSubmissionSchema, productWaitlistSchema } from "@yubie/validation";
 import { catalog } from "./catalog.js";
 
 const commerce = new PreviewCommerceProvider();
@@ -22,6 +22,10 @@ export async function handleRequest(request: Request): Promise<Response> {
 
   if (request.method === "POST" && url.pathname === "/v1/newsletter") {
     return validateJson(request, newsletterSubmissionSchema);
+  }
+
+  if (request.method === "POST" && url.pathname === "/v1/waitlist") {
+    return validateJson(request, productWaitlistSchema);
   }
 
   if (request.method === "POST" && url.pathname === "/v1/b2b-leads") {
