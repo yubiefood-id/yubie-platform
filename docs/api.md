@@ -1,24 +1,21 @@
-# API boundary
+# API Boundary
 
-Base path: `/v1`. All bodies use JSON. The current service is stateless and provider-neutral.
+**Current target:** marketplace routing + WhatsApp/CRM integration. Direct checkout is deferred.
 
-| Method | Route | Purpose | Current behavior |
-| --- | --- | --- | --- |
-| `GET` | `/healthz` | Liveness | Returns service/version status |
-| `GET` | `/v1/catalog` | Public catalog | Returns Flour, Shake, and Ppang states |
-| `POST` | `/v1/newsletter` | Consent-based signup | Validates and acknowledges only |
-| `POST` | `/v1/b2b-leads` | Wholesale inquiry | Validates and acknowledges only |
-| `POST` | `/v1/checkouts` | Checkout orchestration | Returns a non-payable preview session |
+## Target public/internal endpoints
 
-## Error model
+| Method | Route | Purpose |
+|---|---|---|
+| GET | /healthz | liveness |
+| GET | /v1/products | approved product projection |
+| GET | /v1/products/:slug/purchase-options | marketplace + WhatsApp options |
+| GET | /go/:channel/:listingKey | allowlisted tracked redirect |
+| GET | /go/whatsapp/:intentKey | tracked click-to-chat redirect |
+| POST | /v1/b2b/enquiries | optional fallback structured lead |
+| POST | /v1/webhooks/chatwoot | signed event capture |
+| POST | /v1/internal/assistant/messages | internal bot boundary |
+| POST | /v1/internal/marketplace/imports | operator import |
 
-Errors are JSON objects with `ok: false` and a stable uppercase `code`. Invalid external input returns `400`; unavailable catalog lines return `409`; unknown routes return `404`.
+listingKey always resolves server-side; no arbitrary redirect URL is accepted.
 
-## Production hardening sequence
-
-1. Add request IDs, structured logs, and rate limits.
-2. Persist consent and leads with retention metadata.
-3. Integrate an Indonesian payment provider behind `CommerceProvider`.
-4. Require idempotency keys for checkout creation.
-5. Verify signed webhooks before any order transition.
-6. Add inventory reservation and fulfillment reconciliation.
+POST /v1/checkouts remains preview/legacy until a future first-party-commerce ADR. Do not attach production payment credentials.

@@ -1,109 +1,136 @@
 # Yubie Platform Architecture
 
-**Decision:** begin as a modular monolith with clear domain boundaries, a separately deployable customer web app, and provider adapters. Extract services only when scale, reliability isolation, or team ownership produces measured pressure.
+**Current channel decision:** marketplace-first D2C and WhatsApp-first conversation.
 
-## 1. System context
+Yubie is not currently an e-commerce payment processor. The owned platform is the discovery, product-truth, conversational CRM, B2B qualification, attribution and integration layer around marketplace transactions.
 
-```mermaid
-flowchart TD
-  Customer["D2C customer"] --> Web["Yubie Web"]
-  Buyer["B2B buyer"] --> Web
-  Operator["Support · fulfilment · finance"] --> Ops["Operator surfaces"]
-  Web --> Platform["Yubie Platform API"]
-  Ops --> Platform
-  Platform --> Providers["Payment · logistics · email · CRM"]
-  Platform --> Data["Transactional data · audit · product evidence"]
-```
+## 1. Problem-ranked architecture
 
-## 2. Repository/container view
-
-```mermaid
-flowchart TD
-  Web["apps/web\nNext.js/Vinext"] --> API["apps/api\nFetch boundary"]
-  Web --> UI["packages/ui"]
-  Web --> Domain["packages/domain"]
-  API --> Validation["packages/validation"]
-  API --> Commerce["packages/commerce"]
-  Commerce --> Domain
-  Commerce -. ports .-> External["Postgres · payment · fulfilment · CRM"]
-```
-
-| Boundary | Owns | Must not own |
+| Rank | Business problem | Engineering response |
 |---|---|---|
-| `apps/web` | navigation, content presentation, interaction, server rendering | payment truth, inventory truth, claim approval |
-| `apps/api` | HTTP semantics, authentication boundary, orchestration entrypoints | provider-specific business rules |
-| `packages/domain` | product, variant, claim, order, payment, inventory, lot, fulfilment language and invariants | React, HTTP, SQL clients |
-| `packages/validation` | external request/response schemas | authorization or business state |
-| `packages/commerce` | application use cases and provider ports | direct UI state |
-| `packages/ui` | design tokens and accessible primitives | product truth or API access |
-| `packages/config` | strict shared tooling settings | runtime secrets |
+| P0 | Customers discover Yubie on owned/social channels but buy on marketplaces | Route reliably to approved Shopee/Tokopedia & Shop listings and measure outbound intent. |
+| P0 | WhatsApp is the primary question/B2C/B2B channel | Use official WhatsApp Cloud API through Chatwoot with bot + human handoff. |
+| P0 | A chatbot can damage trust if it invents health claims, price, stock or policies | Build a Yubie-owned policy/knowledge/tool layer; the LLM is not a source of truth. |
+| P1 | B2B opportunities get lost in chat | Classify B2B intent, persist lead signal, assign owner and sync qualified opportunities to CRM. |
+| P1 | Product facts and purchase links drift across web/chat/marketplaces | Maintain one Yubie product/listing registry and approved product-truth projection. |
+| P1 | Offsite conversion makes attribution incomplete | Track server-side outbound clicks/WhatsApp starts and ingest marketplace reports/API metrics without claiming false user-level attribution. |
+| P2 | Manual multi-marketplace operations become painful | Add approved marketplace APIs/imports and later ERP/omnichannel automation only when measured operational pain exists. |
+| Deferred | First-party checkout/payment | Build only after a new ADR proves it is required. |
 
-## 3. Production target
+## 2. System context
 
-```mermaid
-flowchart LR
-  Edge["CDN/WAF"] --> Web["Web runtime"]
-  Web --> API["API runtime"]
-  API --> DB["PostgreSQL"]
-  API --> Outbox["Transactional outbox"]
-  Outbox --> Worker["Async worker"]
-  Worker --> Pay["Licensed payment provider"]
-  Worker --> Ship["Fulfilment/logistics"]
-  Worker --> Msg["Email/CRM"]
-```
+~~~mermaid
+flowchart TB
+  Visitor["Visitor / Customer / Business Buyer"] --> Web["Yubie Web"]
+  Web --> Content["Product discovery · recipes · roots · B2B"]
+  Web --> Router["Channel Router / Attribution"]
+  Router --> Shopee["Shopee listing"]
+  Router --> Toko["Tokopedia & Shop listing"]
+  Router --> WA["WhatsApp"]
+  WA --> CW["Chatwoot"]
+  CW --> Bot["Yubie Conversation Core"]
+  Bot --> Knowledge["Approved Product Knowledge"]
+  Bot --> Listing["Marketplace Listing Registry"]
+  Bot --> CRM["B2B CRM"]
+  Bot --> Human["Human Agent"]
+  API["Yubie Core API"] --> DB[("PostgreSQL")]
+  Worker["Yubie Worker"] --> DB
+  Bot --> API
+  Router --> API
+  Worker --> CRM
+  Marketplace["Marketplace API / Seller Export"] --> Worker
+  Worker --> Analytics["Derived Channel Analytics"]
+~~~
 
-### Source-of-truth rules
+## 3. Repository/container view
 
-- PostgreSQL owns orders, payment observations, reservations, inventory movements, lots, fulfilment state, consents, evidence metadata, and audit history.
-- Payment providers own external payment settlement; Yubie stores verified observations and reconciles them.
-- Fulfilment/logistics providers own carrier execution; Yubie stores normalized shipment events.
-- The CMS may own editorial composition but cannot publish protected product facts without the product-truth approval boundary.
-- Analytics is never the source of truth for orders, money, consent, inventory, or food traceability.
+~~~
+apps/web
+  owned discovery + marketplace/WhatsApp CTAs
 
-## 4. Core transaction flow
+apps/api
+  public redirects, lead capture, Chatwoot webhook boundary,
+  internal bot/tool endpoints, integration queries
 
-```mermaid
-sequenceDiagram
-  participant C as Customer
-  participant W as Web/API
-  participant D as Database
-  participant P as Payment provider
-  participant K as Worker
-  C->>W: Submit checkout + idempotency key
-  W->>D: Create order and reservation atomically
-  W->>P: Create hosted payment session
-  P-->>C: Hosted payment experience
-  P->>W: Signed webhook
-  W->>D: Store inbox event once
-  K->>D: Apply payment transition + outbox
-  K-->>C: Confirmation after committed state
-```
+apps/worker
+  async CRM sync, conversation jobs, imports/reconciliation
 
-The browser redirect is not payment proof. Only a verified, replay-safe provider event or reconciliation result may transition an order to paid.
+packages/domain
+packages/application
+packages/persistence
+packages/integrations
+packages/assistant
+packages/validation
+~~~
 
-## 5. Food-tech extensions
+Application, persistence, integrations, assistant and worker are target additions, not claims about current implementation.
 
-Physical-food commerce adds invariants ordinary digital storefronts do not have:
+## 4. Canonical ownership
 
-- each sellable inventory unit maps to a released lot and expiry/best-before policy;
-- quarantined, recalled, expired, or unapproved lots cannot be reserved;
-- fulfilment allocates FEFO unless a documented exception applies;
-- ingredient/formula/label changes create a new product specification version;
-- every public claim resolves to evidence and approval effective for that specification version;
-- customer complaints can be correlated to SKU, lot, order, supplier, and production record;
-- recall scope can identify affected stock, shipments, customers, and communication status.
+| Data | Canonical owner |
+|---|---|
+| Approved product facts and claim visibility | Yubie |
+| Public marketplace listing mapping | Yubie |
+| Website outbound-click event | Yubie |
+| WhatsApp conversation/messages | Chatwoot / official WhatsApp channel |
+| Bot policy, tool decisions, handoff audit | Yubie |
+| B2C support workflow | Chatwoot |
+| Qualified B2B company/deal/activity | CRM |
+| Original B2B lead signal/source attribution | Yubie |
+| Marketplace order/payment/refund execution | Marketplace |
+| Marketplace sales aggregate/import | Marketplace source, Yubie derived projection |
+| Physical stock/batch/QA when ERP is adopted | ERPNext |
+| Analytics dashboards | derived only |
 
-## 6. Security and trust boundaries
+## 5. Website purchase flow
 
-- Internet input terminates at CDN/WAF and remains untrusted through validation.
-- Authentication establishes identity; authorization is checked at every protected operation.
-- Webhook endpoints require provider-specific signature verification, timestamp tolerance, replay protection, and inbox deduplication.
-- Card details remain on the payment provider's hosted components; Yubie stores provider references, not primary account numbers or CVV.
-- Operator access uses least privilege, MFA, auditable actions, and separated production roles.
-- Secrets enter through managed runtime secret stores and are rotated without code changes.
+~~~
+Product page
+  -> Choose marketplace
+      -> /go/{channel}/{listingKey}
+          -> validate allowlisted listing
+          -> record non-PII outbound intent
+          -> redirect to marketplace
+  -> Ask on WhatsApp
+      -> /go/whatsapp/{intentKey}
+          -> record source/product/campaign
+          -> official click-to-chat
+~~~
 
-## 7. Reliability model
+No user-controlled open redirect is allowed.
 
-Synchronous request paths are short: validate, authorize, commit canonical state, return. Slow or failure-prone integrations run asynchronously through outbox/worker delivery. Retries are bounded and idempotent; poison events enter a dead-letter workflow with owner and runbook.
+## 6. WhatsApp flow
 
-Target SLOs, telemetry, backup/restore, deployment strategy, and incident response are defined in [`production/`](./production/README.md).
+~~~
+WhatsApp Cloud API
+ -> Chatwoot
+ -> signed webhook
+ -> durable Yubie inbox
+ -> worker
+ -> intent/policy router
+ -> approved knowledge + deterministic tools
+ -> reply OR human handoff
+ -> optional B2B CRM projection
+~~~
+
+The bot must not invent medical/health claims, marketplace price, stock, certification or order state.
+
+## 7. Marketplace integration maturity
+
+**L0:** verified public listing URLs + Seller Center.
+**L1:** deterministic seller CSV/report import.
+**L2:** approved read APIs/webhooks.
+**L3:** write APIs for catalog/stock only after operational need and contract tests.
+
+For Tokopedia & Shop, verify merchant migration/onboarding before selecting Tokopedia legacy or TikTok Shop APIs. Shopee automation uses approved Shopee Open Platform access only. Do not scrape.
+
+## 8. Reliability
+
+~~~
+local DB -> transactional outbox -> pg-boss -> provider
+provider webhook -> verify -> durable inbox -> worker -> reconcile
+~~~
+
+## 9. Direct commerce
+
+Existing cart/checkout/provider code is a safe prototype but is **not the current production north star**. Do not add real payment credentials until ADR-004 is superseded.

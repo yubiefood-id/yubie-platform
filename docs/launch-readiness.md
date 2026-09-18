@@ -1,24 +1,23 @@
-# Launch readiness
+# Launch Readiness — Marketplace/WhatsApp Model
 
-## Ready now
+## Ready when
 
-- Responsive multi-route brand and shopping experience
-- Product discovery, product detail, local cart, and checkout UX
-- Shared validation for newsletter and B2B inquiries
-- Safe preview commerce adapter
-- SEO metadata, sitemap, robots route, accessibility states, and legal placeholders
-- CI quality gate for lint, types, tests, and production build
+- product pages use approved facts;
+- sellable products have verified marketplace listing mappings;
+- marketplace links have health/ownership checks;
+- official WhatsApp Cloud API path is connected to Chatwoot;
+- team inbox and human handoff are tested;
+- bot answers only from approved knowledge/tools;
+- complaints, safety, uncertainty and human requests exit automation;
+- B2B qualification is durable and assigned;
+- attribution avoids unnecessary PII;
+- webhook/provider failure and reconciliation tests pass.
 
-## Required before accepting money
+## Not required
 
-- Final SKU, price, stock, weight, shipping area, and return-policy approval
-- Verified ingredient, nutrition, allergen, shelf-life, certification, and regulated-claim copy
-- Production database, backups, retention policy, and access controls
-- Payment-provider agreement, webhook verification, refunds, reconciliation, and fraud controls
-- Transactional email/SMS and customer-support workflow
-- Privacy/legal review for Indonesian operations
-- Domain, observability, analytics consent, security headers, and incident runbook
+- direct payment on yubie.id;
+- first-party order/reservation;
+- Medusa/Hyperswitch;
+- custom courier orchestration.
 
-## Release principle
-
-Do not convert `coming-soon` items to `available` or replace the preview adapter until the corresponding commercial and regulatory evidence is linked in the release PR.
+Do not hard-code marketplace promotional price/stock unless a synchronized source and freshness policy exist.
