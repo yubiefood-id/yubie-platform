@@ -1,87 +1,132 @@
-# 08 — Data Architecture, Schemas and Migrations
+# 08 — Data Architecture and Migrations
 
-## 1. Data planes
+**Current model:** marketplace-first commerce and WhatsApp-first CRM.
 
-| Plane | Purpose | Authority |
-|---|---|---|
-| Transactional | Orders, payment observations, inventory, lots, fulfilment, consent, truth and audit | Managed PostgreSQL is canonical. |
-| Object/evidence | Evidence files, approved artwork, reports and exports | Object bytes in private storage; metadata/checksum/approval in PostgreSQL. |
-| Operational telemetry | Logs, traces, metrics and job/provider health | Diagnostic only; never transaction truth. |
-| Analytical | Funnel and business aggregates | Derived; revenue reconciles to canonical paid/refunded records. |
-| Browser/local | Cart convenience and device preferences | Non-authoritative and replaceable. |
+## Data ownership
 
-## 2. Logical schemas
-
-Use database schemas or naming boundaries to make ownership visible:
-
-| Boundary | Representative tables |
+| Data | Canonical owner |
 |---|---|
-| `truth` | products, specifications, variants, claims, evidence, approvals, artworks, publications |
-| `commerce` | price_lists, prices, cart_quotes, orders, order_lines, adjustments |
-| `payment` | intents, attempts, provider_events, refunds, settlements, reconciliation_exceptions |
-| `inventory` | locations, lots, movements, reservations, allocations, recall_actions |
-| `fulfilment` | packages, shipments, tracking_events, exceptions, returns |
-| `customer` | contacts, addresses, consents, waitlist_subscriptions, data_requests |
-| `b2b` | leads, activities, sample_requests, sample_shipments, crm_syncs |
-| `platform` | idempotency_keys, webhook_inbox, outbox, job_attempts, audit_events, operator_tasks |
+| product truth and listing mapping | Yubie |
+| WhatsApp messages/conversation | Chatwoot |
+| chatbot policy/action metadata | Yubie |
+| B2B qualification signal | Yubie |
+| qualified sales deal/activity | CRM |
+| marketplace order/payment/refund | marketplace |
+| imported marketplace metrics/order projection | Yubie derived |
+| physical stock/batch/QA when adopted | ERPNext |
+| analytics | derived only |
 
-Physical schema separation is optional initially; transactional integrity across modules is not.
+## Yubie logical boundaries
 
-## 3. Key constraints
+~~~
+truth
+channel
+conversation
+crm_bridge
+customer
+integration
+platform
+analytics
+~~~
 
-- Unique canonical email uses normalized form plus original display value; never deduplicate solely by name.
-- Consent uniqueness includes contact, purpose, channel, policy/version and current lifecycle semantics.
-- Waitlist uniqueness includes contact + product scope + active lifecycle; retries return existing record.
-- Provider event ID is unique within provider/account/environment.
-- Idempotency key is unique within principal/scope/operation and stores canonical request hash.
-- Order number/public token are unique and non-enumerable externally.
-- Price has currency, effective window and non-overlap constraint per price list/variant where possible.
-- Lot code is unique within owning facility/manufacturer context and references exact specification/variant.
-- Inventory cannot be reserved from a non-released or incompatible lot.
-- Money and quantities use integers/decimals with explicit checks; no floating-point storage.
+Representative tables:
 
-## 4. Transaction patterns
+~~~
+truth.products
+truth.skus
+truth.approved_facts
 
-### Durable lead capture
+channel.marketplace_listings
+channel.listing_health_checks
+channel.outbound_clicks
+channel.whatsapp_intents
+channel.marketplace_imports
+channel.marketplace_order_snapshots
+channel.marketplace_daily_metrics
 
-Normalize contact → resolve idempotency/deduplication → insert/update purpose-specific consent → insert waitlist/B2B record → append audit/outbox → commit → return stable reference. CRM/email delivery occurs after commit.
+conversation.sessions
+conversation.intent_events
+conversation.bot_actions
+conversation.handoffs
 
-### Checkout
+crm_bridge.lead_signals
+crm_bridge.b2b_qualifications
+crm_bridge.crm_links
+crm_bridge.sync_attempts
 
-Lock/validate quote → verify prices and sellable inventory → create order snapshot → create reservations → write idempotency result + audit + outbox → commit. Payment session creation follows a recoverable policy documented in the commerce guide.
+customer.consent_events
 
-### Webhook
+platform.inbox_events
+platform.outbox_events
+platform.idempotency_keys
+platform.audit_events
+platform.operator_tasks
 
-Verify raw signature/time → insert inbox event once → acknowledge. Worker locks inbox/aggregate, validates transition, records provider observation + state/audit/outbox and commits. Duplicate delivery returns prior result.
+integration.integration_links
+integration.cursor_state
+integration.health
+~~~
 
-## 5. Migration policy
+## Do not duplicate provider truth
 
-1. Generate reviewable SQL; application code does not auto-migrate production on boot.
-2. CI proves clean bootstrap and upgrade from the oldest supported schema snapshot.
-3. Use expand/contract: add → deploy compatible code → backfill → verify → constrain → remove in later release.
-4. Analyze table locks, rewrite behavior, transaction duration and rollback/roll-forward for each production migration.
-5. Backfills are resumable, idempotent, rate-limited, observable and checkpointed.
-6. Destructive changes require backup/restore evidence and explicit owner approval.
-7. Schema and application releases retain a documented compatibility window.
+Yubie does not maintain a writable mirror of Chatwoot message history, CRM sales activity, marketplace payment/refund ledger or ERP stock movement.
 
-## 6. Seed and test data
+Store external IDs and minimum projections needed for Yubie workflows.
 
-- Local/CI use synthetic Indonesian addresses, phone formats, lots, expiry dates and provider fixtures.
-- Product fixtures distinguish approved Flour projections from coming-soon Shake/Ppang.
-- Never copy production customer/provider exports into local, preview or CI.
-- Staging test recipients are allowlisted/sinked so exercises cannot message real customers.
+## Listing registry
 
-## 7. Evidence objects
+Each public purchase target has:
 
-Database metadata includes object key, checksum, byte size, media type, classification, owner, supplier/issuer, effective/expiry dates, linked specification/claim/artwork, scan status and immutable upload audit. Public routes receive derived approval facts, never storage keys or raw documents.
+~~~
+listing_key
+marketplace
+shop_key
+product_id
+sku_id?
+external_listing_id?
+public_url
+status
+verified_at
+verified_by
+last_checked_at?
+integration_provider?
+~~~
 
-## 8. Retention and deletion engineering
+The URL is server-owned. Public callers never choose arbitrary redirect targets.
 
-Retention is purpose- and category-specific. Jobs first produce a reviewable candidate set, honor legal/safety/dispute holds, then delete or anonymize with audit evidence. Consent withdrawal stops future marketing promptly but does not erase necessary order, tax, safety, fraud or dispute records.
+## Attribution
 
-## 9. Recovery development requirements
+outbound_clicks records product/SKU, destination channel, listing key, allowlisted source/campaign and timestamp. Avoid PII. Clicks represent purchase intent, not completed sales.
 
-- Automated backup and point-in-time recovery for production database.
-- Restore into isolated environment and run application invariant checks.
-- Reconcile restored outbox/inbox/payment state before traffic resumes.
-- Initial engineering targets: RPO ≤15 minutes for order/payment state and RTO ≤4 hours, pending business approval.
+## Conversation data
+
+Keep structured state such as Chatwoot conversation/contact references, current intent, bot mode, customer type, B2B qualification and CRM ref. Do not mirror raw messages into Yubie analytics.
+
+## Marketplace projections
+
+Only after approved API/import access:
+
+~~~
+marketplace
+external_order_id
+status
+ordered_at
+sku mapping
+quantity
+gross/net fields when supplied
+cancel/refund fields when supplied
+source_import_id
+last_synced_at
+~~~
+
+Marketplace remains transaction authority.
+
+## Migration policy
+
+- reviewed SQL;
+- no automatic production migration on app boot;
+- clean bootstrap + upgrade test in CI;
+- expand/contract changes;
+- synthetic local data only;
+- each sidecar owns its own migrations;
+- destructive changes require backup/restore evidence.

@@ -1,53 +1,36 @@
-# 05 — Order, Payment, Inventory and Fulfilment
+# 05 — Marketplace Order, Payment, Inventory and Fulfilment
 
-## 1. Order state machine
+## Current decision
 
-```mermaid
-stateDiagram-v2
-  [*] --> Draft
-  Draft --> PendingPayment: checkout accepted
-  PendingPayment --> Paid: verified payment
-  PendingPayment --> PaymentExpired
-  Paid --> Allocated
-  Allocated --> Packed
-  Packed --> Shipped
-  Shipped --> Delivered
-  Paid --> CancelPending: operator/customer policy
-  CancelPending --> Cancelled
-  Delivered --> ReturnRequested
-  ReturnRequested --> Returned
-```
+D2C orders/payments are executed by Shopee/Tokopedia & Shop, not yubie.id.
 
-States are not arbitrary strings. Each transition defines actor, preconditions, idempotency key, inventory/financial side effects, audit event, notification, compensating action, and allowed next states.
+Yubie therefore does not need a production payment processor or first-party reservation stack for the current launch.
 
-## 2. Payment model
+## Marketplace-owned
 
-Separate order from payment. One order may have multiple payment attempts and at most the policy-allowed captured amount. Model intent, attempt, provider reference, method, amount/currency, status, verified events, settlement state, refund and reconciliation result.
+- checkout/payment;
+- order status;
+- cancellation/refund mechanics;
+- marketplace promotion;
+- platform logistics workflow where applicable.
 
-Payment transitions account for created, customer-action-required, processing, succeeded, failed, expired, cancelled, partially/fully refunded, disputed/chargeback where supported. A late success after order expiry triggers reconciliation/exception handling rather than silently reopening fulfilment.
+## Yubie-owned
 
-Use hosted payment components/pages from an appropriately authorized provider. Bank Indonesia's current framework requires payment-system services to be conducted by relevant authorized providers; confirm the selected provider through [BI licensing information](https://www.bi.go.id/id/fungsi-utama/sistem-pembayaran/perizinan/default.aspx) and current rules including [PBI No. 10/2025](https://www.bi.go.id/id/publikasi/peraturan/Pages/PBI_102025.aspx).
+- product/listing mapping;
+- outbound purchase intent;
+- imported/API sales projection;
+- support context;
+- B2B workflows;
+- food-safety/traceability processes outside marketplace transaction ownership.
 
-## 3. Inventory and lot allocation
+## Inventory
 
-Inventory movements: receive, release, quarantine, unquarantine, reserve, reservation-release, pick/consume, return-to-stock, damage, expiry, recall, correction. Corrections never erase history.
+Seller-center stock may remain operator-managed while volume is low. Introduce ERPNext/central inventory synchronization only after measured stock drift, oversell, traceability or manufacturing pain.
 
-Reservation policy defines duration, payment-method extension, stock protection, concurrency control and release. Allocation is FEFO across released compatible lots. Inventory availability shown to customers includes safety buffer and excludes quarantined/recalled/expired lots.
+## Support
 
-## 4. Fulfilment
+The WhatsApp bot must not promise to cancel/refund a marketplace order. It supplies approved guidance or human handoff and routes customers to the applicable marketplace process.
 
-Packing requires order paid/approved, active reservation, specific lot allocation, valid packaging/label version, and address validation. Capture picker/packer, quantities, lots, timestamps, package and carrier references.
+## Future direct commerce
 
-Carrier events are normalized but retained raw. Missing/stale tracking, address exception, damage, lost parcel and failed delivery create owned operator tasks.
-
-## 5. Returns and refunds
-
-Return/refund policy distinguishes change-of-mind, damaged package, wrong item, failed delivery, product quality, allergen/label issue, suspected illness, and recall. Food-safety categories escalate before normal disposition.
-
-Refund creation is idempotent and approval-scoped, linked to original payment and order, and reconciled to provider settlement. Inventory is not automatically returned to sellable stock; food disposition requires inspection and policy.
-
-## 6. Reconciliation
-
-Daily automated reconciliation compares Yubie payment attempts/refunds with provider transactions and settlement reports. Exceptions include missing local/provider record, amount/currency mismatch, duplicate success, late success, unresolved processing, refund mismatch and settlement variance.
-
-No exception older than the approved threshold remains unowned. Finance closes periods only after reconciliation evidence is retained.
+The earlier payment/idempotency/webhook controls remain valid reference if a future ADR chooses direct checkout.

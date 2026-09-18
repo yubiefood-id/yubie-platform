@@ -1,68 +1,45 @@
 # 15 — Analytics, Observability and Feature Flags
 
-## 1. Three measurement planes
+## Two kinds of truth
 
-| Plane | Answers | Authority |
-|---|---|---|
-| Product analytics | What behavior occurred in the experience? | Derived and consent-aware. |
-| Business events | What canonical business transition committed? | Emitted from committed application state. |
-| Runtime observability | Is the software healthy and why did it fail? | Diagnostic logs, metrics and traces. |
+Because checkout happens offsite, separate:
 
-Do not calculate executive revenue solely from browser events. Reconcile business dashboards to verified payment/refund/settlement records.
+**Owned behavior:** page/product views, marketplace clicks, WhatsApp starts, bot/human events and B2B qualification.
 
-## 2. Event catalog
+**Marketplace outcomes:** orders, revenue, cancellation/return, promotion and listing statistics.
 
-| Event | Emission point | Allowed properties |
-|---|---|---|
-| `product_viewed` | rendered/visible product experience | product/variant ID, availability class, route, device class, consent state |
-| `waitlist_submitted` | durable subscription commit | product ID, source class, result code; no email |
-| `b2b_lead_submitted` | durable lead commit | business type, product interest, city region if approved; no contact/free text |
-| `cart_item_added` | cart interaction | product/variant, quantity bucket |
-| `cart_quoted` | authoritative quote | line count, result/difference codes, currency |
-| `checkout_started` | durable checkout/order commit | order opaque ID, line count, amount bucket/currency |
-| `payment_verified` | verified domain transition | provider/method class, amount/currency, result |
-| `order_fulfilled` | fulfilment transition | lead-time bucket, carrier class |
-| `refund_completed` | verified refund | reason class, amount/currency |
+Do not claim deterministic conversion from a click unless the marketplace actually provides a valid linkage.
 
-Every event has owner, purpose, schema version, trigger semantics, consent requirement, classification, retention, test and deprecation path.
+## Event catalog
 
-## 3. Consent and resilience
+~~~
+product_view
+marketplace_option_view
+marketplace_click
+whatsapp_click
+whatsapp_conversation_started
+assistant_intent_classified
+assistant_answered
+assistant_handoff
+b2b_detected
+b2b_qualified
+crm_sync_succeeded
+crm_sync_failed
+marketplace_import_completed
+marketplace_import_failed
+listing_health_failed
+~~~
 
-Essential security/transaction logging is separated from optional behavior/marketing analytics. Evaluate consent before optional client collection. The site and checkout remain usable when analytics, tag manager or marketing provider is blocked/unavailable. Never send email, phone, address, raw URL query, free text, evidence or provider payload.
+No raw WhatsApp text in broad analytics.
 
-## 4. Observability conventions
+## Attribution
 
-- Propagate request/trace IDs across web, API, database spans, jobs and provider calls.
-- Structured logs use event name, severity, safe resource IDs, result/error code and duration—not arbitrary object dumps.
-- Metrics cover traffic, errors, latency, saturation plus business controls: checkout conflicts, duplicate prevention, reservation failures, webhook backlog, payment unknowns, reconciliation exceptions, lot blocks and communication failures.
-- Traces sample enough error/slow/critical paths while respecting cost and privacy.
-- Alerts map to user/business impact, owner, threshold/window and runbook.
+Use allowlisted source/campaign/product/root/marketplace and an anonymous correlation token only where permitted.
 
-## 5. Initial SLI/SLO implementation targets
+## Operational observability
 
-| Journey | SLI | Initial target direction |
-|---|---|---|
-| Public browse | successful server responses and latency | ≥99.9% monthly, route latency budget defined per runtime |
-| Checkout commit | valid requests yielding durable unambiguous result | ≥99.9% excluding customer validation failures |
-| Webhook capture | valid signed events durably captured | ≥99.95% |
-| Payment transition | verified event to local state | 99% within 5 minutes, subject to provider behavior |
-| Outbox delivery | due critical events delivered/owned exception | 99% within 5 minutes |
-| Operator lookup | critical order/lot search success | ≥99.9% during operating window |
+Monitor Chatwoot webhook lag/failure, bot processing latency/errors, CRM queue, broken listing URLs, marketplace import freshness, rate limits and dead-letter/operator tasks.
 
-Targets require business/SRE approval and baseline review before they become contractual.
+## Feature flags
 
-## 6. Feature flags
-
-Use flags for progressive exposure, provider adapter activation and reversible behavior—not to bypass migrations, product truth, authorization, food-safety or required disclosures.
-
-Each flag has owner, purpose, default, environment, eligible cohort, metrics/abort signals, expiry date and removal task. Server evaluates critical flags; client flags only adjust presentation. A payment/fulfilment flag-off path must define what happens to in-flight orders.
-
-## 7. Dashboards
-
-- Executive: qualified discovery → verified payment → fulfilment → repeat, with reconciliation status.
-- Commerce: checkout errors, attempts, provider state, refunds and settlement exceptions.
-- Food operations: released/quarantined/expiring lots, reservation/oversell and recall completeness.
-- Demand capture: waitlist per product/source and B2B pipeline aging/sample conversion.
-- Reliability: SLO/error budget, deployment markers, queue/backlog, database/provider health and alert ownership.
-
-Metric definitions specify timezone (`Asia/Jakarta` for business reporting), exclusions, late data, bot/internal traffic and revision history.
+Control bot auto-reply per intent, CRM sync, marketplace API sync, listing destination and model/knowledge version. Food-safety and explicit-human-request intents remain human-first.
