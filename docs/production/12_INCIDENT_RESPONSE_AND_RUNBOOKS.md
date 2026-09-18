@@ -2,63 +2,81 @@
 
 ## 1. Incident classes
 
-| Class | Examples | Lead |
-|---|---|---|
-| Platform | outage, latency, database, deployment | Engineering incident commander |
-| Transaction | duplicate/missing payment, oversell, reconciliation drift | Engineering + Finance/Ops |
-| Security | account compromise, malicious access, secret exposure | Security/Engineering lead |
-| Privacy | unauthorized disclosure, lost export, consent failure | Privacy lead |
-| Fulfilment | carrier outage, lost/damaged batch, warehouse failure | Operations lead |
-| Food safety | illness/allergen/contamination/mislabel/recall | Food-safety lead |
+| Class | Examples |
+|---|---|
+| Platform | VPS/API/database outage, disk exhaustion |
+| Channel | broken/poisoned marketplace destination, marketplace API outage |
+| Conversation | WhatsApp/Chatwoot delivery/inbox failure |
+| AI | unsafe, incorrect or uncontrolled automated response |
+| CRM | duplicate/missing B2B projection |
+| Data | corrupt/bad marketplace import |
+| Security | credential compromise, malicious access |
+| Privacy | unauthorized personal-data disclosure |
+| Food Safety | adverse event, contamination, allergen/mislabel concern |
 
 ## 2. Severity
 
-- **SEV-1:** immediate safety risk, confirmed major data/payment integrity loss, widespread purchase failure or critical compromise.
-- **SEV-2:** substantial customer/operational impact with workaround or bounded scope.
-- **SEV-3:** limited impact requiring timely correction.
-- **SEV-4:** low-impact defect or observation.
+- **SEV-1:** immediate safety risk, major compromise/data loss, or widespread critical channel failure.
+- **SEV-2:** substantial customer/operational impact with bounded scope/workaround.
+- **SEV-3:** limited production impact requiring timely correction.
+- **SEV-4:** low-impact defect/observation.
 
-Severity may increase as evidence changes. Food-safety and privacy owners determine external notification obligations with qualified counsel/regulators.
+Severity can increase as evidence develops.
 
-## 3. Command structure
+## 3. Universal response
 
-Incident commander owns priorities and cadence; technical/operations leads investigate; communications lead handles approved internal/customer/vendor/regulator messages; scribe maintains timeline, decisions and evidence. Responders do not speculate publicly.
+1. detect/declare and assign severity;
+2. protect people and contain further harm;
+3. preserve evidence/timeline;
+4. establish affected scope from canonical systems;
+5. apply safest reversible mitigation;
+6. communicate on a defined cadence;
+7. recover and reconcile external/provider state;
+8. close with owner approval and tracked follow-up.
 
-## 4. Universal response
+## 4. Required scenarios
 
-1. Detect and declare; assign severity and leads.
-2. Protect people and contain further harm.
-3. Preserve evidence and timeline; avoid destructive cleanup.
-4. Establish impact using canonical records.
-5. Mitigate with safest reversible action.
-6. Communicate on a predictable cadence.
-7. Recover and verify invariants/reconciliation.
-8. Close only with owner approval; write blameless review and tracked actions.
+Detailed infrastructure procedures are in [vps/11_DISASTER_RECOVERY_RUNBOOKS.md](./vps/11_DISASTER_RECOVERY_RUNBOOKS.md).
 
-## 5. Required runbooks
+Maintain runbooks for:
 
-### Payment mismatch/duplicate
+- Core VPS loss;
+- database corruption/restore;
+- broken marketplace listing;
+- WhatsApp/Chatwoot outage;
+- unsafe assistant response;
+- CRM outage/duplicate;
+- bad marketplace import;
+- credential compromise;
+- food-safety escalation.
 
-Disable affected operation/provider path if needed; preserve provider events; compare idempotency/inbox/order/payment/settlement; stop automated fulfilment for ambiguous orders; coordinate refund only after verified state; reconcile all potentially affected records.
+## 5. Food-safety incident
 
-### Inventory oversell/negative balance
+Human-first:
 
-Pause affected SKU; lock lot/location; identify reservations/movements/orders; prioritize customer communication and approved substitution/refund; repair via compensating movement; add invariant/test.
+- collect facts without diagnosing;
+- identify product/SKU/order/batch reference where available;
+- notify responsible food/product owner;
+- preserve conversation/timeline;
+- apply stop-sale/quarantine/recall only through approved operational authority;
+- assistant does not close the case.
 
-### Food complaint/recall
+## 6. Security/privacy incident
 
-Escalate immediately; collect complaint details without diagnosing; identify SKU/lot/order; quarantine related stock; stop sale/fulfilment; map all recipients including samples; food-safety owner determines regulator/supplier/customer actions; record contact/disposition; rehearse before launch.
+Revoke/rotate access, isolate affected path, preserve evidence, determine affected data/accounts, involve accountable privacy/security/business owners and follow applicable notification requirements.
 
-### Privacy/security event
+Avoid copying sensitive incident evidence into broad team chat.
 
-Revoke/rotate access, isolate affected path, preserve logs/evidence, determine data/scope/subjects, prevent further disclosure, involve privacy/security/counsel, meet applicable notification duties, avoid placing sensitive data in incident chat.
+## 7. Post-incident review
 
-### Database restore
+Capture:
 
-Declare change freeze; select recovery point; restore isolated; validate schema and order/payment/inventory/lot invariants; reconcile webhooks/outbox/provider settlement after recovery point; approve cutover; monitor.
+- timeline;
+- impact;
+- detection gap;
+- contributing factors;
+- what worked;
+- customer/data/safety outcome;
+- corrective actions with owner/due date.
 
-## 6. Post-incident review
-
-Timeline, impact, detection gap, contributing technical/operational factors, what worked, root/system causes, customer/financial/safety outcomes, and actions with owner/severity/due date. Measure action completion, not document publication.
-
-Use [NIST incident-response guidance](https://csrc.nist.gov/pubs/sp/800/61/r3/final) as a reference baseline and adapt it to Yubie's size and risks.
+Measure action completion, not merely publication of the review.

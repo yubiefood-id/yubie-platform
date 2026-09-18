@@ -1,27 +1,94 @@
 # 15 — Capacity, Cost and Vendor Governance
 
-## 1. Capacity model
+## 1. Capacity dimensions
 
-Maintain forecast and measured baseline for sessions, product views, checkout starts, payment webhooks, orders/day, concurrent reservations, emails, B2B submissions, evidence files and operator users.
+Current architecture capacity is measured by:
 
-Before launch, verify at least 10× expected ordinary peak for read traffic and a documented conservative multiple for checkout/webhook traffic, bounded by realistic DB/provider limits. Record p95/p99 latency, error rate, connection saturation, queue age, cache hit rate and cost per successful order. Rebaseline after campaigns and GA.
+~~~text
+public API/redirect requests
+Chatwoot webhook volume
+assistant turns
+B2B qualification/sync
+marketplace import rows/files
+PostgreSQL data and WAL growth
+queue backlog
+logs/traces
+object storage
+~~~
 
-## 2. Cost guardrails
+Do not size around first-party checkout traffic while checkout remains marketplace-owned.
 
-- Monthly budgets and alerts per environment/provider.
-- Unit economics: infrastructure, payment, logistics, messaging, support and refund cost per order.
-- Log/trace sampling and retention based on diagnostic value and privacy risk.
-- Automated cleanup for previews, stale objects and expired analytics data—never canonical/audit records without retention approval.
-- No architectural complexity whose operating cost exceeds measured risk reduction.
+## 2. Cost model
 
-## 3. Vendor selection
+Track separately:
 
-Score capability fit, authorization/compliance, security, uptime/history, Indonesian payment/logistics coverage, webhook/idempotency/reconciliation quality, sandbox, observability, support/escalation, pricing, data location/subprocessors, privacy terms, export/deletion, lock-in and exit assistance.
+- Core VPS / PostgreSQL;
+- Chatwoot hosting;
+- CRM hosting;
+- backup/object storage;
+- observability/logging;
+- AI inference;
+- transactional messaging/email;
+- DNS/CDN/domain;
+- marketplace/provider fees as business channel cost.
 
-## 4. Exit plan
+## 3. OSS is not zero-cost operations
 
-Every critical vendor adapter has canonical Yubie IDs/states, raw reference retention, export format, replacement mapping, dual-run/migration plan, credential revocation and customer impact plan. Provider-specific enums do not leak into the domain or UI.
+Self-hosting Chatwoot/CRM can reduce SaaS subscription cost while adding:
 
-## 5. Vendor incidents
+- patching;
+- backup/restore;
+- upgrades;
+- monitoring;
+- security;
+- on-call;
+- capacity planning.
 
-Maintain status/support contacts and escalation tier. A vendor's “success” dashboard does not override Yubie's transaction and customer evidence; reconcile independently.
+Choose self-hosting only when that tradeoff is justified.
+
+## 4. Vendor/OSS evaluation
+
+Evaluate:
+
+- capability fit;
+- license;
+- security;
+- upstream/release health;
+- Indonesian marketplace/provider coverage;
+- authentication/webhook/reconciliation quality;
+- export/exit;
+- privacy/data location;
+- support/escalation;
+- operating cost;
+- migration cost.
+
+## 5. Scaling rule
+
+Every scale-up or new service records:
+
+~~~text
+measured bottleneck/problem
+baseline metric
+expected improvement
+cost delta
+rollback
+post-change metric
+~~~
+
+Do not add Kubernetes, Redis, Kafka, replicas or an ERP solely because they are common architecture components.
+
+## 6. Provider exit
+
+Critical integrations stay behind provider ports and stable Yubie IDs.
+
+A CRM/marketplace/assistant provider replacement should be an adapter/projection migration rather than a rewrite of B2B intake or product truth.
+
+## 7. Budget guardrails
+
+- budget alerts by environment/provider;
+- bounded log retention;
+- AI per-conversation budgets;
+- object/import lifecycle;
+- preview cleanup;
+- bounded retries;
+- no unbounded raw conversation data lake.

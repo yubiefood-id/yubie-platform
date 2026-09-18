@@ -1,41 +1,111 @@
 # 08 — CI/CD and Release Engineering
 
-## 1. Protected change flow
+## 1. Change flow
 
-All changes use reviewed pull requests. Default branch protection requires current CI, resolved review comments and no direct force push. CODEOWNERS cover commerce/payment/inventory, product-truth, security/privacy, infrastructure and migrations.
+Reviewed pull requests are the preferred production change path. Direct changes to main are exceptional and still require green CI and production evidence appropriate to risk.
 
-## 2. CI gates
+Enable branch protection/required checks as team workflow matures.
 
-1. locked dependency install;
-2. formatting/lint and strict typecheck;
-3. unit, contract, integration and rendered-route tests;
-4. production build and artifact validation;
-5. migration lint/fresh install/upgrade tests;
-6. dependency, secret and source security scans;
-7. license/policy check as dependencies grow;
-8. generated API/schema drift check;
-9. accessibility and critical browser flow smoke tests.
+## 2. Current CI gate
 
-Critical paths fail closed. Flaky tests are defects with owner/expiry, not silently retried forever.
+~~~text
+npm ci
+npm run check
+~~~
 
-## 3. Deployment
+Current `check` includes repository lint/type/test gates.
 
-- Build once, promote the same immutable artifact and configuration schema.
-- Environment configuration is validated before startup.
-- Database expand migration precedes compatible app deployment; contract cleanup occurs in a later release.
-- Progressive rollout: internal/synthetic → small traffic/customer cohort → wider rollout → full.
-- Observe predefined metrics and business invariants during each hold period.
+## 3. Target CI gate as phases land
 
-## 4. Rollback vs roll-forward
+~~~text
+locked install
+lint
+strict typecheck
+unit/application tests
+real-PostgreSQL tests
+migration bootstrap + upgrade
+provider contract fixtures
+assistant evaluation
+render/browser/accessibility smoke
+production build
+container build
+container/dependency/secret scan
+docs/ADR link validation
+~~~
 
-Application rollback is allowed only when compatible with current schema and provider events. Database rollback is exceptional; prefer forward fixes and compensating actions. Payment, inventory and financial events are not erased by deploying older code.
+Do not introduce a gate before the corresponding subsystem exists; once introduced, critical-path gates fail closed.
 
-Every high-risk PR states: migration compatibility, feature flag, rollout increments, success/abort metrics, recovery action and owner.
+## 4. Artifact strategy
 
-## 5. Feature flags
+Build immutable application container images in CI.
 
-Use flags for risky capability exposure, provider switch, checkout rollout and operator workflow—not permanent branching. Flags have owner, default, environments, cohort rule, created/expiry dates, kill-switch behavior and cleanup task. Authorization cannot depend solely on a client-visible flag.
+~~~text
+commit SHA
+ -> CI
+ -> image build/test/scan
+ -> GHCR
+ -> deploy exact SHA/digest
+~~~
 
-## 6. Release record
+Do not compile a mutable Git checkout on the production VPS.
 
-Commit/artifact digest, release notes, migrations, configuration changes, approvers, checks, rollout events, dashboards, incident references and final outcome. Product/claim/label releases additionally carry food/regulatory approval evidence.
+## 5. Database deployment
+
+Use expand/contract:
+
+~~~text
+backup/recovery readiness
+ -> expand migration
+ -> deploy compatible code
+ -> backfill
+ -> verify
+ -> later contract cleanup
+~~~
+
+Do not combine an irreversible destructive migration with an incompatible application release.
+
+## 6. Production rollout
+
+~~~text
+staging
+ -> migration test
+ -> provider contract/smoke
+ -> production pull
+ -> explicit migration
+ -> service rollout
+ -> health/readiness
+ -> synthetic channel checks
+ -> observation hold
+~~~
+
+## 7. Feature flags
+
+High-risk capabilities have independent kill switches:
+
+- assistant auto-reply by intent;
+- CRM sync;
+- marketplace read API;
+- marketplace write API;
+- experimental model/knowledge version.
+
+Authorization must not depend solely on a client-side flag.
+
+## 8. Rollback
+
+Application rollback is allowed only if current database schema remains compatible.
+
+External provider writes are not undone by deploying old code. Use reconciliation/compensating actions.
+
+## 9. Release record
+
+Retain:
+
+- commit/image digest;
+- migrations;
+- config schema and flag changes;
+- CI result;
+- assistant evaluation version where applicable;
+- provider contract/smoke evidence;
+- deployer/approver;
+- observation metrics;
+- outcome/rollback reference.

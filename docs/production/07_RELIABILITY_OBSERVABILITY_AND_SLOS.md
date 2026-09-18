@@ -1,52 +1,101 @@
 # 07 — Reliability, Observability and SLOs
 
-## 1. Service levels
+## 1. Critical journeys
 
-Initial monthly targets, revisited after baseline:
+The current architecture optimizes the journeys Yubie actually owns.
 
-| Journey | SLI | Target |
+| Journey | SLI | Initial planning objective |
 |---|---|---|
-| Browse/catalog | successful non-5xx requests excluding invalid client requests | 99.9% |
-| Checkout command | valid requests receiving a durable, unambiguous outcome | 99.95% |
-| Payment webhook capture | valid signed events durably captured within 60s | 99.95% |
-| Order confirmation | paid orders visible to customer/operator within 5 min | 99.9% |
-| Operator lot lookup | affected-order query completes within defined incident window | 99.9% |
+| Public product/API | successful valid non-5xx requests | 99.9% monthly |
+| Marketplace redirect | valid listing request receives correct destination | 99.95% monthly |
+| WhatsApp redirect | valid intent receives configured destination | 99.95% monthly |
+| Chatwoot event capture | valid authenticated event durably accepted | 99.95% monthly |
+| Critical async delivery | oldest critical job under healthy dependency | < 5 minutes |
+| Marketplace report/import | expected source window published | explicit freshness policy |
 
-Define latency objectives (p50/p95/p99) per endpoint after representative tests; do not hide failures with average latency.
+These are planning objectives. Rebaseline after production/load evidence.
+
+Assistant safety is governed by evaluation and human-handoff gates, not uptime alone.
 
 ## 2. Telemetry
 
-- Structured logs: timestamp, level, service/version/environment, request/trace ID, safe entity references, event code, outcome and duration.
-- Metrics: request rate/error/latency, saturation, DB pool/query, queue age/depth, retry/dead-letter, webhook verification, checkout/payment conversion, reservation failures, reconciliation exceptions.
-- Traces across web → API → DB/provider/worker with sampled success and retained errors.
-- Business audit events are separate from diagnostic logs.
+### Structured logs
 
-Follow current [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/) for interoperable names. Redact personal data, addresses, tokens, headers, request bodies and provider secrets.
+Include:
 
-## 3. Alert policy
+~~~text
+timestamp
+level
+service
+environment
+release_sha
+request_id
+correlation_id
+event_code
+safe_entity_ref
+provider
+outcome
+duration_ms
+~~~
 
-Alerts must be actionable, symptom-oriented and linked to a runbook. Page for customer/order/safety impact or imminent data loss; ticket for trends/capacity. Examples:
+Redact tokens, cookies, phone/email, message bodies, CRM notes, addresses and marketplace customer data.
 
-- checkout or webhook error-budget burn;
-- payment success without order transition;
-- outbox/queue oldest age over threshold;
-- inventory negative balance/invariant violation;
-- reconciliation exception spike;
-- database unavailable, disk/connection exhaustion, backup failure;
-- claim/lot publication invariant breach;
-- suspected privacy/security/food-safety event.
+### Metrics
 
-## 4. Dependency resilience
+Monitor:
 
-Per provider: timeout budget, retry policy, circuit behavior, rate-limit handling, idempotency, degraded UX, reconciliation and escalation. Do not retry permanent validation/auth failures. Use jitter and bounded attempts. Avoid retry storms and synchronized jobs.
+- request/error/latency;
+- redirect outcome;
+- DB pool/query/locks;
+- queue depth/oldest age;
+- webhook accept/process;
+- provider 429/timeouts;
+- CRM sync;
+- listing health;
+- marketplace import freshness/exceptions;
+- assistant handoff/error/cost;
+- host CPU/RAM/disk;
+- backup age/failure.
 
-## 5. Degraded modes
+### Traces
 
-- Catalog may serve a last-known approved public projection when editorial origin is unavailable.
-- Checkout becomes unavailable rather than accepting ambiguous orders if canonical DB/inventory cannot commit.
-- Payment provider outage preserves carts/orders and communicates retry status without claiming payment failure/success incorrectly.
-- Email/CRM outage never rolls back paid order; outbox retries with operator visibility.
+Use OpenTelemetry-compatible traces when they improve diagnosis across API -> DB, webhook -> worker -> provider and import pipelines.
 
-## 6. Recovery evidence
+## 3. Degraded modes
 
-Quarterly backup restore, webhook replay, outbox recovery, provider outage, credential revocation and lot-recall lookup exercises. Track detection, containment, recovery, data integrity and follow-up actions.
+- edge/public web may remain available if Core VPS fails;
+- marketplace routing may fall back only to a last-known verified mapping if that fallback is explicitly implemented/tested;
+- assistant outage falls back to human Chatwoot;
+- CRM outage never discards durable B2B qualification;
+- marketplace API outage falls back to verified links/report workflows;
+- analytics outage never blocks customer communication;
+- DB unavailability fails durable writes closed rather than pretending success.
+
+## 4. Alert policy
+
+Page for:
+
+- sustained public API/redirect error-budget burn;
+- webhook durable-capture failure;
+- database unavailable;
+- critical queue lag;
+- backup/PITR failure;
+- disk exhaustion;
+- food-safety escalation delivery failure;
+- suspected security compromise.
+
+Create tickets for non-urgent trends such as intermittent CRM retry, listing health degradation or import staleness.
+
+## 5. Recovery evidence
+
+Quarterly after launch, rotate exercises:
+
+- database restore;
+- provider outage;
+- bad assistant release;
+- Chatwoot outage;
+- CRM outage;
+- marketplace import replay/corruption;
+- credential revocation.
+
+Record actual RPO/RTO and corrective actions.
