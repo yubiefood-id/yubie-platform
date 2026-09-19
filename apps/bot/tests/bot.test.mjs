@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
+import { after } from "node:test";
 import test from "node:test";
+
+after(async () => {
+  const { shutdownBotRuntime } = await import("../dist/index.js");
+  await shutdownBotRuntime();
+});
 
 test("healthz returns ok", async () => {
   const { handleRequest } = await import("../dist/index.js");
@@ -34,9 +40,9 @@ test("webhook accepts signed payload when database configured", async (t) => {
   const payload = JSON.stringify({
     event: "message_created",
     message_type: "incoming",
-    id: 99,
+    id: randomUUID(),
     content: "halo",
-    conversation: { id: 1, inbox_id: 2 },
+    conversation: { id: randomUUID(), inbox_id: 2 },
     sender: { id: 3 },
   });
   const signature = `sha256=${createHmac("sha256", secret).update(`${timestamp}.${payload}`).digest("hex")}`;
@@ -46,7 +52,7 @@ test("webhook accepts signed payload when database configured", async (t) => {
       headers: {
         "x-chatwoot-signature": signature,
         "x-chatwoot-timestamp": timestamp,
-        "x-chatwoot-delivery": `delivery-${Date.now()}`,
+        "x-chatwoot-delivery": randomUUID(),
       },
       body: payload,
     }),
@@ -78,7 +84,7 @@ test("zammad webhook accepts signed payload when database configured", async (t)
   const payload = JSON.stringify({
     event: "article_created",
     ticket_id: 10,
-    article_id: 20,
+    article_id: randomUUID(),
     customer_id: 30,
     group_id: 40,
   });
@@ -88,7 +94,7 @@ test("zammad webhook accepts signed payload when database configured", async (t)
       method: "POST",
       headers: {
         "x-hub-signature": signature,
-        "x-zammad-delivery": `zammad-delivery-${Date.now()}`,
+        "x-zammad-delivery": randomUUID(),
       },
       body: payload,
     }),

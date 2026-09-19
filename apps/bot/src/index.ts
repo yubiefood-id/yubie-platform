@@ -7,7 +7,7 @@ import {
   verifyChatwootWebhook,
   verifyZammadWebhook,
 } from "@yubie/integrations";
-import { createDatabase, PostgresWebhookInboxRepository } from "@yubie/persistence";
+import { closeDatabase, createDatabase, PostgresWebhookInboxRepository, type Database } from "@yubie/persistence";
 import { increment, snapshotMetrics } from "./metrics.js";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -25,6 +25,7 @@ function zammadBearerToken() {
 }
 
 let bossInstance: PgBoss | null = null;
+const databaseInstances = new Set<Database>();
 
 async function getBoss(): Promise<PgBoss> {
   if (!databaseUrl) throw new Error("DATABASE_URL required");
@@ -59,6 +60,7 @@ async function acceptInboxEvent(input: {
   }
 
   const database = createDatabase(databaseUrl);
+  databaseInstances.add(database);
   const inbox = new PostgresWebhookInboxRepository(database);
   const receivedAt = new Date().toISOString();
   const insert = await inbox.insert({
@@ -221,4 +223,16 @@ export async function handleRequest(request: Request): Promise<Response> {
   }
 
   return Response.json({ error: "not_found" }, { status: 404 });
+}
+
+/** Stops pg-boss and DB pools so test processes can exit cleanly. */
+export async function shutdownBotRuntime() {
+  if (bossInstance) {
+    await bossInstance.stop({ graceful: true, timeout: 5000 });
+    bossInstance = null;
+  }
+  for (const database of databaseInstances) {
+    await closeDatabase(database);
+  }
+  databaseInstances.clear();
 }
