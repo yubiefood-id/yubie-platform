@@ -6,11 +6,14 @@ set -euo pipefail
 GRAPHIFY_DIR_NAME=".graphify"
 GRAPHIFY_OUT="graphify-out"
 GRAPH_JSON="${GRAPHIFY_OUT}/graph.json"
+SEMANTIC_GRAPH="${GRAPHIFY_OUT}/semantic.json"
+ENGINEERING_GRAPH="${GRAPHIFY_OUT}/engineering-graph.json"
 CHECKPOINT_FILE="${GRAPHIFY_DIR_NAME}/checkpoint.json"
 HOOK_LOG="${GRAPHIFY_DIR_NAME}/logs/hooks.log"
 IMPACT_REPORT="${GRAPHIFY_DIR_NAME}/reports/latest-impact.md"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 log() {
   echo "[graphify] $*"
@@ -25,6 +28,10 @@ graphify_available() {
   command -v graphify >/dev/null 2>&1
 }
 
+agent_available() {
+  command -v agent >/dev/null 2>&1
+}
+
 ensure_graphify() {
   if ! graphify_available; then
     log "graphify CLI not found on PATH — install with: uv tool install graphifyy"
@@ -33,57 +40,59 @@ ensure_graphify() {
   return 0
 }
 
-has_llm_key() {
-  [[ -n "${GEMINI_API_KEY:-}" || -n "${GOOGLE_API_KEY:-}" || -n "${ANTHROPIC_API_KEY:-}" || -n "${OPENAI_API_KEY:-}" ]]
+query_graph_path() {
+  if [[ -f "${REPO_ROOT}/${ENGINEERING_GRAPH}" ]]; then
+    echo "${ENGINEERING_GRAPH}"
+  elif [[ -f "${REPO_ROOT}/${GRAPH_JSON}" ]]; then
+    echo "${GRAPH_JSON}"
+  else
+    echo ""
+  fi
 }
 
 graph_exists() {
-  [[ -f "${REPO_ROOT}/${GRAPH_JSON}" ]]
+  [[ -n "$(query_graph_path)" ]]
 }
 
 read_checkpoint_sha() {
-  local checkpoint="${REPO_ROOT}/${CHECKPOINT_FILE}"
-  if [[ ! -f "$checkpoint" ]]; then
-    echo ""
-    return 0
-  fi
   node -e "
-    const fs = require('fs');
-    try {
-      const data = JSON.parse(fs.readFileSync('${checkpoint}', 'utf8'));
-      process.stdout.write(data.indexed_sha || '');
-    } catch { process.stdout.write(''); }
-  "
+    const fs=require('fs');
+    const p='${REPO_ROOT}/${CHECKPOINT_FILE}';
+    if(!fs.existsSync(p)) process.exit(0);
+    const d=JSON.parse(fs.readFileSync(p,'utf8'));
+    process.stdout.write(d.code_index_sha||d.indexed_sha||'');
+  " 2>/dev/null || true
 }
 
-write_checkpoint() {
+write_code_checkpoint() {
   local mode="$1"
   shift
   local changed_files=("$@")
-  local sha
-  sha="$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo "unknown")"
-  local version
-  version="$(graphify --version 2>/dev/null | awk '{print $NF}' || echo "unknown")"
-  local docs_semantic="false"
-  if has_llm_key; then
-    docs_semantic="true"
-  fi
-
-  mkdir -p "${REPO_ROOT}/${GRAPHIFY_DIR_NAME}"
-  local tmp="${REPO_ROOT}/${CHECKPOINT_FILE}.tmp"
-  node -e "
-    const fs = require('fs');
-    const payload = {
-      indexed_sha: '${sha}',
-      indexed_at: new Date().toISOString(),
-      graphify_version: '${version}',
-      changed_files: $(node -e "console.log(JSON.stringify(process.argv.slice(1)))" "${changed_files[@]}"),
-      mode: '${mode}',
-      docs_semantic: ${docs_semantic}
-    };
-    fs.writeFileSync('${tmp}', JSON.stringify(payload, null, 2) + '\n');
-  "
-  mv "${tmp}" "${REPO_ROOT}/${CHECKPOINT_FILE}"
+  node --input-type=module -e "
+    import fs from 'node:fs';
+    import { execSync } from 'node:child_process';
+    import { computeFreshnessStatus } from './checkpoint.mjs';
+    const cp='${REPO_ROOT}/${CHECKPOINT_FILE}';
+    let d={};
+    try{d=JSON.parse(fs.readFileSync(cp,'utf8'))}catch{}
+    const sha=execSync('git rev-parse HEAD',{cwd:'${REPO_ROOT}',encoding:'utf8'}).trim();
+    let gv='unknown';
+    try{gv=execSync('graphify --version',{encoding:'utf8'}).trim().split(' ').pop()}catch{}
+    Object.assign(d,{
+      code_index_sha:sha,
+      code_indexed_at:new Date().toISOString(),
+      indexed_sha:sha,
+      indexed_at:new Date().toISOString(),
+      graphify_version:gv,
+      changed_files:$(node -e "console.log(JSON.stringify(process.argv.slice(1)))" "${changed_files[@]}"),
+      mode:'${mode}'
+    });
+    d.freshness_status=computeFreshnessStatus(d);
+    fs.mkdirSync('${REPO_ROOT}/${GRAPHIFY_DIR_NAME}',{recursive:true});
+    const tmp=cp+'.tmp';
+    fs.writeFileSync(tmp,JSON.stringify(d,null,2)+'\n');
+    fs.renameSync(tmp,cp);
+  " --cwd "${SCRIPT_DIR}"
 }
 
 is_engineering_file() {
@@ -100,6 +109,11 @@ is_engineering_file() {
       ;;
   esac
   return 1
+}
+
+is_semantic_doc() {
+  local file="$1"
+  [[ "$file" == *.md ]] || [[ "$file" == AGENTS.md || "$file" == DESIGN.md || "$file" == README.md ]]
 }
 
 get_changed_files_since_checkpoint() {
@@ -219,8 +233,8 @@ git_operation_in_progress() {
   return 1
 }
 
-run_in_background() {
-  local script="$1"
-  shift
-  nohup bash "$script" "$@" >> "${REPO_ROOT}/${HOOK_LOG}" 2>&1 &
+mark_semantic_dirty_files() {
+  local files=("$@")
+  if ((${#files[@]} == 0)); then return 0; fi
+  node "${SCRIPT_DIR}/mark-dirty.mjs" "${files[@]}" 2>/dev/null || true
 }

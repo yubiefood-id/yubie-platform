@@ -14,23 +14,15 @@ fi
 log "Bootstrapping engineering graph (code-first, offline AST)..."
 graphify extract . --code-only --no-viz
 
-docs_semantic=false
-if has_llm_key; then
-  log "API key detected — indexing docs with semantic extraction..."
-  graphify update docs/ || log "Docs semantic update skipped or partial"
-  docs_semantic=true
-else
-  log "No LLM API key — docs remain path-indexed only until graph:update with a key"
-fi
-
 if [[ -n "${DATABASE_URL:-}" ]]; then
   log "DATABASE_URL set — extracting live PostgreSQL schema..."
   graphify extract --postgres "${DATABASE_URL}" || log "Postgres schema extraction skipped"
 fi
 
 mapfile -t changed < <(git diff --name-only HEAD 2>/dev/null || true)
-write_checkpoint "bootstrap" "${changed[@]}"
+write_code_checkpoint "bootstrap" "${changed[@]}"
 
-bash "${SCRIPT_DIR}/impact-report.sh"
+node "${SCRIPT_DIR}/impact-report.mjs"
 
 log "Bootstrap complete. Graph at ${GRAPH_JSON}"
+log "Run npm run graph:semantic-bootstrap to index P0 docs via Cursor (no external API keys)."

@@ -1,0 +1,21 @@
+{
+  "p0": [
+    "AGENTS.md",
+    "DESIGN.md",
+    "README.md",
+    "docs/ARCHITECTURE.md",
+    "docs/DEVELOPMENT_GOALS.md",
+    "docs/production/ADR-*.md",
+    "docs/production/runbooks/**",
+    "docs/development/phases/**",
+    "*IMPLEMENTATION_PLAN*.md",
+    "*ACCEPTANCE_REPORT*.md"
+  ],
+  "p1": [
+    "*SECURITY*.md",
+    "*API_CONTRACT*.md",
+    "*MIGRATION_REPORT*.md",
+    "*STAGING_REPORT*.md"
+  ],
+  "p2": []
+}
