@@ -21,6 +21,16 @@ test("verifyZammadWebhook accepts valid HMAC-SHA1 signature", () => {
   assert.equal(result.ok, true);
 });
 
+test("verifyZammadWebhook rejects missing auth config", () => {
+  const result = verifyZammadWebhook({
+    rawBody: Buffer.from("{}"),
+    signature: null,
+    secret: "",
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, "missing_auth_config");
+});
+
 test("verifyZammadWebhook rejects invalid signature", () => {
   const result = verifyZammadWebhook({
     rawBody: Buffer.from("{}"),

@@ -1,6 +1,7 @@
 # M4-Z Staging Report
 
 **Date:** 2026-09-20  
+**M4.5 status:** STAGING_PENDING — see [`M4_5_WHATSAPP_STAGING_REPORT.md`](./M4_5_WHATSAPP_STAGING_REPORT.md) (BLOCKED_EXTERNAL from validation host)  
 **Environment:** `support-staging.yubie.id` (dedicated VPS — operator deploy)
 
 ## Code readiness

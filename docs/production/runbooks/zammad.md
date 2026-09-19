@@ -14,10 +14,23 @@ infrastructure/zammad/scripts/verify.sh
 
 ## Key metrics (no PII labels)
 
+Bot (`GET /metrics`):
+
 - `zammad_webhook_received_total`
 - `zammad_webhook_duplicate_total`
 - `zammad_webhook_rejected_total`
-- `support.reconcile` job logs (`scanned`, `changed`, `errors`)
+
+Worker (`GET /metrics` on port 8789):
+
+- `support_provider_request_total`
+- `support_provider_error_total`
+- `support_provider_timeout_total`
+- `assistant_outbox_pending` / `assistant_outbox_ambiguous` / `assistant_outbox_failed`
+- `support_reconcile_lag_seconds`
+- `assistant_handoff_total`
+- `human_takeover_total`
+
+Structured logs: `support.reconcile` (`scanned`, `changed`, `errors`)
 
 ## Assistant runtime
 

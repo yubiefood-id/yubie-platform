@@ -1,11 +1,15 @@
 {
   "upstreamRepo": "https://github.com/zammad/zammad-docker-compose",
-  "upstreamRef": "master",
+  "upstreamRef": "c3051022307a3ff3f522b249c2117b660fbaf617",
+  "upstreamRefLabel": "2026-09-16",
   "image": "ghcr.io/zammad/zammad:7.1.3-0014",
+  "imageDigestAmd64": "sha256:db5dd50e45ff186a20568115ce800fa5f8be9867c30534f18100b64e971a289c",
+  "zammadRelease": "7.1.3",
   "postgresVersion": "17.10-alpine",
   "redisVersion": "8.10-alpine",
   "memcachedVersion": "1.6.45-alpine",
   "elasticsearchVersion": "9.4.2",
+  "vmMaxMapCount": 262144,
   "verifiedAt": "2026-09-20",
-  "notes": "Recheck security advisories before production pin changes."
+  "notes": "Zammad 7.1.3 is the latest security release as of verification date. Recheck advisories before pin changes. Never use :latest."
 }

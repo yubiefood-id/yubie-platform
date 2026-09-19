@@ -6,6 +6,7 @@ import {
   PostgresWebhookInboxRepository,
   type Database,
 } from "@yubie/persistence";
+import { setGauge } from "./metrics.js";
 
 const OVERLAP_MS = 5 * 60 * 1000;
 
@@ -72,6 +73,7 @@ export async function reconcileSupport(
     provider,
   };
 
+  setGauge("support_reconcile_lag_seconds", Math.round(metrics.lagMs / 1000));
   console.log(JSON.stringify({ event: "support.reconcile", ...metrics }));
   return metrics;
 }

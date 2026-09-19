@@ -3,6 +3,7 @@ import { checkListingHealth, FixedClock, SequentialIdGenerator } from "@yubie/ap
 import { createSupportProvider, HttpLinkHealthChecker } from "@yubie/integrations";
 import { closeDatabase, createWorkerRepositories } from "@yubie/persistence";
 import { processAssistantJob } from "./assistant-handler.js";
+import { startMetricsServer } from "./metrics-server.js";
 import { reconcileSupport } from "./reconcile-handler.js";
 import { deliverSupportOutbox, processPendingOutbox } from "./reply-delivery-handler.js";
 
@@ -18,6 +19,9 @@ const checker = new HttpLinkHealthChecker();
 const clock = new FixedClock(new Date().toISOString());
 
 async function start() {
+  if (process.env.WORKER_METRICS_ENABLED !== "false") {
+    startMetricsServer();
+  }
   await boss.start();
   await boss.createQueue("listing.health");
   await boss.createQueue("integration.health");

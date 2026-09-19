@@ -12,7 +12,15 @@ export interface ZammadWebhookVerifyInput {
 
 export type ZammadWebhookVerifyResult =
   | { ok: true }
-  | { ok: false; reason: "missing_signature" | "invalid_signature" | "invalid_bearer" | "body_too_large" };
+  | {
+      ok: false;
+      reason:
+        | "missing_signature"
+        | "invalid_signature"
+        | "invalid_bearer"
+        | "body_too_large"
+        | "missing_auth_config";
+    };
 
 function normalizeSignature(header: string): string {
   const trimmed = header.trim();
@@ -23,6 +31,10 @@ function normalizeSignature(header: string): string {
 export function verifyZammadWebhook(input: ZammadWebhookVerifyInput): ZammadWebhookVerifyResult {
   if (input.rawBody.byteLength > MAX_BODY_BYTES) {
     return { ok: false, reason: "body_too_large" };
+  }
+
+  if (!input.secret && !input.bearerToken) {
+    return { ok: false, reason: "missing_auth_config" };
   }
 
   if (input.bearerToken) {

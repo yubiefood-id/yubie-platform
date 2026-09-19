@@ -29,3 +29,5 @@
 ## Verdict
 
 **M4-Z code complete; staging/production GO pending operator live validation and cutover authorization.**
+
+M4.5-RC update: see [`M4_5_ACCEPTANCE_REPORT.md`](./M4_5_ACCEPTANCE_REPORT.md) for separate CODE / STAGING / WHATSAPP / PRODUCTION_READY verdicts.
