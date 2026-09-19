@@ -11,6 +11,9 @@ test("migration SQL file exists", async () => {
   const migration2 = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../migrations/0002_assistant.sql"), "utf8");
   assert.match(migration2, /CREATE TABLE webhook_inbox/);
   assert.match(migration2, /CREATE TABLE conversation_sessions/);
+  const migration5 = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../migrations/0005_m5_deterministic_concierge.sql"), "utf8");
+  assert.match(migration5, /CREATE TABLE conversation_flow_state/);
+  assert.match(migration5, /CREATE TABLE conversation_flow_events/);
 });
 
 test("persistence integration runs when DATABASE_URL is set", async (t) => {

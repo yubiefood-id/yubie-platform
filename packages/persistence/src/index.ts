@@ -11,6 +11,7 @@ export * from "./repositories/outbox-repository.js";
 export * from "./repositories/idempotency-repository.js";
 export * from "./repositories/webhook-inbox-repository.js";
 export * from "./repositories/conversation-session-repository.js";
+export * from "./repositories/conversation-flow-state-repository.js";
 export * from "./repositories/assistant-run-repository.js";
 export type { AssistantRunRecord } from "./repositories/assistant-run-repository.js";
 export * from "./repositories/assistant-outbox-repository.js";

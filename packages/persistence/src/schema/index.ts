@@ -1,4 +1,4 @@
-import { index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer } from "drizzle-orm/pg-core";
+import { index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb } from "drizzle-orm/pg-core";
 
 export const listingStatusEnum = pgEnum("listing_status", ["draft", "active", "paused", "broken", "retired"]);
 export const marketplaceEnum = pgEnum("marketplace", ["shopee", "tokopedia"]);
@@ -309,3 +309,32 @@ export const integrationHealth = pgTable("integration_health", {
   lastCheckedAt: timestamp("last_checked_at", { withTimezone: true, mode: "string" }).notNull(),
   details: text("details"),
 });
+
+export const conversationFlowState = pgTable("conversation_flow_state", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull(),
+  providerThreadId: text("provider_thread_id").notNull(),
+  flowVersion: text("flow_version").notNull().default("deterministic-v1"),
+  nodeId: text("node_id").notNull().default("home"),
+  contextJsonb: jsonb("context_jsonb").notNull().default({}),
+  fallbackCount: integer("fallback_count").notNull().default(0),
+  lastTransitionAt: timestamp("last_transition_at", { withTimezone: true, mode: "string" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("conversation_flow_state_provider_thread").on(table.provider, table.providerThreadId),
+]);
+
+export const conversationFlowEvents = pgTable("conversation_flow_events", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull(),
+  providerThreadId: text("provider_thread_id").notNull(),
+  flowVersion: text("flow_version").notNull(),
+  fromNodeId: text("from_node_id"),
+  toNodeId: text("to_node_id").notNull(),
+  eventType: text("event_type").notNull(),
+  metricLabels: jsonb("metric_labels").notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  index("conversation_flow_events_thread_created").on(table.provider, table.providerThreadId, table.createdAt),
+]);
