@@ -52,6 +52,11 @@ export function shouldSkipExtraction(relPath, content) {
   return { skip: false, cached, sha };
 }
 
+/** True when a document has a valid, content-matched ok cache entry. */
+export function isExtractionCacheFresh(relPath, content) {
+  return shouldSkipExtraction(relPath, content).skip;
+}
+
 export function saveSuccessfulExtraction(relPath, content, extraction, meta) {
   const entry = {
     path: relPath,

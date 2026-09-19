@@ -144,20 +144,39 @@ ${priorOutput}
 Return ONLY corrected JSON for document "${documentPath}". No markdown fences.`;
 }
 
+function extractJsonPayload(text) {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) return fenced[1].trim();
+
+  const start = text.indexOf('{');
+  if (start === -1) return text.trim();
+
+  let depth = 0;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return text.slice(start).trim();
+}
+
 export function parseCliJsonOutput(stdout) {
   const trimmed = stdout.trim();
   try {
     const envelope = JSON.parse(trimmed);
     if (envelope?.result) {
-      const inner = typeof envelope.result === 'string' ? envelope.result.trim() : JSON.stringify(envelope.result);
-      const fenced = inner.match(/```(?:json)?\s*([\s\S]*?)```/);
-      const payload = fenced ? fenced[1].trim() : inner;
-      return JSON.parse(payload);
+      const inner =
+        typeof envelope.result === 'string' ? envelope.result.trim() : JSON.stringify(envelope.result);
+      return JSON.parse(extractJsonPayload(inner));
+    }
+    if (envelope?.document && envelope?.document_type) {
+      return envelope;
     }
   } catch {
     // fall through
   }
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const payload = fenced ? fenced[1].trim() : trimmed;
-  return JSON.parse(payload);
+  return JSON.parse(extractJsonPayload(trimmed));
 }

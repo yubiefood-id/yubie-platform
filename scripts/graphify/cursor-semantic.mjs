@@ -7,6 +7,7 @@ import { shouldSkipSemantic } from './secret-scan.mjs';
 import { listSemanticCandidates, getDocumentPriority } from './semantic-priority.mjs';
 import {
   shouldSkipExtraction,
+  isExtractionCacheFresh,
   saveSuccessfulExtraction,
   saveFailedExtraction,
   saveSkippedSecurity,
@@ -36,6 +37,26 @@ function parseArgs(argv) {
     else if (a === '--all-p0') opts.tiers = ['P0'];
   }
   return opts;
+}
+
+/** Pick up to `limit` targets that still need Cursor extraction (skips cache-fresh docs). */
+export function selectSemanticBatch(targets, { limit = 5 } = {}) {
+  const selected = [];
+  for (const target of targets) {
+    if (selected.length >= limit) break;
+
+    const full = path.join(REPO_ROOT, target.path);
+    if (!fs.existsSync(full)) {
+      selected.push(target);
+      continue;
+    }
+
+    const content = fs.readFileSync(full, 'utf8');
+    if (isExtractionCacheFresh(target.path, content)) continue;
+
+    selected.push(target);
+  }
+  return selected;
 }
 
 async function pickProvider(forceAcp = false) {
@@ -126,7 +147,7 @@ export async function runSemanticIndexing(opts = {}) {
     }
 
     const limit = opts.limit ?? 5;
-    const batch = targets.slice(0, limit);
+    const batch = selectSemanticBatch(targets, { limit });
     const results = [];
     for (const t of batch) {
       results.push(await processDocument(t.path, provider));
