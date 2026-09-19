@@ -13,15 +13,17 @@ if ((${#changed[@]} == 0)); then
   mapfile -t changed < <(git diff --name-only HEAD 2>/dev/null || true)
 fi
 
-declare -A view_files
-declare -A view_counts
+declare -A view_files=()
+declare -A view_counts=()
+any_views=0
 
 for file in "${changed[@]}"; do
   [[ -z "$file" ]] && continue
   while IFS= read -r view; do
     [[ -z "$view" ]] && continue
     view_files["$view"]+="- ${file}\n"
-    view_counts["$view"]=$((${view_counts[$view]:-0} + 1))
+    view_counts["$view"]=$((${view_counts["$view"]:-0} + 1))
+    any_views=1
   done < <(classify_file "$file")
 done
 
@@ -44,7 +46,7 @@ report="${REPO_ROOT}/${IMPACT_REPORT}"
   echo ""
   echo "## Views affected"
   echo ""
-  if ((${#view_counts[@]} == 0)); then
+  if ((any_views == 0)); then
     echo "_No view classification for current changes._"
   else
     echo "| View | Files |"
@@ -65,7 +67,7 @@ report="${REPO_ROOT}/${IMPACT_REPORT}"
     fi
     echo "## ${view}"
     echo ""
-    printf "%b" "${view_files[$view]}"
+    printf "%b" "${view_files[$view]:-}"
     echo ""
   done
 
