@@ -20,7 +20,7 @@ log "3. Semantic extraction (changed P0/P1, cached skips)"
 node "${SCRIPT_DIR}/cursor-semantic.mjs" --limit 5 --p1 2>/dev/null || true
 
 log "4. Merge engineering graph"
-node --input-type=module --cwd "${SCRIPT_DIR}" -e "import { mergeEngineeringGraph } from './semantic-merge.mjs'; console.log(JSON.stringify(mergeEngineeringGraph()));" 2>/dev/null || true
+(cd "${SCRIPT_DIR}" && node --input-type=module -e "import { mergeEngineeringGraph } from './semantic-merge.mjs'; console.log(JSON.stringify(mergeEngineeringGraph()));") 2>/dev/null || true
 
 log "5. Doctor"
 bash "${SCRIPT_DIR}/doctor.sh" || true

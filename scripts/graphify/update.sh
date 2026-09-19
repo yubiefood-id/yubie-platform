@@ -98,7 +98,7 @@ if $HOOK_MODE; then mode="hook"; fi
 
 write_code_checkpoint "$mode" "${changed[@]}"
 
-node --input-type=module --cwd "${SCRIPT_DIR}" -e "import { mergeEngineeringGraph } from './semantic-merge.mjs'; console.log(JSON.stringify(mergeEngineeringGraph()));" 2>/dev/null || true
+(cd "${SCRIPT_DIR}" && node --input-type=module -e "import { mergeEngineeringGraph } from './semantic-merge.mjs'; console.log(JSON.stringify(mergeEngineeringGraph()));") 2>/dev/null || true
 
 node "${SCRIPT_DIR}/impact-report.mjs"
 

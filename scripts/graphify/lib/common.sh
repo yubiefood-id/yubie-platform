@@ -68,7 +68,7 @@ write_code_checkpoint() {
   local mode="$1"
   shift
   local changed_files=("$@")
-  node --input-type=module -e "
+  (cd "${SCRIPT_DIR}" && node --input-type=module -e "
     import fs from 'node:fs';
     import { execSync } from 'node:child_process';
     import { computeFreshnessStatus } from './checkpoint.mjs';
@@ -92,7 +92,7 @@ write_code_checkpoint() {
     const tmp=cp+'.tmp';
     fs.writeFileSync(tmp,JSON.stringify(d,null,2)+'\n');
     fs.renameSync(tmp,cp);
-  " --cwd "${SCRIPT_DIR}"
+  ")
 }
 
 is_engineering_file() {
