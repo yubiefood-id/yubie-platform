@@ -28,32 +28,48 @@ else
   fail "graphify CLI not on PATH"
 fi
 
-if graph_exists; then
+if agent_available; then
+  log "Cursor agent: $(agent --version 2>/dev/null || echo unknown)"
+else
+  warn "Cursor agent CLI not on PATH (semantic indexing degraded)"
+fi
+
+QGRAPH="$(query_graph_path)"
+if [[ -n "$QGRAPH" ]]; then
   nodes_edges="$(node -e "
     const fs = require('fs');
-    const g = JSON.parse(fs.readFileSync('${REPO_ROOT}/${GRAPH_JSON}', 'utf8'));
+    const g = JSON.parse(fs.readFileSync('${REPO_ROOT}/${QGRAPH}', 'utf8'));
     const nodes = Array.isArray(g.nodes) ? g.nodes.length : Object.keys(g.nodes || {}).length;
-    const edges = Array.isArray(g.edges) ? g.edges.length : (g.links || []).length;
+    const edges = Array.isArray(g.links) ? g.links.length : (g.edges || []).length;
     console.log(nodes + ' nodes, ' + edges + ' edges');
   " 2>/dev/null || echo "unknown")"
-  log "Graph: ${GRAPH_JSON} (${nodes_edges})"
+  log "Query graph: ${QGRAPH} (${nodes_edges})"
 else
-  warn "No graph at ${GRAPH_JSON} — run: npm run graph:bootstrap"
+  warn "No graph — run: npm run graph:bootstrap"
+fi
+
+if [[ -f "${REPO_ROOT}/${SEMANTIC_GRAPH}" ]]; then
+  log "Semantic graph: present"
+else
+  warn "No semantic graph — run: npm run graph:semantic-bootstrap"
 fi
 
 if [[ -f "${CHECKPOINT_FILE}" ]]; then
-  checkpoint_sha="$(read_checkpoint_sha)"
-  head_sha="$(git rev-parse HEAD 2>/dev/null || echo "")"
-  if [[ -n "$checkpoint_sha" && -n "$head_sha" && "$checkpoint_sha" != "$head_sha" ]]; then
-    warn "Checkpoint SHA (${checkpoint_sha:0:8}) differs from HEAD (${head_sha:0:8}) — graph may be stale"
-  else
-    log "Checkpoint: aligned with HEAD (${checkpoint_sha:0:8})"
-  fi
+  node -e "
+    const fs=require('fs');
+    const d=JSON.parse(fs.readFileSync('${REPO_ROOT}/${CHECKPOINT_FILE}','utf8'));
+    const head=require('child_process').execSync('git rev-parse HEAD',{cwd:'${REPO_ROOT}',encoding:'utf8'}).trim();
+    console.log('[graphify] Freshness:', d.freshness_status||'unknown');
+    console.log('[graphify] Code SHA:', (d.code_index_sha||d.indexed_sha||'').slice(0,8), 'HEAD:', head.slice(0,8));
+    console.log('[graphify] Semantic SHA:', (d.semantic_index_sha||'').slice(0,8));
+    console.log('[graphify] Semantic provider:', d.semantic_provider||'none');
+    console.log('[graphify] Semantic dirty:', (d.semantic_dirty_files||[]).length);
+  " 2>/dev/null || warn "Could not read checkpoint"
 else
-  warn "No checkpoint file — run graph:update after bootstrap"
+  warn "No checkpoint file"
 fi
 
-if graphify_available && graph_exists; then
+if graphify_available && [[ -f "${REPO_ROOT}/${GRAPH_JSON}" ]]; then
   if graphify check-update . 2>&1 | grep -qi "needs_update\|pending\|stale"; then
     warn "graphify check-update reports pending semantic re-extraction"
   else

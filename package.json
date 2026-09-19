@@ -33,7 +33,10 @@
     "graph:watch": "bash scripts/graphify/watch.sh",
     "graph:query": "bash scripts/graphify/query.sh",
     "graph:context": "bash scripts/graphify/context.sh",
-    "graph:setup-hooks": "bash scripts/graphify/setup-hooks.sh"
+    "graph:setup-hooks": "bash scripts/graphify/setup-hooks.sh",
+    "graph:semantic-bootstrap": "bash scripts/graphify/semantic-bootstrap.sh",
+    "graph:llm-doctor": "bash scripts/graphify/llm-doctor.sh",
+    "graph:test": "node --test scripts/graphify/tests/*.test.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3"

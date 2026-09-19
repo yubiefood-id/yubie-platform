@@ -11,10 +11,10 @@ if ! ensure_graphify; then
   exit 1
 fi
 
-if ! graph_exists; then
+if ! [[ -f "${REPO_ROOT}/${GRAPH_JSON}" ]]; then
   log "No graph yet — bootstrapping first..."
   bash "${SCRIPT_DIR}/bootstrap.sh"
 fi
 
-log "Watching repository for changes (Ctrl+C to stop)..."
-graphify watch .
+log "Starting Yubie Graphify session watcher..."
+exec node "${SCRIPT_DIR}/watcher.mjs"

@@ -45,7 +45,12 @@ next-env.d.ts
 
 # graphify (local engineering intelligence graph)
 graphify-out/
+graphify-out/semantic.json
+graphify-out/engineering-graph.json
 .graphify/checkpoint.json
+.graphify/semantic-cache/
+.graphify/update.lock
+.graphify/watch.pid
 .graphify/logs/
 .graphify/reports/
 

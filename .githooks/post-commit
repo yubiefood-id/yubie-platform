@@ -32,4 +32,5 @@ fi
 
 mkdir -p "${REPO_ROOT}/.graphify/logs"
 nohup bash "${REPO_ROOT}/scripts/graphify/update.sh" --hook >> "${REPO_ROOT}/.graphify/logs/hooks.log" 2>&1 &
+# Semantic refresh scheduled inside update.sh when docs changed
 exit 0
