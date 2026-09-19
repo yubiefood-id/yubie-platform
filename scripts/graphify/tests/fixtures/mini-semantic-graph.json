@@ -1,0 +1,16 @@
+{
+  "directed": true,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "id": "doc:docs/production/ADR-009_ZAMMAD_SUPPORT_AUTHORITY.md",
+      "label": "docs/production/ADR-009_ZAMMAD_SUPPORT_AUTHORITY.md",
+      "_origin": "semantic",
+      "source_file": "docs/production/ADR-009_ZAMMAD_SUPPORT_AUTHORITY.md"
+    }
+  ],
+  "links": [],
+  "hyperedges": [],
+  "_origin": "yubie-semantic"
+}

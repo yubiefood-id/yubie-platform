@@ -1,0 +1,14 @@
+{
+  "directed": true,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "id": "packages/integrations/src/zammad/webhook-verifier.ts",
+      "label": "webhook-verifier",
+      "source_file": "packages/integrations/src/zammad/webhook-verifier.ts"
+    }
+  ],
+  "links": [],
+  "hyperedges": []
+}

@@ -1,0 +1,36 @@
+{
+  "document": "docs/production/ADR-009_ZAMMAD_SUPPORT_AUTHORITY.md",
+  "document_type": "ADR",
+  "summary": "Zammad is the production support operations authority.",
+  "entities": [
+    { "name": "Zammad", "type": "system" },
+    { "name": "SupportConversationProvider", "type": "policy" }
+  ],
+  "relationships": [
+    {
+      "source": "Zammad",
+      "relationship": "declares_authority",
+      "target": "support operations",
+      "evidence": "Decision: Zammad owns ticket operations in production."
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Zammad is support authority",
+      "status": "Accepted",
+      "scope": "M4-Z",
+      "supersedes": []
+    }
+  ],
+  "constraints": [
+    {
+      "rule": "Chatwoot is rollback-only",
+      "scope": "production",
+      "severity": "required"
+    }
+  ],
+  "code_references": ["packages/integrations/src/zammad/"],
+  "security_boundaries": ["webhook verification"],
+  "data_authorities": ["Zammad"],
+  "operational_dependencies": ["worker support.reply queue"]
+}

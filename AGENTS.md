@@ -94,13 +94,15 @@ Changes touching product claims, food-safety workflows, privacy/retention, marke
 
 ## 8. Engineering graph (Graphify)
 
-Before launching broad repository audit subagents, query the Yubie Graphify knowledge graph first:
+Before launching broad repository audit subagents, query the Yubie Graphify engineering graph first:
 
 ~~~bash
 npm run graph:context
 ~~~
 
-Use `npm run graph:query` for contracts, infrastructure, boundaries, database, security, tests, and documentation views. Spawn audit subagents only when graph evidence is missing or stale. See [docs/development/GRAPHIFY_WORKFLOW.md](docs/development/GRAPHIFY_WORKFLOW.md).
+The graph combines offline AST indexing (`graphify-out/graph.json`) with Cursor-native semantic extraction for P0/P1 docs (ADRs, runbooks, architecture). Merged queries use `graphify-out/engineering-graph.json` when present. No external LLM API keys are required — semantic indexing uses the logged-in Cursor CLI (`agent --print --mode ask`).
+
+Use `npm run graph:query` for contracts, infrastructure, boundaries, database, security, tests, and documentation views. Spawn audit subagents only when `npm run graph:doctor` reports staleness, graph queries lack evidence, or impact v2 flags potentially stale docs. Do not auto-launch seven parallel full-repo audits. See [docs/development/GRAPHIFY_WORKFLOW.md](docs/development/GRAPHIFY_WORKFLOW.md).
 
 ## Learned User Preferences
 

@@ -3,21 +3,34 @@ description: graphify knowledge graph context
 alwaysApply: true
 ---
 
-This project has a graphify knowledge graph at `graphify-out/`.
+This project has a Graphify engineering graph at `graphify-out/` (AST) and, when indexed, `graphify-out/engineering-graph.json` (AST + Cursor semantic docs).
 
-**MANDATORY: Before launching broad repository audit subagents** (contracts, infrastructure, boundaries, database, security, tests, documentation), run `npm run graph:context` or query the graph with view-specific questions. Spawn audit subagents only when graph evidence is missing or `npm run graph:doctor` reports staleness.
+**MANDATORY: Before launching broad repository audit subagents**, run `npm run graph:context` and read `.graphify/reports/latest-impact.md`. Query the graph with view-specific questions. Spawn audit subagents only when graph evidence is missing or stale.
 
-**Before using Read, Grep, Glob, or Bash to explore the codebase**, prefer graphify when `graphify-out/graph.json` exists:
+**Before using Read, Grep, Glob, or Bash to explore the codebase**, prefer graphify when a graph exists:
 
-- `npm run graph:query -- "<question>"` or `graphify query "<question>"`
+- `npm run graph:query -- "<question>"` — queries merged engineering graph when available
+- `npm run graph:query -- --view documentation` — ADRs, runbooks, semantic nodes
 - `graphify path "<A>" "<B>"` — dependency path between symbols
 - `graphify explain "<concept>"` — related nodes for a concept
 
 Only use Read/Grep/Glob directly when:
 
-1. graphify has oriented you and you need to modify or debug specific lines
-2. `graphify-out/graph.json` does not exist yet (run `npm run graph:bootstrap`)
+1. Graphify has oriented you and you need to modify or debug specific lines
+2. No graph exists yet (run `npm run graph:bootstrap`)
+3. `freshness_status` is `DEGRADED_NO_CURSOR` and you only need code (not doc authority)
 
-After modifying code files in a session, run `npm run graph:update` to keep the graph current (AST-only, no API cost).
+After modifying **code** files, run `npm run graph:update` (AST-only, no Cursor cost). Doc changes (P0/P1) mark semantic dirty; `graph:context` or hooks schedule Cursor extraction.
 
-See [docs/development/GRAPHIFY_WORKFLOW.md](docs/development/GRAPHIFY_WORKFLOW.md) and [.agents/workflows/graphify-context.md](.agents/workflows/graphify-context.md).
+## Escalate to subagents only when
+
+1. `npm run graph:doctor` reports errors or `STALE` / `BROKEN`
+2. Graph queries return insufficient context for the task
+3. Change touches unaudited areas (new provider, migration, security boundary)
+4. Impact report lists `POTENTIALLY_STALE` docs overlapping your change
+5. `freshness_status` is `DEGRADED_NO_CURSOR` and task requires ADR/runbook authority
+6. New ADR/runbook not yet in semantic cache
+
+Do **not** automatically run seven parallel full-repo audits on every phase or task.
+
+Semantic indexing uses **Cursor CLI** (`agent --print --mode ask`), not external LLM API keys. See [docs/development/GRAPHIFY_WORKFLOW.md](docs/development/GRAPHIFY_WORKFLOW.md) and [.agents/workflows/graphify-context.md](.agents/workflows/graphify-context.md).
