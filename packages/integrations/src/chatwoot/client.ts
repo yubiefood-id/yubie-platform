@@ -3,10 +3,20 @@ export interface ChatwootConversationStatus {
   status: "open" | "resolved" | "pending" | "snoozed";
 }
 
+export interface ChatwootMessage {
+  id: number;
+  content: string;
+  messageType: "incoming" | "outgoing" | "activity";
+  private: boolean;
+  createdAt: string;
+}
+
 export interface ChatwootClient {
   sendMessage(conversationId: string, content: string, idempotencyKey?: string): Promise<void>;
   requestHandoff(conversationId: string, labels: string[]): Promise<void>;
   getConversationStatus(conversationId: string): Promise<ChatwootConversationStatus>;
+  getRecentMessages(conversationId: string, limit: number): Promise<ChatwootMessage[]>;
+  listConversationsUpdatedSince(sinceIso: string): Promise<Array<{ id: string; updatedAt: string }>>;
 }
 
 export class HttpChatwootClient implements ChatwootClient {
@@ -31,9 +41,12 @@ export class HttpChatwootClient implements ChatwootClient {
     return response;
   }
 
-  async sendMessage(conversationId: string, content: string) {
+  async sendMessage(conversationId: string, content: string, idempotencyKey?: string) {
+    const headers: Record<string, string> = {};
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     await this.request(`/conversations/${conversationId}/messages`, {
       method: "POST",
+      headers,
       body: JSON.stringify({ content, message_type: "outgoing", private: false }),
     });
   }
@@ -56,6 +69,39 @@ export class HttpChatwootClient implements ChatwootClient {
     const body = (await response.json()) as { id: number; status: ChatwootConversationStatus["status"] };
     return { id: body.id, status: body.status };
   }
+
+  async getRecentMessages(conversationId: string, limit: number) {
+    const response = await this.request(`/conversations/${conversationId}/messages`, { method: "GET" });
+    const body = (await response.json()) as {
+      payload?: Array<{
+        id: number;
+        content: string;
+        message_type: number;
+        private: boolean;
+        created_at: string;
+      }>;
+    };
+    const payload = body.payload ?? [];
+    return payload
+      .slice(-limit)
+      .map((m): ChatwootMessage => ({
+        id: m.id,
+        content: m.content,
+        messageType: m.message_type === 0 ? "incoming" : m.message_type === 1 ? "outgoing" : "activity",
+        private: m.private,
+        createdAt: m.created_at,
+      }));
+  }
+
+  async listConversationsUpdatedSince(sinceIso: string) {
+    const response = await this.request(`/conversations?since=${encodeURIComponent(sinceIso)}`, { method: "GET" });
+    const body = (await response.json()) as {
+      data?: { payload?: Array<{ id: number; updated_at: string }> };
+      payload?: Array<{ id: number; updated_at: string }>;
+    };
+    const payload = body.data?.payload ?? body.payload ?? [];
+    return payload.map((c) => ({ id: String(c.id), updatedAt: c.updated_at }));
+  }
 }
 
 export class FakeChatwootClient implements ChatwootClient {
@@ -74,5 +120,19 @@ export class FakeChatwootClient implements ChatwootClient {
 
   async getConversationStatus(conversationId: string) {
     return { id: Number(conversationId), status: this.statuses.get(conversationId) ?? "pending" };
+  }
+
+  messagesByConversation = new Map<string, ChatwootMessage[]>();
+
+  async getRecentMessages(conversationId: string, limit: number) {
+    const msgs = this.messagesByConversation.get(conversationId) ?? [];
+    return msgs.slice(-limit);
+  }
+
+  async listConversationsUpdatedSince(_sinceIso: string) {
+    return Array.from(this.messagesByConversation.keys()).map((id) => ({
+      id,
+      updatedAt: new Date().toISOString(),
+    }));
   }
 }

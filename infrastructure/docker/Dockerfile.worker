@@ -7,6 +7,7 @@ RUN npm ci
 RUN npm run build --workspace @yubie/domain \
   && npm run build --workspace @yubie/application \
   && npm run build --workspace @yubie/integrations \
+  && npm run build --workspace @yubie/assistant \
   && npm run build --workspace @yubie/persistence \
   && npm run build --workspace @yubie/worker
 

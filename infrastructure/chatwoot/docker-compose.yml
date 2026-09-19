@@ -20,7 +20,7 @@ services:
     command: ["redis-server", "--save", "60", "1"]
 
   chatwoot-web:
-    image: chatwoot/chatwoot:v4.13.0
+    image: chatwoot/chatwoot:v4.17.1
     depends_on:
       chatwoot-postgres:
         condition: service_healthy
@@ -41,7 +41,7 @@ services:
       - "3000:3000"
 
   chatwoot-sidekiq:
-    image: chatwoot/chatwoot:v4.13.0
+    image: chatwoot/chatwoot:v4.17.1
     depends_on: [chatwoot-web]
     environment:
       RAILS_ENV: production

@@ -4,7 +4,7 @@
 
 - Compose: `infrastructure/vllm/docker-compose.yml`
 - Profile: `gpu` (requires NVIDIA Container Toolkit)
-- Image: `vllm/vllm-openai:v0.8.5`
+- Image: `vllm/vllm-openai:v0.29.0`
 - Network: `ai_internal` only — **no public port**
 
 ## Configuration

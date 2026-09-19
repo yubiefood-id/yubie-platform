@@ -2,7 +2,9 @@ import PgBoss from "pg-boss";
 import { checkListingHealth, FixedClock, SequentialIdGenerator } from "@yubie/application";
 import { HttpLinkHealthChecker } from "@yubie/integrations";
 import { closeDatabase, createWorkerRepositories } from "@yubie/persistence";
-import { processAssistantJob } from "./assistant-handler.js";
+import { createChatwootClient, processAssistantJob } from "./assistant-handler.js";
+import { reconcileChatwoot } from "./reconcile-handler.js";
+import { deliverChatwootOutbox, processPendingOutbox } from "./reply-delivery-handler.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -20,14 +22,41 @@ async function start() {
   await boss.createQueue("listing.health");
   await boss.createQueue("integration.health");
   await boss.createQueue("assistant.process");
+  await boss.createQueue("chatwoot.reply");
+  await boss.createQueue("chatwoot.reconcile");
+  await boss.createQueue("webhook.cleanup");
 
   await boss.work("assistant.process", async (jobs) => {
     for (const job of jobs) {
       const inboxId = String((job.data as { inboxId?: string }).inboxId ?? "");
-      if (inboxId) {
+      if (inboxId && inboxId !== "unknown") {
         await processAssistantJob(inboxId);
+        await boss.send("chatwoot.reply", { outboxSweep: true });
       }
     }
+  });
+
+  await boss.work("chatwoot.reply", async (jobs) => {
+    const chatwoot = createChatwootClient();
+    for (const job of jobs) {
+      const outboxId = String((job.data as { outboxId?: string }).outboxId ?? "");
+      if (outboxId) {
+        await deliverChatwootOutbox(repos.database, chatwoot, outboxId);
+      } else {
+        await processPendingOutbox(repos.database, chatwoot);
+      }
+    }
+  });
+
+  await boss.work("chatwoot.reconcile", async () => {
+    const chatwoot = createChatwootClient();
+    await reconcileChatwoot(repos.database, chatwoot);
+  });
+
+  await boss.work("webhook.cleanup", async () => {
+    const { PostgresWebhookInboxRepository } = await import("@yubie/persistence");
+    const inbox = new PostgresWebhookInboxRepository(repos.database);
+    await inbox.purgeExpiredRawBodies(new Date().toISOString());
   });
 
   await boss.work("listing.health", async (jobs) => {
@@ -49,6 +78,9 @@ async function start() {
   });
 
   await boss.send("integration.health", {}, { startAfter: 5 });
+  await boss.schedule("chatwoot.reconcile", "*/15 * * * *", {});
+  await boss.schedule("webhook.cleanup", "0 * * * *", {});
+
   console.log(JSON.stringify({ level: "info", event: "worker.started", releaseSha: process.env.RELEASE_SHA ?? "dev" }));
 }
 

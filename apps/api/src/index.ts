@@ -41,6 +41,14 @@ export async function handleRequest(request: Request): Promise<Response> {
     return json({ ok: ready, service: "yubie-api", details: health.ok ? health.value.details : undefined }, { status: ready ? 200 : 503 });
   }
 
+  if (url.pathname.startsWith("/ops/assistant") && process.env.DATABASE_URL) {
+    const { createDatabase } = await import("@yubie/persistence");
+    const { handleOpsAssistant } = await import("./ops-assistant.js");
+    const database = createDatabase(process.env.DATABASE_URL);
+    const opsResponse = await handleOpsAssistant(request, database);
+    if (opsResponse) return opsResponse;
+  }
+
   const purchaseMatch = url.pathname.match(/^\/v1\/products\/([^/]+)\/purchase-options$/);
   if (request.method === "GET" && purchaseMatch?.[1]) {
     const slug = decodeURIComponent(purchaseMatch[1]);

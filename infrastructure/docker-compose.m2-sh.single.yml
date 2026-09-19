@@ -4,6 +4,23 @@ include:
   - path: chatwoot/docker-compose.yml
 
 services:
+  worker:
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/Dockerfile.worker
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      CHATWOOT_BASE_URL: ${CHATWOOT_BASE_URL:-http://chatwoot-web:3000}
+      CHATWOOT_API_TOKEN: ${CHATWOOT_API_TOKEN:-}
+      CHATWOOT_ACCOUNT_ID: ${CHATWOOT_ACCOUNT_ID:-1}
+      CHAT_PROVIDER: ${CHAT_PROVIDER:-fake}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-fake}
+      ASSISTANT_AUTO_REPLY: ${ASSISTANT_AUTO_REPLY:-false}
+      ASSISTANT_MODE: ${ASSISTANT_MODE:-shadow}
+      RELEASE_SHA: ${RELEASE_SHA:-dev}
+    depends_on: [postgres, migrate]
+    networks: [internal]
+
   bot:
     build:
       context: ..

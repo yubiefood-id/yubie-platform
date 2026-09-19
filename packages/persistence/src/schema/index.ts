@@ -131,12 +131,20 @@ export const webhookInbox = pgTable("webhook_inbox", {
   id: text("id").primaryKey(),
   provider: text("provider").notNull().default("chatwoot_agentbot"),
   deliveryId: text("delivery_id"),
+  dedupeKey: text("dedupe_key"),
   eventType: text("event_type").notNull(),
   payloadHash: text("payload_hash").notNull(),
-  rawBody: text("raw_body").notNull(),
+  conversationRef: text("conversation_ref"),
+  messageRef: text("message_ref"),
+  contactRef: text("contact_ref"),
+  inboxRef: text("inbox_ref"),
+  providerTimestamp: timestamp("provider_timestamp", { withTimezone: true, mode: "string" }),
+  rawBody: text("raw_body"),
+  rawBodyExpiresAt: timestamp("raw_body_expires_at", { withTimezone: true, mode: "string" }),
   status: webhookInboxStatusEnum("status").notNull().default("received"),
   receivedAt: timestamp("received_at", { withTimezone: true, mode: "string" }).notNull(),
   processedAt: timestamp("processed_at", { withTimezone: true, mode: "string" }),
+  attemptCount: integer("attempt_count").notNull().default(0),
   lastError: text("last_error"),
 }, (table) => [
   uniqueIndex("webhook_inbox_provider_delivery").on(table.provider, table.deliveryId),
@@ -162,13 +170,125 @@ export const assistantRuns = pgTable("assistant_runs", {
   id: text("id").primaryKey(),
   sessionId: text("session_id").notNull(),
   inboxEventId: text("inbox_event_id").notNull(),
+  conversationRef: text("conversation_ref"),
+  messageRef: text("message_ref"),
   intent: text("intent"),
   risk: text("risk"),
+  classifierVersion: text("classifier_version"),
+  policyVersion: text("policy_version"),
+  knowledgeVersion: text("knowledge_version"),
   modelProvider: text("model_provider").notNull(),
+  modelName: text("model_name"),
   promptVersion: text("prompt_version").notNull(),
+  toolNames: text("tool_names"),
+  validatorOutcome: text("validator_outcome"),
+  handoffReason: text("handoff_reason"),
   latencyMs: integer("latency_ms"),
+  tokenUsage: integer("token_usage"),
   outcome: text("outcome").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+});
+
+export const assistantActions = pgTable("assistant_actions", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull(),
+  actionType: text("action_type").notNull(),
+  toolName: text("tool_name"),
+  detailsJson: text("details_json"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+});
+
+export const assistantOutboxStatusEnum = pgEnum("assistant_outbox_status", [
+  "pending",
+  "delivering",
+  "delivered",
+  "retry",
+  "ambiguous",
+  "failed",
+]);
+
+export const assistantOutbox = pgTable("assistant_outbox", {
+  id: text("id").primaryKey(),
+  runId: text("run_id"),
+  conversationRef: text("conversation_ref").notNull(),
+  actionType: text("action_type").notNull(),
+  payloadFingerprint: text("payload_fingerprint").notNull(),
+  payloadJson: text("payload_json").notNull(),
+  providerExternalId: text("provider_external_id"),
+  status: assistantOutboxStatusEnum("status").notNull().default("pending"),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+  deliveredAt: timestamp("delivered_at", { withTimezone: true, mode: "string" }),
+}, (table) => [
+  uniqueIndex("assistant_outbox_fingerprint").on(table.conversationRef, table.payloadFingerprint),
+]);
+
+export const assistantRuntimeConfig = pgTable("assistant_runtime_config", {
+  key: text("key").primaryKey(),
+  valueJson: text("value_json").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedBy: text("updated_by").notNull(),
+});
+
+export const assistantRuntimeConfigAudit = pgTable("assistant_runtime_config_audit", {
+  id: text("id").primaryKey(),
+  key: text("key").notNull(),
+  oldValueJson: text("old_value_json"),
+  newValueJson: text("new_value_json").notNull(),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at", { withTimezone: true, mode: "string" }).notNull(),
+});
+
+export const knowledgeItems = pgTable("knowledge_items", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  scope: text("scope").notNull(),
+  scopeId: text("scope_id"),
+  locale: text("locale").notNull().default("id"),
+  approvalStatus: text("approval_status").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+});
+
+export const knowledgeVersions = pgTable("knowledge_versions", {
+  id: text("id").primaryKey(),
+  knowledgeId: text("knowledge_id").notNull(),
+  version: integer("version").notNull(),
+  approvedContent: text("approved_content").notNull(),
+  effectiveFrom: timestamp("effective_from", { withTimezone: true, mode: "string" }).notNull(),
+  effectiveUntil: timestamp("effective_until", { withTimezone: true, mode: "string" }),
+  sourceReference: text("source_reference"),
+});
+
+export const assistantEvalCases = pgTable("assistant_eval_cases", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  inputText: text("input_text").notNull(),
+  expectedIntent: text("expected_intent").notNull(),
+  expectedRisk: text("expected_risk").notNull(),
+  expectedOutcome: text("expected_outcome").notNull(),
+  locale: text("locale").notNull().default("id"),
+  tags: text("tags").notNull().default(""),
+});
+
+export const assistantEvalResults = pgTable("assistant_eval_results", {
+  id: text("id").primaryKey(),
+  caseId: text("case_id").notNull(),
+  promptVersion: text("prompt_version").notNull(),
+  modelProvider: text("model_provider").notNull(),
+  passed: integer("passed").notNull(),
+  actualIntent: text("actual_intent"),
+  actualRisk: text("actual_risk"),
+  actualOutcome: text("actual_outcome"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+});
+
+export const conversationSyncCheckpoints = pgTable("conversation_sync_checkpoints", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull(),
+  cursorValue: text("cursor_value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
 });
 
 export const integrationHealth = pgTable("integration_health", {

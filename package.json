@@ -19,7 +19,7 @@
     "infra:up": "docker compose -f infrastructure/docker-compose.yml up -d",
     "infra:down": "docker compose -f infrastructure/docker-compose.yml down",
     "db:migrate": "npm run build --workspace @yubie/persistence && npm run db:migrate --workspace @yubie/persistence",
-    "db:seed": "npm run build --workspace @yubie/persistence && npm run db:seed --workspace @yubie/persistence",
+    "db:seed": "npm run build --workspace @yubie/persistence && npm run db:seed --workspace @yubie/persistence && npm run db:seed:assistant --workspace @yubie/persistence",
     "db:reset": "npm run build --workspace @yubie/persistence && npm run db:reset --workspace @yubie/persistence",
     "build": "npm run build --workspace @yubie/domain && npm run build --workspace @yubie/validation && npm run build --workspace @yubie/application && npm run build --workspace @yubie/integrations && npm run build --workspace @yubie/assistant && npm run build --workspace @yubie/persistence && npm run build --workspace @yubie/commerce && npm run build --workspace @yubie/ui && npm run build --workspace @yubie/api && npm run build --workspace @yubie/worker && npm run build --workspace @yubie/bot && npm run build --workspace @yubie/web",
     "lint": "npm run lint --workspaces --if-present",

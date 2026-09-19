@@ -1,9 +1,12 @@
 export * from "./ports.js";
 export * from "./intent-classifier.js";
 export * from "./risk-policy.js";
+export { POLICY_VERSION } from "./risk-policy.js";
 export * from "./validator.js";
 export * from "./model-providers.js";
 export * from "./tools.js";
+export * from "./knowledge-tools.js";
+export * from "./structured-classifier.js";
 export * from "./pipeline.js";
 export * from "./prompts.js";
 export * from "./config.js";

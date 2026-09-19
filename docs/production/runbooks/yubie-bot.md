@@ -31,4 +31,12 @@
 
 ## Rollback
 
-Set `ASSISTANT_AUTO_REPLY=false`. Scale bot to zero; Chatwoot human agents continue.
+1. **Emergency OFF (no rebuild):** `POST /ops/assistant/emergency-off` with `Authorization: Bearer $OPS_API_TOKEN`
+2. Set `ASSISTANT_AUTO_REPLY=false` and restart worker
+3. Scale bot to zero if needed; Chatwoot human agents continue
+
+## M3 pipeline
+
+Bot: verify → `webhook_inbox` (refs + raw TTL) → `assistant.process`  
+Worker: pipeline → `assistant_runs` + `assistant_outbox` → `chatwoot.reply`  
+Scheduled: `chatwoot.reconcile`, `webhook.cleanup`

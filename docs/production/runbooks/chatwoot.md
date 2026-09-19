@@ -2,7 +2,7 @@
 
 ## Stack
 
-- Image: `chatwoot/chatwoot:v4.13.0`
+- Image: `chatwoot/chatwoot:v4.17.1`
 - Services: web, sidekiq, postgres, redis
 - DNS: `support.yubie.id`
 

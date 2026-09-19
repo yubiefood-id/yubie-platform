@@ -84,4 +84,3 @@ export interface AssistantPipelineDeps {
   mode: "shadow" | "suggestion" | "auto";
 }
 
-export type PipelineResult = AssistantOutcome;

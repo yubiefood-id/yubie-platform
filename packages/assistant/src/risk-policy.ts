@@ -1,6 +1,8 @@
 import type { AssistantIntent, RiskLevel } from "@yubie/domain";
 import type { RiskPolicy } from "./ports.js";
 
+export const POLICY_VERSION = "policy-v1";
+
 const GREEN: AssistantIntent[] = [
   "PRODUCT_INFO",
   "PRODUCT_DISCOVERY",
