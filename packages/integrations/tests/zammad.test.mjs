@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import test from "node:test";
 import {
+  buildHandoffCommand,
   buildZammadDedupeKey,
   FakeZammadClient,
   parseZammadTriggerPayload,
@@ -81,6 +82,20 @@ test("buildZammadDedupeKey prefers delivery id", () => {
     payloadHash: "abc",
   });
   assert.equal(key, "delivery-1");
+});
+
+test("buildHandoffCommand maps logical destinations to groups", () => {
+  const ref = { provider: "zammad", threadId: "1" };
+  const sales = buildHandoffCommand(ref, "B2B_INTRO", "b2b", { destination: "SALES_PARTNERSHIP" });
+  assert.equal(sales.groupId, "3");
+  const safety = buildHandoffCommand(ref, "FOOD_SAFETY", "food_safety", {
+    destination: "FOOD_SAFETY",
+    priorityIds: { high: "5" },
+  });
+  assert.equal(safety.groupId, "4");
+  assert.equal(safety.priorityId, "5");
+  const cs = buildHandoffCommand(ref, "HUMAN_REQUEST", "human", { destination: "CUSTOMER_SUPPORT" });
+  assert.equal(cs.groupId, "2");
 });
 
 test("ZammadSupportProvider sends reply via fake client", async () => {

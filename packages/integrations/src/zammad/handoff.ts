@@ -1,5 +1,5 @@
 import type { AssistantIntent } from "@yubie/domain";
-import type { HandoffCommand, SupportThreadRef } from "@yubie/application";
+import type { HandoffCommand, HandoffDestination, SupportThreadRef } from "@yubie/application";
 
 export interface ZammadHandoffConfig {
   groupIds: {
@@ -16,25 +16,38 @@ export interface ZammadHandoffConfig {
   };
 }
 
+function resolveDestination(
+  intent: AssistantIntent,
+  handoffReason?: string,
+  destination?: HandoffDestination,
+): HandoffDestination {
+  if (destination) return destination;
+  if (intent === "FOOD_SAFETY" || handoffReason?.includes("food")) return "FOOD_SAFETY";
+  if (intent.startsWith("B2B")) return "SALES_PARTNERSHIP";
+  return "CUSTOMER_SUPPORT";
+}
+
 export function buildHandoffCommand(
   ref: SupportThreadRef,
   intent: AssistantIntent,
   handoffReason?: string,
-  config?: Partial<ZammadHandoffConfig>,
+  config?: Partial<ZammadHandoffConfig> & { destination?: HandoffDestination },
 ): HandoffCommand {
   const labels = ["human-required"];
   const cfg: ZammadHandoffConfig = {
     groupIds: {
-      customerSupport: config?.groupIds?.customerSupport ?? "2",
-      salesPartnership: config?.groupIds?.salesPartnership ?? "3",
-      foodSafety: config?.groupIds?.foodSafety ?? "4",
-      botQueue: config?.groupIds?.botQueue ?? "1",
+      customerSupport: config?.groupIds?.customerSupport ?? process.env.ZAMMAD_GROUP_CUSTOMER_SUPPORT ?? "2",
+      salesPartnership: config?.groupIds?.salesPartnership ?? process.env.ZAMMAD_GROUP_SALES_PARTNERSHIP ?? "3",
+      foodSafety: config?.groupIds?.foodSafety ?? process.env.ZAMMAD_GROUP_FOOD_SAFETY ?? "4",
+      botQueue: config?.groupIds?.botQueue ?? process.env.ZAMMAD_GROUP_BOT_QUEUE ?? "1",
     },
     priorityIds: config?.priorityIds ?? {},
     stateIds: config?.stateIds ?? {},
   };
 
-  if (intent.startsWith("B2B")) {
+  const dest = resolveDestination(intent, handoffReason, config?.destination);
+
+  if (dest === "SALES_PARTNERSHIP") {
     labels.push("b2b");
     return {
       threadRef: ref,
@@ -44,7 +57,7 @@ export function buildHandoffCommand(
     };
   }
 
-  if (intent === "FOOD_SAFETY" || handoffReason?.includes("food")) {
+  if (dest === "FOOD_SAFETY") {
     labels.push("food-safety");
     return {
       threadRef: ref,
@@ -55,18 +68,10 @@ export function buildHandoffCommand(
     };
   }
 
-  if (intent === "HUMAN_REQUEST") {
-    return {
-      threadRef: ref,
-      labels,
-      groupId: cfg.groupIds.customerSupport,
-      botModeOff: true,
-    };
-  }
-
   return {
     threadRef: ref,
     labels,
     groupId: cfg.groupIds.customerSupport,
+    botModeOff: intent === "HUMAN_REQUEST" || Boolean(handoffReason),
   };
 }
