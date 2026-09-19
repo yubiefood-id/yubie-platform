@@ -1,5 +1,12 @@
 import type { ModelProvider, ModelRequest, ModelResponse } from "./ports.js";
 
+/** Throws immediately — use in deterministic mode tests to prove zero model calls. */
+export class ThrowingModelProvider implements ModelProvider {
+  async generate(): Promise<ModelResponse> {
+    throw new Error("model_provider_invoked_in_deterministic_mode");
+  }
+}
+
 export class FakeModelProvider implements ModelProvider {
   async generate(req: ModelRequest): Promise<ModelResponse> {
     const lower = req.userMessage.toLowerCase();

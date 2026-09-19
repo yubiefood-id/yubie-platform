@@ -1,4 +1,5 @@
 export * from "./ports.js";
+export * from "./ports/handoff-destination.js";
 export * from "./use-cases/get-purchase-options.js";
 export * from "./use-cases/resolve-marketplace-redirect.js";
 export * from "./use-cases/resolve-whatsapp-redirect.js";

@@ -1,18 +1,23 @@
 import { createHash } from "node:crypto";
 import type { SupportConversationProvider } from "@yubie/application";
 import {
+  createConversationEngineRouter,
+  createInitialFlowState,
   createModelProviderFromEnv,
   DefaultResponseValidator,
   DeterministicRiskPolicy,
+  FLOW_VERSION,
   KnowledgeToolRegistry,
   loadAssistantConfig,
   POLICY_VERSION,
   PROMPT_VERSION,
+  resolveBotEngine,
   RuleBasedIntentClassifier,
   RuleOnlyStructuredClassifier,
   runAssistantPipeline,
   SYSTEM_PROMPT_V1,
   CLASSIFIER_VERSION,
+  type HandoffDestination,
 } from "@yubie/assistant";
 import type { ConversationState } from "@yubie/domain";
 import {
@@ -34,6 +39,7 @@ import {
   createDatabase,
   PostgresAssistantOutboxRepository,
   PostgresAssistantRunRepository,
+  PostgresConversationFlowStateRepository,
   PostgresConversationSessionRepository,
   PostgresKnowledgeRepository,
   PostgresRuntimeConfigRepository,
@@ -41,6 +47,8 @@ import {
   webhookInbox,
   type Database,
 } from "@yubie/persistence";
+import { increment } from "./metrics.js";
+
 export { createChatwootClient, createSupportProvider };
 
 function fingerprint(conversationRef: string, actionType: string, payload: string) {
@@ -108,6 +116,10 @@ async function resolveNormalizedMessage(
   return parseAgentBotEvent(event as import("@yubie/integrations").AgentBotWebhookEvent);
 }
 
+function mapHandoffDestination(destination?: HandoffDestination) {
+  return destination;
+}
+
 export async function processAssistantInbox(
   database: Database,
   inboxId: string,
@@ -129,6 +141,7 @@ export async function processAssistantInbox(
   const now = new Date().toISOString();
   const provider = support.provider;
   const sessions = new PostgresConversationSessionRepository(database);
+  const flowStates = new PostgresConversationFlowStateRepository(database);
   const runs = new PostgresAssistantRunRepository(database);
   const outbox = new PostgresAssistantOutboxRepository(database);
   const knowledge = new PostgresKnowledgeRepository(database);
@@ -168,32 +181,92 @@ export async function processAssistantInbox(
 
   const sessionId =
     sessionResult.ok && sessionResult.value ? sessionResult.value.id : `session-${message.conversationId}`;
-  const envConfig = loadAssistantConfig();
-  const mode = configSnapshot.mode as "shadow" | "suggestion" | "auto";
-  const autoReplyEnabled = envConfig.autoReplyEnabled && configSnapshot.assistantEnabled;
-  const allowedGreenIntents = new Set(configSnapshot.allowedGreenIntents as import("@yubie/domain").AssistantIntent[]);
-
-  const contextProvider = createContextProvider(support);
-  const conversationContext = await contextProvider.fetchContext(message.conversationId);
-  const structuredClassifier = new RuleOnlyStructuredClassifier();
-  const tools = new KnowledgeToolRegistry({ knowledge });
+  const botEngine = resolveBotEngine();
   const started = Date.now();
-  const outcome = await runAssistantPipeline(message, conversationState, {
-    classifier: new RuleBasedIntentClassifier(),
-    classifyStructured: (msg) => structuredClassifier.classify(msg),
-    riskPolicy: new DeterministicRiskPolicy(),
-    tools,
-    model: createModelProviderFromEnv(),
-    validator: new DefaultResponseValidator(),
-    systemPrompt: SYSTEM_PROMPT_V1,
-    autoReplyEnabled,
-    allowedGreenIntents,
-    mode,
-    conversationContext: {
-      recentTurns: conversationContext.recentTurns,
-      customerLanguage: conversationContext.customerLanguage,
+
+  const existingFlow = await flowStates.get(provider, message.conversationId);
+  const initialFlow = createInitialFlowState();
+  const flowState = existingFlow.ok && existingFlow.value
+    ? {
+        nodeId: existingFlow.value.nodeId,
+        flowVersion: existingFlow.value.flowVersion,
+        context: existingFlow.value.context,
+        fallbackCount: existingFlow.value.fallbackCount,
+      }
+    : initialFlow;
+
+  const router = createConversationEngineRouter({
+    knowledge,
+    legacyProcessor: async (input) => {
+      const envConfig = loadAssistantConfig();
+      const mode = configSnapshot.mode as "shadow" | "suggestion" | "auto";
+      const autoReplyEnabled = envConfig.autoReplyEnabled && configSnapshot.assistantEnabled;
+      const allowedGreenIntents = new Set(configSnapshot.allowedGreenIntents as import("@yubie/domain").AssistantIntent[]);
+      const contextProvider = createContextProvider(support);
+      const conversationContext = await contextProvider.fetchContext(message.conversationId);
+      const structuredClassifier = new RuleOnlyStructuredClassifier();
+      const tools = new KnowledgeToolRegistry({ knowledge });
+      const outcome = await runAssistantPipeline(input.message, input.conversationState, {
+        classifier: new RuleBasedIntentClassifier(),
+        classifyStructured: (msg) => structuredClassifier.classify(msg),
+        riskPolicy: new DeterministicRiskPolicy(),
+        tools,
+        model: createModelProviderFromEnv(),
+        validator: new DefaultResponseValidator(),
+        systemPrompt: SYSTEM_PROMPT_V1,
+        autoReplyEnabled,
+        allowedGreenIntents,
+        mode,
+        conversationContext: {
+          recentTurns: conversationContext.recentTurns,
+          customerLanguage: conversationContext.customerLanguage,
+        },
+      });
+      const mapped: import("@yubie/assistant").ConversationEngineResult = {
+        kind: outcome.kind,
+        intent: outcome.intent,
+        risk: outcome.risk,
+        metrics: [],
+      };
+      if (outcome.text) mapped.text = outcome.text;
+      if (outcome.handoffReason) mapped.handoffReason = outcome.handoffReason;
+      return mapped;
     },
   });
+
+  const engineResult = await router.process({
+    message,
+    conversationState,
+    flowState,
+  });
+
+  for (const metric of engineResult.metrics) {
+    increment(metric);
+  }
+
+  if (engineResult.nextFlowState) {
+    await flowStates.upsert({
+      provider,
+      providerThreadId: message.conversationId,
+      flowVersion: engineResult.nextFlowState.flowVersion,
+      nodeId: engineResult.nextFlowState.nodeId,
+      context: engineResult.nextFlowState.context,
+      fallbackCount: engineResult.nextFlowState.fallbackCount,
+      lastTransitionAt: now,
+      createdAt: existingFlow.ok && existingFlow.value ? existingFlow.value.createdAt : now,
+      updatedAt: now,
+    });
+    await flowStates.appendEvent({
+      provider,
+      providerThreadId: message.conversationId,
+      flowVersion: engineResult.flowVersion ?? FLOW_VERSION,
+      fromNodeId: flowState.nodeId,
+      toNodeId: engineResult.nextFlowState.nodeId,
+      eventType: engineResult.kind,
+      metricLabels: { intent: engineResult.intent, nodeId: engineResult.nodeId ?? "" },
+      createdAt: now,
+    });
+  }
 
   const runId = runs.nextRunId();
   const runRecord: import("@yubie/persistence").AssistantRunRecord = {
@@ -202,33 +275,40 @@ export async function processAssistantInbox(
     inboxEventId: inboxId,
     conversationRef: message.conversationId,
     messageRef: message.messageId,
-    intent: outcome.intent,
-    risk: outcome.risk,
-    classifierVersion: CLASSIFIER_VERSION,
+    intent: engineResult.intent,
+    risk: engineResult.risk,
+    classifierVersion: botEngine === "deterministic" ? FLOW_VERSION : CLASSIFIER_VERSION,
     policyVersion: POLICY_VERSION,
     knowledgeVersion: configSnapshot.knowledgeVersion,
-    modelProvider: process.env.MODEL_PROVIDER ?? "fake",
-    modelName: process.env.VLLM_MODEL ?? "default",
-    promptVersion: PROMPT_VERSION,
-    validatorOutcome: outcome.kind,
+    modelProvider: botEngine,
+    modelName: botEngine === "deterministic" ? "none" : (process.env.VLLM_MODEL ?? "default"),
+    promptVersion: botEngine === "deterministic" ? FLOW_VERSION : PROMPT_VERSION,
+    validatorOutcome: engineResult.kind,
     latencyMs: Date.now() - started,
-    outcome: outcome.kind,
+    outcome: engineResult.kind,
     createdAt: now,
   };
-  if (outcome.kind === "handoff" && outcome.handoffReason) {
-    runRecord.handoffReason = outcome.handoffReason;
+  if (engineResult.kind === "handoff" && engineResult.handoffReason) {
+    runRecord.handoffReason = engineResult.handoffReason;
   }
   await runs.insert(runRecord);
 
-  if (outcome.kind === "handoff") {
+  if (engineResult.kind === "handoff") {
     await sessions.updateState(provider, message.conversationId, "HANDOFF_REQUESTED", now);
-    const handoff = buildHandoffCommand(threadRef, outcome.intent, outcome.handoffReason);
+    const dest = mapHandoffDestination(engineResult.handoffDestination);
+    const handoff = buildHandoffCommand(
+      threadRef,
+      engineResult.intent,
+      engineResult.handoffReason,
+      dest ? { destination: dest } : undefined,
+    );
     const payload = JSON.stringify({
       labels: handoff.labels,
-      intent: outcome.intent,
-      handoffReason: outcome.handoffReason,
+      intent: engineResult.intent,
+      handoffReason: engineResult.handoffReason,
       groupId: handoff.groupId,
       priorityId: handoff.priorityId,
+      destination: engineResult.handoffDestination,
     });
     await outbox.enqueue({
       runId,
@@ -241,8 +321,23 @@ export async function processAssistantInbox(
       createdAt: now,
     });
     await runs.insertAction({ runId, actionType: "handoff", detailsJson: payload, createdAt: now });
-  } else if (outcome.kind === "reply" && outcome.text) {
-    const payload = JSON.stringify({ content: outcome.text });
+
+    if (engineResult.text) {
+      const replyPayload = JSON.stringify({ content: engineResult.text });
+      await outbox.enqueue({
+        runId,
+        provider,
+        providerThreadId: message.conversationId,
+        conversationRef: message.conversationId,
+        actionType: "reply",
+        payloadFingerprint: fingerprint(message.conversationId, "reply-handoff", replyPayload),
+        payloadJson: replyPayload,
+        createdAt: now,
+      });
+      await runs.insertAction({ runId, actionType: "reply", detailsJson: replyPayload, createdAt: now });
+    }
+  } else if (engineResult.kind === "reply" && engineResult.text) {
+    const payload = JSON.stringify({ content: engineResult.text });
     await outbox.enqueue({
       runId,
       provider,
@@ -254,13 +349,7 @@ export async function processAssistantInbox(
       createdAt: now,
     });
     await runs.insertAction({ runId, actionType: "reply", detailsJson: payload, createdAt: now });
-  } else if ("suggestionText" in outcome && outcome.suggestionText) {
-    await runs.insertAction({
-      runId,
-      actionType: "suggestion",
-      detailsJson: JSON.stringify({ text: outcome.suggestionText }),
-      createdAt: now,
-    });
+    increment("deterministic_task_completed_total");
   }
 
   console.log(
@@ -268,11 +357,12 @@ export async function processAssistantInbox(
       event: "assistant.turn",
       inboxId,
       runId,
-      intent: outcome.intent,
-      risk: outcome.risk,
-      outcome: outcome.kind,
+      engine: botEngine,
+      intent: engineResult.intent,
+      risk: engineResult.risk,
+      outcome: engineResult.kind,
+      nodeId: engineResult.nodeId,
       latencyMs: Date.now() - started,
-      promptVersion: PROMPT_VERSION,
       conversationRef: message.conversationId,
       provider,
     }),
