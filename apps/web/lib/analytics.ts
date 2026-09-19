@@ -7,7 +7,8 @@ export type YubieAnalyticsEvent =
   | "recipe_filter_change"
   | "recipe_product_click"
   | "product_variant_select"
-  | "add_to_cart"
+  | "marketplace_click"
+  | "whatsapp_intent_click"
   | "b2b_sample_click"
   | "b2b_product_development_click"
   | "product_waitlist_submit";

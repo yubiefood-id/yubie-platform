@@ -17,8 +17,11 @@
     "test": "npm run build && node --test tests/*.test.mjs"
   },
   "dependencies": {
+    "@yubie/application": "*",
     "@yubie/commerce": "*",
     "@yubie/domain": "*",
+    "@yubie/integrations": "*",
+    "@yubie/persistence": "*",
     "@yubie/validation": "*"
   }
 }

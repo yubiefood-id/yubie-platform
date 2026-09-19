@@ -19,7 +19,7 @@ export default function Home() {
     <section className="hero" aria-labelledby="hero-title">
       <Image className="hero-image" src="/photography/hero-lifestyle.webp" alt="Perempuan Indonesia berhijab menikmati minuman ubi ungu bersama rangkaian produk Yubie" fill priority sizes="100vw" unoptimized />
       <div className="hero-scrim" />
-      <div className="hero-copy"><span className="eyebrow light-text">INDONESIAN ROOTS. MODERN NOURISHMENT.</span><h1 id="hero-title">ROOTED HERE.<br /><em>MADE FOR NOW.</em></h1><p>Temui cara baru menikmati ubi Indonesia—ditransformasi menjadi produk praktis untuk baking, breakfast, dan kreasi sehari-hari.</p><div className="hero-actions"><Link className="button gold" href="/shop">Shop Yubie <span>↗</span></Link><Link className="text-link light-text" href="/our-roots">Discover Our Roots <span>→</span></Link></div></div>
+      <div className="hero-copy"><span className="eyebrow light-text">INDONESIAN ROOTS. MODERN NOURISHMENT.</span><h1 id="hero-title">ROOTED HERE.<br /><em>MADE FOR NOW.</em></h1><p>Temui cara baru menikmati ubi Indonesia—ditransformasi menjadi produk praktis untuk baking, breakfast, dan kreasi sehari-hari.</p><div className="hero-actions"><Link className="button gold" href="/shop">Temukan produk <span>↗</span></Link><Link className="text-link light-text" href="/our-roots">Discover Our Roots <span>→</span></Link></div></div>
       <div className="hero-index"><span>01</span><i /><small>SCROLL TO DISCOVER</small></div>
     </section>
 

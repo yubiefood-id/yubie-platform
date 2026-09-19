@@ -20,6 +20,7 @@ export const b2bLeadSchema = z.object({
   email: z.email(),
   whatsapp: z.string().trim().min(8).max(24),
   need: z.string().trim().max(120).optional(),
+  intent: z.enum(["sample", "bulk", "product-development", "general"]).default("general"),
   interest: z.string().trim().min(1).max(120),
   message: z.string().trim().max(1000).optional(),
   consent: z.literal(true),
@@ -40,3 +41,5 @@ export type NewsletterSubmission = z.infer<typeof newsletterSubmissionSchema>;
 export type ProductWaitlistSubmission = z.infer<typeof productWaitlistSchema>;
 export type B2BLead = z.infer<typeof b2bLeadSchema>;
 export type CheckoutRequest = z.infer<typeof checkoutRequestSchema>;
+
+export * from "./channel.js";

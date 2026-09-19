@@ -1,7 +1,8 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -13,15 +14,35 @@ const schema = z.object({
   email: z.string().email("Email tidak valid."),
   whatsapp: z.string().trim().min(8, "Nomor WhatsApp tidak valid."),
   need: z.string().trim().optional(),
+  intent: z.enum(["sample", "bulk", "product-development", "general"]),
   interest: z.string().min(1, "Pilih produk."),
   message: z.string().trim().max(1000).optional(),
   consent: z.literal(true, { error: "Persetujuan diperlukan." }),
 });
 type Data = z.infer<typeof schema>;
 
+const intentLabels: Record<Data["intent"], string> = {
+  sample: "Minta sampel produk",
+  bulk: "Konsultasi bulk ingredients",
+  "product-development": "Pengembangan produk bersama",
+  general: "Pertanyaan B2B umum",
+};
+
 export function B2BForm() {
   const [sent, setSent] = useState(false);
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<Data>({ resolver: zodResolver(schema) });
+  const searchParams = useSearchParams();
+  const defaultIntent = (searchParams.get("intent") as Data["intent"] | null) ?? "general";
+  const defaultInterest = searchParams.get("interest") ?? "";
+  const { register, handleSubmit, setValue, watch, formState: { errors, isSubmitting } } = useForm<Data>({
+    resolver: zodResolver(schema),
+    defaultValues: { intent: ["sample", "bulk", "product-development", "general"].includes(defaultIntent) ? defaultIntent : "general", interest: defaultInterest },
+  });
+  const intent = watch("intent");
+
+  useEffect(() => {
+    if (defaultInterest) setValue("interest", defaultInterest === "flour" ? "Yubie Flour" : defaultInterest);
+  }, [defaultInterest, setValue]);
+
   const submit = async (data: Data) => { const response = await fetch("/api/b2b", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) }); if (response.ok) setSent(true); };
   if (sent) return <div className="b2b-success" role="status"><span>01</span><h2>Enquiry tervalidasi.</h2><p>Ini adalah prototype aman. Integrasi CRM/email belum diaktifkan, jadi belum ada pesan yang dikirim keluar.</p></div>;
   return <form className="b2b-form" onSubmit={handleSubmit(submit)} noValidate>
@@ -32,9 +53,10 @@ export function B2BForm() {
     <label>Email<input type="email" {...register("email")} />{errors.email && <small>{errors.email.message}</small>}</label>
     <label>WhatsApp<input {...register("whatsapp")} inputMode="tel" />{errors.whatsapp && <small>{errors.whatsapp.message}</small>}</label>
     <label>Estimasi kebutuhan / bulan<input {...register("need")} placeholder="Contoh: 20 kg" /></label>
+    <label>Jenis kebutuhan<select {...register("intent")}>{Object.entries(intentLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>{errors.intent && <small>{errors.intent.message}</small>}</label>
     <label>Produk yang diminati<select {...register("interest")} defaultValue=""><option value="" disabled>Pilih</option><option>Yubie Flour</option><option>Yubie Shake</option><option>Yubie Ppang</option><option>Collaboration</option></select>{errors.interest && <small>{errors.interest.message}</small>}</label>
-    <label className="wide">Pesan<textarea {...register("message")} rows={5} /></label>
+    <label className="wide">Pesan<textarea {...register("message")} rows={5} placeholder={intent === "sample" ? "Ceritakan use case sampel yang Anda butuhkan." : intent === "bulk" ? "Ceritakan volume dan jadwal kebutuhan bulk." : "Ceritakan kebutuhan Anda."} /></label>
     <label className="check wide"><input type="checkbox" {...register("consent")} /><span>Saya setuju data ini diproses untuk menindaklanjuti enquiry dan telah membaca <a href="/privacy">Privacy Policy</a>.</span></label>{errors.consent && <small className="wide">{errors.consent.message}</small>}
-    <button className="button gold wide" disabled={isSubmitting}>{isSubmitting ? "Validating…" : "Send sample request"}<span>→</span></button>
+    <button className="button gold wide" disabled={isSubmitting}>{isSubmitting ? "Validating…" : intentLabels[intent]}<span>→</span></button>
   </form>;
 }

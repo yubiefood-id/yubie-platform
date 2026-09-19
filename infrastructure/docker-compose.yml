@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: yubie
+      POSTGRES_PASSWORD: yubie_local
+      POSTGRES_DB: yubie_dev
+    volumes:
+      - yubie_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yubie -d yubie_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  yubie_pgdata:

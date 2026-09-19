@@ -11,12 +11,19 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace @yubie/web --",
+    "dev": "npm run dev:web",
+    "dev:web": "npm run dev --workspace @yubie/web --",
     "dev:api": "npm run dev --workspace @yubie/api",
-    "build": "npm run build --workspace @yubie/domain && npm run build --workspace @yubie/validation && npm run build --workspace @yubie/commerce && npm run build --workspace @yubie/ui && npm run build --workspace @yubie/api && npm run build --workspace @yubie/web",
+    "dev:worker": "npm run dev --workspace @yubie/worker",
+    "infra:up": "docker compose -f infrastructure/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infrastructure/docker-compose.yml down",
+    "db:migrate": "npm run build --workspace @yubie/persistence && npm run db:migrate --workspace @yubie/persistence",
+    "db:seed": "npm run build --workspace @yubie/persistence && npm run db:seed --workspace @yubie/persistence",
+    "db:reset": "npm run build --workspace @yubie/persistence && npm run db:reset --workspace @yubie/persistence",
+    "build": "npm run build --workspace @yubie/domain && npm run build --workspace @yubie/validation && npm run build --workspace @yubie/application && npm run build --workspace @yubie/integrations && npm run build --workspace @yubie/persistence && npm run build --workspace @yubie/commerce && npm run build --workspace @yubie/ui && npm run build --workspace @yubie/api && npm run build --workspace @yubie/worker && npm run build --workspace @yubie/web",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspace @yubie/domain && npm run test --workspace @yubie/validation && npm run test --workspace @yubie/commerce && npm run test --workspace @yubie/api && npm run test --workspace @yubie/web",
+    "test": "npm run test --workspace @yubie/domain && npm run test --workspace @yubie/validation && npm run test --workspace @yubie/integrations && npm run test --workspace @yubie/application && npm run test --workspace @yubie/persistence && npm run test --workspace @yubie/commerce && npm run test --workspace @yubie/api && npm run test --workspace @yubie/worker && npm run test --workspace @yubie/web",
     "check": "npm run lint && npm run typecheck && npm run test"
   },
   "devDependencies": {

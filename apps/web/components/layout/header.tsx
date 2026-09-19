@@ -5,13 +5,11 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { navigation, siteConfig } from "@/config/site";
 import { products } from "@/config/products";
-import { useCart } from "@/features/cart/cart-context";
 
 export function Header() {
   const [menu, setMenu] = useState(false);
   const [search, setSearch] = useState(false);
   const [query, setQuery] = useState("");
-  const { count, setOpen } = useCart();
   const results = query.trim() ? products.filter((p) => `${p.name} ${p.descriptor}`.toLowerCase().includes(query.toLowerCase())) : products;
 
   useEffect(() => {
@@ -32,8 +30,8 @@ export function Header() {
       <Link className="brand" href="/" aria-label="Yubie home"><Image src="/brand/yubie-logo.webp" alt="Yubie — Nourish Naturally" width={155} height={84} priority unoptimized /></Link>
       <nav className="desktop-nav" aria-label="Navigasi utama">{navigation.map((item) => <Link href={item.href} key={item.href}>{item.label}</Link>)}</nav>
       <div className="nav-actions">
-        <button className="text-button search-trigger" onClick={() => setSearch(true)}>Search <kbd>⌘K</kbd></button>
-        <button className="text-button" onClick={() => setOpen(true)}>Cart <span className="cart-count" aria-label={`${count} item`}>{count}</span></button>
+        <button className="text-button search-trigger" onClick={() => setSearch(true)}>Cari <kbd>⌘K</kbd></button>
+        <Link className="text-button" href="/products/yubie-flour" aria-label="Lihat opsi beli Yubie Flour">Beli</Link>
         <button className="menu-button" onClick={() => setMenu(true)} aria-label="Buka menu"><span /><span /></button>
       </div>
     </header>

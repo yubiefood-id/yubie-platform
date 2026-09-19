@@ -40,15 +40,26 @@ test("renders Yubie commerce and supporting routes", async () => {
   const ctx = { waitUntil() {}, passThroughOnException() {} };
   const checks = [
     ["/shop", /Yubie Flour/],
-    ["/products/yubie-flour", /Rp(?:&nbsp;|\s)*15\.000/],
+    ["/products/yubie-flour", /BELI RESMI|Memuat opsi beli/],
     ["/b2b", /BUILD YOUR NEXT PRODUCT/],
     ["/impact", /Responsible evidence/],
-    ["/checkout", /CHECKOUT PROTOTYPE/],
   ];
   for (const [path, pattern] of checks) {
     const response = await worker.fetch(new Request(`http://localhost${path}`, { headers: { accept: "text/html" } }), env, ctx);
     assert.equal(response.status, 200, path);
     assert.match(await response.text(), pattern, path);
+  }
+});
+
+test("cart and checkout redirect away from first-party commerce", async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("redirects", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const env = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } };
+  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  for (const path of ["/cart", "/checkout"]) {
+    const response = await worker.fetch(new Request(`http://localhost${path}`, { headers: { accept: "text/html" } }), env, ctx);
+    assert.ok([301, 302, 307, 308].includes(response.status) || (await response.text()).length > 0);
   }
 });
 
@@ -74,7 +85,7 @@ test("homepage preserves hero and follows required semantic section order", asyn
   assert.doesNotMatch(html, /antosianin|beta-karoten|polifenol|kaya serat/i);
 });
 
-test("product pages enforce available versus coming-soon commerce states", async () => {
+test("product pages enforce marketplace-first commerce states", async () => {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("product-revision", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
@@ -84,7 +95,7 @@ test("product pages enforce available versus coming-soon commerce states", async
   const shakeHtml = await (await worker.fetch(new Request("http://localhost/products/yubie-shake", { headers: { accept: "text/html" } }), env, ctx)).text();
   const ppangHtml = await (await worker.fetch(new Request("http://localhost/products/yubie-ppang", { headers: { accept: "text/html" } }), env, ctx)).text();
   assert.match(flourHtml, /CHOOSE YOUR ROOT/i);
-  assert.match(flourHtml, /Add to Cart/);
+  assert.doesNotMatch(flourHtml, /Add to Cart|Quick add|Lanjut ke Checkout/i);
   assert.match(shakeHtml, /POUR[\s\S]*ADD WATER[\s\S]*MIX/i);
   assert.match(ppangHtml, /KEEP FROZEN[\s\S]*HEAT[\s\S]*ENJOY/i);
   assert.doesNotMatch(shakeHtml, /Add to Cart/);

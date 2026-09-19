@@ -74,3 +74,4 @@ export function calculateSubtotal(items: readonly CartItem[]): number {
 }
 
 export * from "./product-discovery.js";
+export * from "./channel.js";
