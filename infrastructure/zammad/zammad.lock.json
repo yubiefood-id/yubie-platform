@@ -1,0 +1,11 @@
+{
+  "upstreamRepo": "https://github.com/zammad/zammad-docker-compose",
+  "upstreamRef": "master",
+  "image": "ghcr.io/zammad/zammad:7.1.3-0014",
+  "postgresVersion": "17.10-alpine",
+  "redisVersion": "8.10-alpine",
+  "memcachedVersion": "1.6.45-alpine",
+  "elasticsearchVersion": "9.4.2",
+  "verifiedAt": "2026-09-20",
+  "notes": "Recheck security advisories before production pin changes."
+}

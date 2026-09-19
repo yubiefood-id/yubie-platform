@@ -1,0 +1,37 @@
+# Yubie override for official zammad-docker-compose.
+# Usage:
+#   git clone https://github.com/zammad/zammad-docker-compose.git /opt/zammad
+#   cp infrastructure/zammad/.env.example /opt/zammad/.env
+#   docker compose -f docker-compose.yml -f /path/to/yubie/infrastructure/zammad/docker-compose.yubie.override.yml up -d
+
+services:
+  zammad-elasticsearch:
+    ports: []
+    networks:
+      - zammad-internal
+
+  zammad-postgresql:
+    ports: []
+    networks:
+      - zammad-internal
+
+  zammad-redis:
+    ports: []
+    networks:
+      - zammad-internal
+
+  zammad-memcached:
+    ports: []
+    networks:
+      - zammad-internal
+
+  zammad-nginx:
+    networks:
+      - zammad-internal
+      - zammad-edge
+
+networks:
+  zammad-internal:
+    internal: true
+  zammad-edge:
+    external: false
