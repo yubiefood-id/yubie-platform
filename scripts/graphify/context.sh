@@ -9,23 +9,36 @@ cd "${REPO_ROOT}"
 
 log "=== Yubie engineering context ==="
 
-bash "${SCRIPT_DIR}/update.sh" || true
+log "1. Git state"
+git rev-parse --short HEAD 2>/dev/null || true
+git diff --stat HEAD 2>/dev/null | tail -15 || true
+
+log "2. Incremental AST update"
+bash "${SCRIPT_DIR}/update.sh" --ast-only || true
+
+log "3. Semantic extraction (changed P0/P1, cached skips)"
+node "${SCRIPT_DIR}/cursor-semantic.mjs" --limit 5 --p1 2>/dev/null || true
+
+log "4. Merge engineering graph"
+node --input-type=module --cwd "${SCRIPT_DIR}" -e "import { mergeEngineeringGraph } from './semantic-merge.mjs'; console.log(JSON.stringify(mergeEngineeringGraph()));" 2>/dev/null || true
+
+log "5. Doctor"
 bash "${SCRIPT_DIR}/doctor.sh" || true
 
-echo ""
-log "Git diff (working tree):"
-git diff --stat HEAD 2>/dev/null | tail -20 || true
+log "6. Impact report v2"
+node "${SCRIPT_DIR}/impact-report.mjs" || true
 
 echo ""
 if [[ -f "${IMPACT_REPORT}" ]]; then
-  log "Impact report:"
-  head -60 "${IMPACT_REPORT}"
+  log "Impact summary:"
+  head -80 "${IMPACT_REPORT}"
   echo ""
 fi
 
-if graph_exists && graphify_available; then
-  log "Quick graph query — current branch impact:"
-  graphify query "What components, contracts, and tests are affected by recent changes in this repository?" --budget 2000 --graph "${GRAPH_JSON}" 2>/dev/null || true
+QGRAPH="$(query_graph_path)"
+if [[ -n "$QGRAPH" ]] && graphify_available; then
+  log "7. Architecture query"
+  graphify query "What are the current support authority, provider boundaries, and affected components?" --budget 2500 --graph "${QGRAPH}" 2>/dev/null || true
 fi
 
 log "=== End context ==="

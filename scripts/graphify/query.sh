@@ -27,7 +27,8 @@ if ! ensure_graphify; then
   exit 1
 fi
 
-if ! graph_exists; then
+QGRAPH="$(query_graph_path)"
+if [[ -z "$QGRAPH" ]]; then
   log "No graph — run: npm run graph:bootstrap"
   exit 1
 fi
@@ -44,4 +45,4 @@ if [[ -z "$QUESTION" ]]; then
   exit 1
 fi
 
-graphify query "$QUESTION" --budget 3000 --graph "${GRAPH_JSON}"
+graphify query "$QUESTION" --budget 3000 --graph "${QGRAPH}"
