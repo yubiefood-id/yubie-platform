@@ -42,3 +42,12 @@ next-env.d.ts
 /.workspace-runtime/
 /outputs/
 /work/
+
+# graphify (local engineering intelligence graph)
+graphify-out/
+.graphify/checkpoint.json
+.graphify/logs/
+.graphify/reports/
+
+# cursor local hook state
+.cursor/hooks/

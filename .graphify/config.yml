@@ -1,0 +1,62 @@
+# Yubie Graphify engineering views — path classifiers and preset queries.
+# Used by scripts/graphify/impact-report.sh and query.sh.
+
+views:
+  contracts:
+    description: APIs, ports, provider interfaces, webhooks, queues, events
+    patterns:
+      - apps/api/
+      - packages/integrations/
+      - packages/application/
+      - webhook
+      - /ports/
+    query: "Show integration contracts, webhooks, and provider ports affected by recent changes"
+
+  infrastructure:
+    description: Docker, Compose, VPS topology, services, health checks
+    patterns:
+      - infrastructure/
+      - docker-compose
+      - Dockerfile
+    query: "Show infrastructure services, networks, ports, and health checks affected by recent changes"
+
+  boundaries:
+    description: apps/* and packages/* layer boundaries and forbidden imports
+    patterns:
+      - apps/
+      - packages/domain/
+      - packages/application/
+      - packages/persistence/
+      - packages/integrations/
+      - packages/assistant/
+    query: "Show architectural boundary violations or cross-layer dependencies affected by recent changes"
+
+  database:
+    description: tables, migrations, repositories, outbox/inbox
+    patterns:
+      - packages/persistence/migrations/
+      - packages/persistence/src/
+    query: "Show database tables, migrations, and repositories affected by recent changes"
+
+  security:
+    description: auth, webhook verification, trust boundaries, security tests
+    patterns:
+      - verif
+      - auth
+      - apps/api/
+      - security
+    query: "Show security trust boundaries, webhook verification, and auth paths affected by recent changes"
+
+  tests:
+    description: source to test mappings and release gates
+    patterns:
+      - /tests/
+      - .test.mjs
+    query: "Show tests covering files changed in the current branch"
+
+  documentation:
+    description: ADRs, runbooks, architecture docs
+    patterns:
+      - docs/
+      - ADR-
+    query: "Show documentation and ADRs potentially impacted by recent changes"

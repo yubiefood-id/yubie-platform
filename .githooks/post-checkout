@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Yubie Graphify post-checkout hook — incremental update on branch switch.
+
+set -euo pipefail
+
+[ "${GRAPHIFY_SKIP_HOOK:-0}" = "1" ] && exit 0
+
+PREV_HEAD="${1:-}"
+NEW_HEAD="${2:-}"
+BRANCH_SWITCH="${3:-0}"
+
+# Only on branch switches
+[ "${BRANCH_SWITCH}" != "1" ] && exit 0
+[ "${PREV_HEAD}" = "${NEW_HEAD}" ] && exit 0
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "${REPO_ROOT}"
+
+if ! command -v graphify >/dev/null 2>&1; then
+  exit 0
+fi
+
+if [[ ! -f "graphify-out/graph.json" ]]; then
+  exit 0
+fi
+
+GIT_DIR="${GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}"
+[[ -d "${GIT_DIR}/rebase-merge" || -d "${GIT_DIR}/rebase-apply" ]] && exit 0
+[[ -f "${GIT_DIR}/MERGE_HEAD" || -f "${GIT_DIR}/CHERRY_PICK_HEAD" ]] && exit 0
+
+mkdir -p "${REPO_ROOT}/.graphify/logs"
+nohup bash "${REPO_ROOT}/scripts/graphify/update.sh" --hook --checkout >> "${REPO_ROOT}/.graphify/logs/hooks.log" 2>&1 &
+exit 0

@@ -26,7 +26,14 @@
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspace @yubie/domain && npm run test --workspace @yubie/validation && npm run test --workspace @yubie/integrations && npm run test --workspace @yubie/application && npm run test --workspace @yubie/assistant && npm run test --workspace @yubie/persistence && npm run test --workspace @yubie/commerce && npm run test --workspace @yubie/api && npm run test --workspace @yubie/worker && npm run test --workspace @yubie/bot && npm run test --workspace @yubie/web",
-    "check": "npm run lint && npm run typecheck && npm run test"
+    "check": "npm run lint && npm run typecheck && npm run test",
+    "graph:bootstrap": "bash scripts/graphify/bootstrap.sh",
+    "graph:update": "bash scripts/graphify/update.sh",
+    "graph:doctor": "bash scripts/graphify/doctor.sh",
+    "graph:watch": "bash scripts/graphify/watch.sh",
+    "graph:query": "bash scripts/graphify/query.sh",
+    "graph:context": "bash scripts/graphify/context.sh",
+    "graph:setup-hooks": "bash scripts/graphify/setup-hooks.sh"
   },
   "devDependencies": {
     "typescript": "5.9.3"

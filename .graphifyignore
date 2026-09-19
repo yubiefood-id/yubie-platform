@@ -1,0 +1,35 @@
+# Yubie Graphify exclusions (merged with .gitignore — only excludes more, never re-includes)
+
+node_modules/
+**/dist/
+**/.next/
+coverage/
+.git/
+.env*
+**/*.pem
+**/.wrangler/
+**/.sites-runtime/
+.workspace-runtime/
+outputs/
+work/
+*.log
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.woff
+*.woff2
+*.ico
+*.pdf
+*.zip
+*.tar
+*.gz
+graphify-out/
+.graphify/
+
+# Cursor / agent tooling (not engineering source)
+.cursor/
+
+# Large vendor lock artifacts (keep zammad operational lock)
+infrastructure/zammad/zammad.lock.json

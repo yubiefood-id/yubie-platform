@@ -1,0 +1,23 @@
+---
+description: graphify knowledge graph context
+alwaysApply: true
+---
+
+This project has a graphify knowledge graph at `graphify-out/`.
+
+**MANDATORY: Before launching broad repository audit subagents** (contracts, infrastructure, boundaries, database, security, tests, documentation), run `npm run graph:context` or query the graph with view-specific questions. Spawn audit subagents only when graph evidence is missing or `npm run graph:doctor` reports staleness.
+
+**Before using Read, Grep, Glob, or Bash to explore the codebase**, prefer graphify when `graphify-out/graph.json` exists:
+
+- `npm run graph:query -- "<question>"` or `graphify query "<question>"`
+- `graphify path "<A>" "<B>"` — dependency path between symbols
+- `graphify explain "<concept>"` — related nodes for a concept
+
+Only use Read/Grep/Glob directly when:
+
+1. graphify has oriented you and you need to modify or debug specific lines
+2. `graphify-out/graph.json` does not exist yet (run `npm run graph:bootstrap`)
+
+After modifying code files in a session, run `npm run graph:update` to keep the graph current (AST-only, no API cost).
+
+See [docs/development/GRAPHIFY_WORKFLOW.md](docs/development/GRAPHIFY_WORKFLOW.md) and [.agents/workflows/graphify-context.md](.agents/workflows/graphify-context.md).

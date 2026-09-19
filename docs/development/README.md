@@ -39,6 +39,7 @@ This handbook is both architecture documentation and an execution contract. It d
 23. [Capacity/Cost/Scaling](./36_CAPACITY_COST_AND_SCALING_PLAN.md)
 24. [Detailed M0-M8 phases](./phases/README.md)
 25. [Production VPS Handbook](../production/vps/README.md)
+26. [Graphify Engineering Graph](./GRAPHIFY_WORKFLOW.md)
 
 ## Engineering execution rule
 

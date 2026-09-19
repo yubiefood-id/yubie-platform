@@ -1,0 +1,2 @@
+# Graphify-native options (see graphify hooks.py _load_graphifyrc)
+viz_node_limit=0

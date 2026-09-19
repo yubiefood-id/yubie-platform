@@ -91,3 +91,33 @@ npm run check
 As phases land, the quality gate expands to database bootstrap/upgrade, provider contract tests, assistant evaluations, accessibility smoke tests, container/image scans and production artifact checks.
 
 Changes touching product claims, food-safety workflows, privacy/retention, marketplace integrations, chat automation, CRM automation, production infrastructure or database migrations require explicit review notes and rollback behavior.
+
+## 8. Engineering graph (Graphify)
+
+Before launching broad repository audit subagents, query the Yubie Graphify knowledge graph first:
+
+~~~bash
+npm run graph:context
+~~~
+
+Use `npm run graph:query` for contracts, infrastructure, boundaries, database, security, tests, and documentation views. Spawn audit subagents only when graph evidence is missing or stale. See [docs/development/GRAPHIFY_WORKFLOW.md](docs/development/GRAPHIFY_WORKFLOW.md).
+
+## Learned User Preferences
+
+- Do not edit attached plan files during implementation; implement from them as specified.
+- Use plan to-dos as created; do not recreate them; mark in_progress and complete all before stopping.
+- Execute milestone work in order; do not skip ahead to later phases while an earlier milestone is still open.
+- Run read-only codebase or doc audits before large implementation or release-candidate work.
+- Verify execution docs and acceptance claims against code evidence; flag aspirational or overstated claims.
+- Prefer minimal, focused diffs scoped to the current milestone rather than broad rewrites.
+
+## Learned Workspace Facts
+
+- Milestones progress M0 → M1 → M2-SH → M3-PROD → M4-Z → M4.5-RC for marketplace, assistant, and support cutover.
+- Production support authority is self-hosted Zammad (ADR-009); Chatwoot remains for migration rollback only.
+- Support provider is selected via `SUPPORT_PROVIDER` (falls back to `CHAT_PROVIDER`); implementations live in `packages/integrations`.
+- `SupportConversationProvider` port in `packages/application` abstracts Zammad and Chatwoot; `packages/assistant` has no provider imports.
+- Worker outbound paths use `support.reply` and `support.reconcile` queues (Chatwoot queue names temporarily aliased).
+- Migration `0004_m4_zammad_provider.sql` adds provider columns; legacy `chatwoot_*` columns retained until post-cutover cleanup.
+- Zammad stack is pinned in `infrastructure/zammad/zammad.lock.json` (image `ghcr.io/zammad/zammad:7.1.3-0014`).
+- Graphify incremental workflow (`npm run graph:context`) lets agents query an architectural code graph instead of repeated manual audits.
