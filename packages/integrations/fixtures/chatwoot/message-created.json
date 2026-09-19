@@ -1,0 +1,15 @@
+{
+  "event": "message_created",
+  "id": 1001,
+  "content": "halo, apa itu yubie flour?",
+  "message_type": "incoming",
+  "conversation": {
+    "id": 501,
+    "inbox_id": 10,
+    "status": "pending"
+  },
+  "sender": {
+    "id": 9001
+  },
+  "created_at": "2026-09-19T12:00:00.000Z"
+}

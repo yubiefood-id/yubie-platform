@@ -1,0 +1,25 @@
+include:
+  - path: docker-compose.yml
+  - path: docker-compose.prod.yml
+  - path: chatwoot/docker-compose.yml
+
+services:
+  bot:
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/Dockerfile.bot
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      CHATWOOT_AGENTBOT_SECRET: ${CHATWOOT_AGENTBOT_SECRET}
+      PORT: 8788
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-fake}
+      CHAT_PROVIDER: ${CHAT_PROVIDER:-fake}
+      ASSISTANT_AUTO_REPLY: ${ASSISTANT_AUTO_REPLY:-false}
+    depends_on: [postgres, migrate]
+    networks: [internal, edge]
+    ports:
+      - "8788:8788"
+
+networks:
+  internal:
+  edge:

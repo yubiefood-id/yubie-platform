@@ -2,6 +2,7 @@ import PgBoss from "pg-boss";
 import { checkListingHealth, FixedClock, SequentialIdGenerator } from "@yubie/application";
 import { HttpLinkHealthChecker } from "@yubie/integrations";
 import { closeDatabase, createWorkerRepositories } from "@yubie/persistence";
+import { processAssistantJob } from "./assistant-handler.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -18,6 +19,16 @@ async function start() {
   await boss.start();
   await boss.createQueue("listing.health");
   await boss.createQueue("integration.health");
+  await boss.createQueue("assistant.process");
+
+  await boss.work("assistant.process", async (jobs) => {
+    for (const job of jobs) {
+      const inboxId = String((job.data as { inboxId?: string }).inboxId ?? "");
+      if (inboxId) {
+        await processAssistantJob(inboxId);
+      }
+    }
+  });
 
   await boss.work("listing.health", async (jobs) => {
     for (const job of jobs) {

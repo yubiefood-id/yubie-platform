@@ -110,6 +110,67 @@ export const operatorTasks = pgTable("operator_tasks", {
   index("operator_tasks_status_priority_created").on(table.status, table.priority, table.createdAt),
 ]);
 
+export const conversationStateEnum = pgEnum("conversation_state", [
+  "BOT_ELIGIBLE",
+  "BOT_ACTIVE",
+  "HANDOFF_REQUESTED",
+  "QUEUED",
+  "HUMAN_ACTIVE",
+  "RESOLVED",
+]);
+
+export const webhookInboxStatusEnum = pgEnum("webhook_inbox_status", [
+  "received",
+  "processing",
+  "processed",
+  "failed",
+  "duplicate",
+]);
+
+export const webhookInbox = pgTable("webhook_inbox", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull().default("chatwoot_agentbot"),
+  deliveryId: text("delivery_id"),
+  eventType: text("event_type").notNull(),
+  payloadHash: text("payload_hash").notNull(),
+  rawBody: text("raw_body").notNull(),
+  status: webhookInboxStatusEnum("status").notNull().default("received"),
+  receivedAt: timestamp("received_at", { withTimezone: true, mode: "string" }).notNull(),
+  processedAt: timestamp("processed_at", { withTimezone: true, mode: "string" }),
+  lastError: text("last_error"),
+}, (table) => [
+  uniqueIndex("webhook_inbox_provider_delivery").on(table.provider, table.deliveryId),
+  uniqueIndex("webhook_inbox_provider_hash").on(table.provider, table.payloadHash),
+]);
+
+export const conversationSessions = pgTable("conversation_sessions", {
+  id: text("id").primaryKey(),
+  chatwootConversationId: text("chatwoot_conversation_id").notNull(),
+  chatwootContactId: text("chatwoot_contact_id").notNull(),
+  inboxId: text("inbox_id").notNull(),
+  state: conversationStateEnum("state").notNull().default("BOT_ELIGIBLE"),
+  currentIntent: text("current_intent"),
+  customerType: text("customer_type"),
+  lastActivityAt: timestamp("last_activity_at", { withTimezone: true, mode: "string" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("conversation_sessions_chatwoot_id").on(table.chatwootConversationId),
+]);
+
+export const assistantRuns = pgTable("assistant_runs", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  inboxEventId: text("inbox_event_id").notNull(),
+  intent: text("intent"),
+  risk: text("risk"),
+  modelProvider: text("model_provider").notNull(),
+  promptVersion: text("prompt_version").notNull(),
+  latencyMs: integer("latency_ms"),
+  outcome: text("outcome").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+});
+
 export const integrationHealth = pgTable("integration_health", {
   id: text("id").primaryKey(),
   integration: text("integration").notNull(),

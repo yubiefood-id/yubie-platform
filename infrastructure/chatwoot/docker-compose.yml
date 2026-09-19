@@ -1,0 +1,63 @@
+services:
+  chatwoot-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: chatwoot
+      POSTGRES_PASSWORD: ${CHATWOOT_POSTGRES_PASSWORD:-chatwoot_local}
+      POSTGRES_DB: chatwoot
+    volumes:
+      - chatwoot_pgdata:/var/lib/postgresql/data
+    networks: [chatwoot_internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatwoot -d chatwoot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  chatwoot-redis:
+    image: redis:7-alpine
+    networks: [chatwoot_internal]
+    command: ["redis-server", "--save", "60", "1"]
+
+  chatwoot-web:
+    image: chatwoot/chatwoot:v4.13.0
+    depends_on:
+      chatwoot-postgres:
+        condition: service_healthy
+      chatwoot-redis:
+        condition: service_started
+    environment:
+      RAILS_ENV: production
+      SECRET_KEY_BASE: ${CHATWOOT_SECRET_KEY_BASE:-replace-me-in-production}
+      FRONTEND_URL: ${CHATWOOT_FRONTEND_URL:-http://localhost:3000}
+      POSTGRES_HOST: chatwoot-postgres
+      POSTGRES_USERNAME: chatwoot
+      POSTGRES_PASSWORD: ${CHATWOOT_POSTGRES_PASSWORD:-chatwoot_local}
+      POSTGRES_DATABASE: chatwoot
+      REDIS_URL: redis://chatwoot-redis:6379
+    command: ["bundle", "exec", "rails", "s", "-p", "3000", "-b", "0.0.0.0"]
+    networks: [chatwoot_internal, edge]
+    ports:
+      - "3000:3000"
+
+  chatwoot-sidekiq:
+    image: chatwoot/chatwoot:v4.13.0
+    depends_on: [chatwoot-web]
+    environment:
+      RAILS_ENV: production
+      SECRET_KEY_BASE: ${CHATWOOT_SECRET_KEY_BASE:-replace-me-in-production}
+      FRONTEND_URL: ${CHATWOOT_FRONTEND_URL:-http://localhost:3000}
+      POSTGRES_HOST: chatwoot-postgres
+      POSTGRES_USERNAME: chatwoot
+      POSTGRES_PASSWORD: ${CHATWOOT_POSTGRES_PASSWORD:-chatwoot_local}
+      POSTGRES_DATABASE: chatwoot
+      REDIS_URL: redis://chatwoot-redis:6379
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
+    networks: [chatwoot_internal]
+
+networks:
+  chatwoot_internal:
+  edge:
+
+volumes:
+  chatwoot_pgdata:

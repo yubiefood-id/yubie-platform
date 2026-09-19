@@ -1,0 +1,26 @@
+services:
+  vllm:
+    image: vllm/vllm-openai:v0.8.5
+    profiles: ["gpu"]
+    ipc: host
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    command:
+      - --model
+      - ${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}
+      - --gpu-memory-utilization
+      - "0.90"
+      - --max-model-len
+      - "8192"
+    networks: [ai_internal]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+networks:
+  ai_internal:
+    internal: true

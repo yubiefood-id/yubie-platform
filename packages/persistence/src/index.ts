@@ -9,4 +9,6 @@ export * from "./repositories/listing-health-repository.js";
 export * from "./repositories/audit-repository.js";
 export * from "./repositories/outbox-repository.js";
 export * from "./repositories/idempotency-repository.js";
+export * from "./repositories/webhook-inbox-repository.js";
+export * from "./repositories/conversation-session-repository.js";
 export * from "./schema/index.js";

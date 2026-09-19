@@ -7,4 +7,5 @@ test("worker package builds", async () => {
   const { fileURLToPath } = await import("node:url");
   const index = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../dist/index.js"), "utf8");
   assert.match(index, /listing\.health/);
+  assert.match(index, /assistant\.process/);
 });

@@ -8,12 +8,15 @@
     "dev": "npm run build && node dist/index.js",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test tests/*.test.mjs"
+    "test": "npm run build --workspace @yubie/assistant && npm run build --workspace @yubie/integrations && npm run build && node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@yubie/application": "*",
+    "@yubie/assistant": "*",
+    "@yubie/domain": "*",
     "@yubie/integrations": "*",
     "@yubie/persistence": "*",
+    "drizzle-orm": "0.45.2",
     "pg-boss": "10.3.2"
   }
 }
