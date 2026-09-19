@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { SupportConversationProvider } from "@yubie/application";
 import {
   createModelProviderFromEnv,
   DefaultResponseValidator,
@@ -16,11 +17,18 @@ import {
 import type { ConversationState } from "@yubie/domain";
 import {
   ChatwootConversationContextProvider,
-  FakeChatwootClient,
-  HttpChatwootClient,
+  createChatwootClient,
+  createSupportProvider,
+  createZammadClient,
   parseAgentBotEvent,
-  type ChatwootClient,
+  parseZammadTriggerPayload,
+  resolveSupportProviderName,
+  toNormalizedMessage,
+  ZammadConversationContextProvider,
+  buildHandoffCommand,
+  isCustomerInboundArticle,
 } from "@yubie/integrations";
+import type { ConversationContextProvider } from "@yubie/integrations";
 import { eq } from "drizzle-orm";
 import {
   createDatabase,
@@ -33,23 +41,78 @@ import {
   webhookInbox,
   type Database,
 } from "@yubie/persistence";
-
-export function createChatwootClient(): ChatwootClient {
-  if (process.env.CHAT_PROVIDER === "fake" || !process.env.CHATWOOT_API_TOKEN) {
-    return new FakeChatwootClient();
-  }
-  return new HttpChatwootClient(
-    process.env.CHATWOOT_BASE_URL ?? "http://localhost:3000",
-    process.env.CHATWOOT_API_TOKEN ?? "",
-    process.env.CHATWOOT_ACCOUNT_ID ?? "1",
-  );
-}
+export { createChatwootClient, createSupportProvider };
 
 function fingerprint(conversationRef: string, actionType: string, payload: string) {
   return createHash("sha256").update(`${conversationRef}:${actionType}:${payload}`).digest("hex");
 }
 
-export async function processAssistantInbox(database: Database, inboxId: string, chatwoot: ChatwootClient) {
+function createContextProvider(support: SupportConversationProvider): ConversationContextProvider {
+  if (support.provider === "zammad") {
+    return new ZammadConversationContextProvider(createZammadClient());
+  }
+  return new ChatwootConversationContextProvider(createChatwootClient());
+}
+
+async function resolveNormalizedMessage(
+  database: Database,
+  row: typeof webhookInbox.$inferSelect,
+  support: SupportConversationProvider,
+) {
+  if (row.provider === "zammad") {
+    const parsed = row.rawBody
+      ? parseZammadTriggerPayload(JSON.parse(row.rawBody) as import("@yubie/integrations").ZammadTriggerPayload)
+      : null;
+    if (!parsed?.articleId) return null;
+
+    const article = support.getArticle
+      ? await support.getArticle({ provider: "zammad", threadId: parsed.ticketId }, parsed.articleId)
+      : null;
+    if (!article || !isCustomerInboundArticle({ sender: article.role === "customer" ? "Customer" : "Agent", internal: article.internal })) {
+      return null;
+    }
+
+    return toNormalizedMessage({
+      ticketId: parsed.ticketId,
+      articleId: parsed.articleId,
+      customerId: parsed.customerId ?? "0",
+      groupId: parsed.groupId ?? "1",
+      text: article.text,
+      receivedAt: article.createdAt,
+    });
+  }
+
+  let event: unknown;
+  if (row.rawBody) {
+    event = JSON.parse(row.rawBody) as unknown;
+  } else if (row.messageRef && row.conversationRef) {
+    const messages = await support.getRecentMessages(
+      { provider: support.provider, threadId: row.conversationRef },
+      { limit: 1 },
+    );
+    const msg = messages.find((m) => m.id === row.messageRef);
+    if (!msg) return null;
+    event = {
+      event: "message_created",
+      id: Number(row.messageRef),
+      content: msg.text,
+      message_type: "incoming",
+      conversation: { id: Number(row.conversationRef), inbox_id: Number(row.inboxRef ?? 1) },
+      sender: { id: Number(row.contactRef ?? 0) },
+      created_at: msg.createdAt,
+    };
+  } else {
+    return null;
+  }
+
+  return parseAgentBotEvent(event as import("@yubie/integrations").AgentBotWebhookEvent);
+}
+
+export async function processAssistantInbox(
+  database: Database,
+  inboxId: string,
+  support: SupportConversationProvider,
+) {
   const inboxRepo = new PostgresWebhookInboxRepository(database);
   await inboxRepo.markProcessing(inboxId);
 
@@ -57,37 +120,14 @@ export async function processAssistantInbox(database: Database, inboxId: string,
   const row = rows[0];
   if (!row) return;
 
-  let event: unknown;
-  if (row.rawBody) {
-    event = JSON.parse(row.rawBody) as unknown;
-  } else if (row.messageRef && row.conversationRef) {
-    const messages = await chatwoot.getRecentMessages(row.conversationRef, 1);
-    const msg = messages.find((m) => String(m.id) === row.messageRef);
-    if (!msg) {
-      await inboxRepo.markFailed(inboxId, "message_not_found");
-      return;
-    }
-    event = {
-      event: "message_created",
-      id: Number(row.messageRef),
-      content: msg.content,
-      message_type: msg.messageType === "incoming" ? "incoming" : "outgoing",
-      conversation: { id: Number(row.conversationRef), inbox_id: Number(row.inboxRef ?? 1) },
-      sender: { id: Number(row.contactRef ?? 0) },
-      created_at: msg.createdAt,
-    };
-  } else {
-    await inboxRepo.markFailed(inboxId, "no_event_source");
-    return;
-  }
-
-  const message = parseAgentBotEvent(event as import("@yubie/integrations").AgentBotWebhookEvent);
+  const message = await resolveNormalizedMessage(database, row, support);
   if (!message) {
     await inboxRepo.markProcessed(inboxId, new Date().toISOString());
     return;
   }
 
   const now = new Date().toISOString();
+  const provider = support.provider;
   const sessions = new PostgresConversationSessionRepository(database);
   const runs = new PostgresAssistantRunRepository(database);
   const outbox = new PostgresAssistantOutboxRepository(database);
@@ -100,17 +140,25 @@ export async function processAssistantInbox(database: Database, inboxId: string,
     return;
   }
 
-  const sessionResult = await sessions.getByChatwootId(message.conversationId);
-  let conversationState: ConversationState = sessionResult.ok && sessionResult.value ? sessionResult.value.state : "BOT_ELIGIBLE";
+  const threadRef = { provider, threadId: message.conversationId };
+  const sessionResult = await sessions.getByProviderThreadId(provider, message.conversationId);
+  let conversationState: ConversationState =
+    sessionResult.ok && sessionResult.value ? sessionResult.value.state : "BOT_ELIGIBLE";
 
-  const cwStatus = await chatwoot.getConversationStatus(message.conversationId);
-  if (cwStatus.status === "open") {
+  const humanState = await support.getCurrentHumanState(threadRef);
+  if (humanState.humanActive) {
     conversationState = "HUMAN_ACTIVE";
   }
 
-  const upsertResult = await sessions.upsert({
-    chatwootConversationId: message.conversationId,
-    chatwootContactId: message.contactId,
+  await sessions.upsert({
+    provider,
+    providerThreadId: message.conversationId,
+    providerCustomerId: message.contactId,
+    providerInboxOrChannelId: message.inboxId,
+    providerLastMessageId: message.messageId,
+    ...(provider === "chatwoot"
+      ? { chatwootConversationId: message.conversationId, chatwootContactId: message.contactId }
+      : {}),
     inboxId: message.inboxId,
     state: conversationState === "BOT_ELIGIBLE" ? "BOT_ACTIVE" : conversationState,
     lastActivityAt: now,
@@ -118,16 +166,16 @@ export async function processAssistantInbox(database: Database, inboxId: string,
     updatedAt: now,
   });
 
-  const sessionId = upsertResult.ok ? upsertResult.value : `session-${message.conversationId}`;
+  const sessionId =
+    sessionResult.ok && sessionResult.value ? sessionResult.value.id : `session-${message.conversationId}`;
   const envConfig = loadAssistantConfig();
   const mode = configSnapshot.mode as "shadow" | "suggestion" | "auto";
   const autoReplyEnabled = envConfig.autoReplyEnabled && configSnapshot.assistantEnabled;
   const allowedGreenIntents = new Set(configSnapshot.allowedGreenIntents as import("@yubie/domain").AssistantIntent[]);
 
-  const contextProvider = new ChatwootConversationContextProvider(chatwoot);
+  const contextProvider = createContextProvider(support);
   const conversationContext = await contextProvider.fetchContext(message.conversationId);
   const structuredClassifier = new RuleOnlyStructuredClassifier();
-
   const tools = new KnowledgeToolRegistry({ knowledge });
   const started = Date.now();
   const outcome = await runAssistantPipeline(message, conversationState, {
@@ -173,12 +221,19 @@ export async function processAssistantInbox(database: Database, inboxId: string,
   await runs.insert(runRecord);
 
   if (outcome.kind === "handoff") {
-    await sessions.updateState(message.conversationId, "HANDOFF_REQUESTED", now);
-    const labels = outcome.intent.startsWith("B2B") ? ["b2b", "human-required"] : ["human-required"];
-    if (outcome.intent === "FOOD_SAFETY") labels.push("food-safety");
-    const payload = JSON.stringify({ labels });
+    await sessions.updateState(provider, message.conversationId, "HANDOFF_REQUESTED", now);
+    const handoff = buildHandoffCommand(threadRef, outcome.intent, outcome.handoffReason);
+    const payload = JSON.stringify({
+      labels: handoff.labels,
+      intent: outcome.intent,
+      handoffReason: outcome.handoffReason,
+      groupId: handoff.groupId,
+      priorityId: handoff.priorityId,
+    });
     await outbox.enqueue({
       runId,
+      provider,
+      providerThreadId: message.conversationId,
       conversationRef: message.conversationId,
       actionType: "handoff",
       payloadFingerprint: fingerprint(message.conversationId, "handoff", payload),
@@ -190,6 +245,8 @@ export async function processAssistantInbox(database: Database, inboxId: string,
     const payload = JSON.stringify({ content: outcome.text });
     await outbox.enqueue({
       runId,
+      provider,
+      providerThreadId: message.conversationId,
       conversationRef: message.conversationId,
       actionType: "reply",
       payloadFingerprint: fingerprint(message.conversationId, "reply", payload),
@@ -217,6 +274,7 @@ export async function processAssistantInbox(database: Database, inboxId: string,
       latencyMs: Date.now() - started,
       promptVersion: PROMPT_VERSION,
       conversationRef: message.conversationId,
+      provider,
     }),
   );
 
@@ -227,6 +285,10 @@ export async function processAssistantJob(inboxId: string) {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL required");
   const database = createDatabase(databaseUrl);
-  const chatwoot = createChatwootClient();
-  await processAssistantInbox(database, inboxId, chatwoot);
+  const support = createSupportProvider();
+  await processAssistantInbox(database, inboxId, support);
+}
+
+export function activeSupportProviderName() {
+  return resolveSupportProviderName();
 }

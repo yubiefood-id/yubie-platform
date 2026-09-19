@@ -53,3 +53,45 @@ test("webhook accepts signed payload when database configured", async (t) => {
   );
   assert.equal(response.status, 202);
 });
+
+test("zammad webhook rejects invalid signature", async () => {
+  process.env.ZAMMAD_WEBHOOK_SECRET = "zammad-secret";
+  const { handleRequest } = await import("../dist/index.js");
+  const response = await handleRequest(
+    new Request("http://localhost/webhooks/zammad", {
+      method: "POST",
+      headers: { "x-hub-signature": "sha1=invalid" },
+      body: JSON.stringify({ ticket_id: 1, article_id: 2 }),
+    }),
+  );
+  assert.equal(response.status, 401);
+});
+
+test("zammad webhook accepts signed payload when database configured", async (t) => {
+  if (!process.env.DATABASE_URL) {
+    t.skip("DATABASE_URL not set");
+    return;
+  }
+  const secret = process.env.ZAMMAD_WEBHOOK_SECRET ?? "zammad-secret";
+  process.env.ZAMMAD_WEBHOOK_SECRET = secret;
+  const { handleRequest } = await import("../dist/index.js");
+  const payload = JSON.stringify({
+    event: "article_created",
+    ticket_id: 10,
+    article_id: 20,
+    customer_id: 30,
+    group_id: 40,
+  });
+  const signature = `sha1=${createHmac("sha1", secret).update(payload).digest("hex")}`;
+  const response = await handleRequest(
+    new Request("http://localhost/webhooks/zammad", {
+      method: "POST",
+      headers: {
+        "x-hub-signature": signature,
+        "x-zammad-delivery": `zammad-delivery-${Date.now()}`,
+      },
+      body: payload,
+    }),
+  );
+  assert.equal(response.status, 202);
+});

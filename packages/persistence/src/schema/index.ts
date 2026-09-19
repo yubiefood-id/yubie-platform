@@ -132,6 +132,7 @@ export const webhookInbox = pgTable("webhook_inbox", {
   provider: text("provider").notNull().default("chatwoot_agentbot"),
   deliveryId: text("delivery_id"),
   dedupeKey: text("dedupe_key"),
+  providerEventType: text("provider_event_type"),
   eventType: text("event_type").notNull(),
   payloadHash: text("payload_hash").notNull(),
   conversationRef: text("conversation_ref"),
@@ -153,6 +154,11 @@ export const webhookInbox = pgTable("webhook_inbox", {
 
 export const conversationSessions = pgTable("conversation_sessions", {
   id: text("id").primaryKey(),
+  provider: text("provider").notNull().default("chatwoot"),
+  providerThreadId: text("provider_thread_id"),
+  providerCustomerId: text("provider_customer_id"),
+  providerInboxOrChannelId: text("provider_inbox_or_channel_id"),
+  providerLastMessageId: text("provider_last_message_id"),
   chatwootConversationId: text("chatwoot_conversation_id").notNull(),
   chatwootContactId: text("chatwoot_contact_id").notNull(),
   inboxId: text("inbox_id").notNull(),
@@ -164,6 +170,7 @@ export const conversationSessions = pgTable("conversation_sessions", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
 }, (table) => [
   uniqueIndex("conversation_sessions_chatwoot_id").on(table.chatwootConversationId),
+  uniqueIndex("conversation_sessions_provider_thread").on(table.provider, table.providerThreadId),
 ]);
 
 export const assistantRuns = pgTable("assistant_runs", {
@@ -210,6 +217,9 @@ export const assistantOutboxStatusEnum = pgEnum("assistant_outbox_status", [
 export const assistantOutbox = pgTable("assistant_outbox", {
   id: text("id").primaryKey(),
   runId: text("run_id"),
+  provider: text("provider").notNull().default("chatwoot"),
+  providerThreadId: text("provider_thread_id"),
+  providerMessageId: text("provider_message_id"),
   conversationRef: text("conversation_ref").notNull(),
   actionType: text("action_type").notNull(),
   payloadFingerprint: text("payload_fingerprint").notNull(),

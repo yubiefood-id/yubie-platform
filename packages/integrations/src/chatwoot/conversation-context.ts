@@ -1,21 +1,12 @@
 import type { ConversationState } from "@yubie/domain";
+import type {
+  ConversationContext,
+  ConversationContextProvider,
+  ConversationTurn,
+} from "../conversation/types.js";
 import type { ChatwootClient } from "./client.js";
 
-export interface ConversationTurn {
-  role: "customer" | "agent" | "bot";
-  text: string;
-}
-
-export interface ConversationContext {
-  recentTurns: ConversationTurn[];
-  customerLanguage: "id" | "en" | "mixed";
-  providerConversationId: string;
-  status: ConversationState;
-}
-
-export interface ConversationContextProvider {
-  fetchContext(conversationId: string, limits?: { maxTurns?: number; maxChars?: number }): Promise<ConversationContext>;
-}
+export type { ConversationContext, ConversationContextProvider, ConversationTurn };
 
 const DEFAULT_MAX_TURNS = 10;
 const DEFAULT_MAX_CHARS = 4000;

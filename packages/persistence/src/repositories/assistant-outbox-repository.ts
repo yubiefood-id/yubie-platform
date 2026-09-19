@@ -12,6 +12,8 @@ export class PostgresAssistantOutboxRepository {
   async enqueue(entry: {
     id?: string;
     runId?: string;
+    provider?: string;
+    providerThreadId?: string;
     conversationRef: string;
     actionType: string;
     payloadFingerprint: string;
@@ -36,6 +38,8 @@ export class PostgresAssistantOutboxRepository {
     await this.database.db.insert(assistantOutbox).values({
       id,
       runId: entry.runId ?? null,
+      provider: entry.provider ?? "chatwoot",
+      providerThreadId: entry.providerThreadId ?? entry.conversationRef,
       conversationRef: entry.conversationRef,
       actionType: entry.actionType,
       payloadFingerprint: entry.payloadFingerprint,
@@ -60,13 +64,20 @@ export class PostgresAssistantOutboxRepository {
   async updateStatus(
     id: string,
     status: OutboxStatus,
-    fields: { lastError?: string; providerExternalId?: string; deliveredAt?: string; attemptCount?: number },
+    fields: {
+      lastError?: string;
+      providerExternalId?: string;
+      providerMessageId?: string;
+      deliveredAt?: string;
+      attemptCount?: number;
+    },
     updatedAt: string,
   ) {
     const update: Record<string, unknown> = {
       status,
       lastError: fields.lastError ?? null,
       providerExternalId: fields.providerExternalId ?? null,
+      providerMessageId: fields.providerMessageId ?? null,
       deliveredAt: fields.deliveredAt ?? null,
       updatedAt,
     };

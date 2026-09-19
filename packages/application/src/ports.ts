@@ -65,3 +65,5 @@ export interface IdGenerator {
 export interface HealthProbe {
   check(): Promise<Result<{ ready: boolean; details?: Record<string, string> }>>;
 }
+
+export * from "./ports/support-conversation-provider.js";

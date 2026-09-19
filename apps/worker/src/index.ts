@@ -1,10 +1,10 @@
 import PgBoss from "pg-boss";
 import { checkListingHealth, FixedClock, SequentialIdGenerator } from "@yubie/application";
-import { HttpLinkHealthChecker } from "@yubie/integrations";
+import { createSupportProvider, HttpLinkHealthChecker } from "@yubie/integrations";
 import { closeDatabase, createWorkerRepositories } from "@yubie/persistence";
-import { createChatwootClient, processAssistantJob } from "./assistant-handler.js";
-import { reconcileChatwoot } from "./reconcile-handler.js";
-import { deliverChatwootOutbox, processPendingOutbox } from "./reply-delivery-handler.js";
+import { processAssistantJob } from "./assistant-handler.js";
+import { reconcileSupport } from "./reconcile-handler.js";
+import { deliverSupportOutbox, processPendingOutbox } from "./reply-delivery-handler.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -22,6 +22,8 @@ async function start() {
   await boss.createQueue("listing.health");
   await boss.createQueue("integration.health");
   await boss.createQueue("assistant.process");
+  await boss.createQueue("support.reply");
+  await boss.createQueue("support.reconcile");
   await boss.createQueue("chatwoot.reply");
   await boss.createQueue("chatwoot.reconcile");
   await boss.createQueue("webhook.cleanup");
@@ -31,27 +33,33 @@ async function start() {
       const inboxId = String((job.data as { inboxId?: string }).inboxId ?? "");
       if (inboxId && inboxId !== "unknown") {
         await processAssistantJob(inboxId);
-        await boss.send("chatwoot.reply", { outboxSweep: true });
+        await boss.send("support.reply", { outboxSweep: true });
       }
     }
   });
 
-  await boss.work("chatwoot.reply", async (jobs) => {
-    const chatwoot = createChatwootClient();
+  const handleReply = async (jobs: Array<{ data: unknown }>) => {
+    const support = createSupportProvider();
     for (const job of jobs) {
       const outboxId = String((job.data as { outboxId?: string }).outboxId ?? "");
       if (outboxId) {
-        await deliverChatwootOutbox(repos.database, chatwoot, outboxId);
+        await deliverSupportOutbox(repos.database, support, outboxId);
       } else {
-        await processPendingOutbox(repos.database, chatwoot);
+        await processPendingOutbox(repos.database, support);
       }
     }
-  });
+  };
 
-  await boss.work("chatwoot.reconcile", async () => {
-    const chatwoot = createChatwootClient();
-    await reconcileChatwoot(repos.database, chatwoot);
-  });
+  await boss.work("support.reply", handleReply);
+  await boss.work("chatwoot.reply", handleReply);
+
+  const handleReconcile = async () => {
+    const support = createSupportProvider();
+    await reconcileSupport(repos.database, support);
+  };
+
+  await boss.work("support.reconcile", handleReconcile);
+  await boss.work("chatwoot.reconcile", handleReconcile);
 
   await boss.work("webhook.cleanup", async () => {
     const { PostgresWebhookInboxRepository } = await import("@yubie/persistence");
@@ -78,6 +86,7 @@ async function start() {
   });
 
   await boss.send("integration.health", {}, { startAfter: 5 });
+  await boss.schedule("support.reconcile", "*/15 * * * *", {});
   await boss.schedule("chatwoot.reconcile", "*/15 * * * *", {});
   await boss.schedule("webhook.cleanup", "0 * * * *", {});
 

@@ -1,20 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FakeChatwootClient } from "@yubie/integrations";
+import { ChatwootSupportProvider, FakeChatwootClient } from "@yubie/integrations";
 import { closeDatabase, createDatabase, PostgresAssistantOutboxRepository } from "@yubie/persistence";
-import { deliverChatwootOutbox } from "../dist/reply-delivery-handler.js";
+import { deliverSupportOutbox } from "../dist/reply-delivery-handler.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 
 test("drops reply when human has taken over in Chatwoot", { skip: !databaseUrl }, async () => {
   const database = createDatabase(databaseUrl);
   const chatwoot = new FakeChatwootClient();
+  const support = new ChatwootSupportProvider(chatwoot);
   const outbox = new PostgresAssistantOutboxRepository(database);
   const conversationRef = `race-conv-${Date.now()}`;
   chatwoot.statuses.set(conversationRef, "open");
 
   const now = new Date().toISOString();
   const inserted = await outbox.enqueue({
+    provider: "chatwoot",
+    providerThreadId: conversationRef,
     conversationRef,
     actionType: "reply",
     payloadFingerprint: `fp-race-${Date.now()}`,
@@ -23,7 +26,7 @@ test("drops reply when human has taken over in Chatwoot", { skip: !databaseUrl }
   });
   assert.equal(inserted.ok, true);
 
-  await deliverChatwootOutbox(database, chatwoot, inserted.value.id);
+  await deliverSupportOutbox(database, support, inserted.value.id);
   assert.equal(chatwoot.messages.length, 0);
   await closeDatabase(database);
 });
@@ -31,11 +34,14 @@ test("drops reply when human has taken over in Chatwoot", { skip: !databaseUrl }
 test("delivers reply when conversation is not human active", { skip: !databaseUrl }, async () => {
   const database = createDatabase(databaseUrl);
   const chatwoot = new FakeChatwootClient();
+  const support = new ChatwootSupportProvider(chatwoot);
   const outbox = new PostgresAssistantOutboxRepository(database);
   const conversationRef = `ok-conv-${Date.now()}`;
 
   const now = new Date().toISOString();
   const inserted = await outbox.enqueue({
+    provider: "chatwoot",
+    providerThreadId: conversationRef,
     conversationRef,
     actionType: "reply",
     payloadFingerprint: `fp-ok-${Date.now()}`,
@@ -43,7 +49,7 @@ test("delivers reply when conversation is not human active", { skip: !databaseUr
     createdAt: now,
   });
 
-  await deliverChatwootOutbox(database, chatwoot, inserted.value.id);
+  await deliverSupportOutbox(database, support, inserted.value.id);
   assert.equal(chatwoot.messages.length, 1);
   assert.equal(chatwoot.messages[0].content, "Halo dari Yubie");
   await closeDatabase(database);

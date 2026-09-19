@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
-import type { ChatwootClient } from "@yubie/integrations";
+import type { SupportConversationProvider, SupportThreadRef } from "@yubie/application";
+import { buildHandoffCommand } from "@yubie/integrations";
 import {
   assistantOutbox,
   PostgresAssistantOutboxRepository,
@@ -8,7 +9,22 @@ import {
   type Database,
 } from "@yubie/persistence";
 
-export async function deliverChatwootOutbox(database: Database, chatwoot: ChatwootClient, outboxId: string) {
+function threadRefFromRow(row: {
+  provider: string;
+  providerThreadId: string | null;
+  conversationRef: string;
+}): SupportThreadRef {
+  return {
+    provider: row.provider as SupportThreadRef["provider"],
+    threadId: row.providerThreadId ?? row.conversationRef,
+  };
+}
+
+export async function deliverSupportOutbox(
+  database: Database,
+  support: SupportConversationProvider,
+  outboxId: string,
+) {
   const outboxRepo = new PostgresAssistantOutboxRepository(database);
   const sessions = new PostgresConversationSessionRepository(database);
   const rows = await database.db.select().from(assistantOutbox).where(eq(assistantOutbox.id, outboxId)).limit(1);
@@ -19,28 +35,64 @@ export async function deliverChatwootOutbox(database: Database, chatwoot: Chatwo
   const now = new Date().toISOString();
   await outboxRepo.updateStatus(outboxId, "delivering", { attemptCount: row.attemptCount + 1 }, now);
 
-  const session = await sessions.getByChatwootId(row.conversationRef);
+  const ref = threadRefFromRow(row);
+  const session = await sessions.getByProviderThreadId(ref.provider, ref.threadId);
   if (session.ok && session.value?.state === "HUMAN_ACTIVE") {
     await outboxRepo.updateStatus(outboxId, "failed", { lastError: "human_takeover" }, now);
     return;
   }
 
-  const cwStatus = await chatwoot.getConversationStatus(row.conversationRef);
-  if (cwStatus.status === "open") {
-    await outboxRepo.updateStatus(outboxId, "failed", { lastError: "human_takeover_chatwoot" }, now);
+  const humanState = await support.getCurrentHumanState(ref);
+  if (humanState.humanActive) {
+    await outboxRepo.updateStatus(outboxId, "failed", { lastError: `human_takeover_${humanState.reason ?? "provider"}` }, now);
     return;
   }
 
-  const payload = JSON.parse(row.payloadJson) as { content?: string; labels?: string[] };
+  const payload = JSON.parse(row.payloadJson) as {
+    content?: string;
+    labels?: string[];
+    intent?: string;
+    handoffReason?: string;
+    groupId?: string;
+    priorityId?: string;
+  };
 
   try {
     if (row.actionType === "reply" && payload.content) {
-      const idempotencyKey = createHash("sha256").update(`${row.conversationRef}:${row.payloadFingerprint}`).digest("hex");
-      await chatwoot.sendMessage(row.conversationRef, payload.content, idempotencyKey);
+      const idempotencyKey = createHash("sha256").update(`${ref.threadId}:${row.payloadFingerprint}`).digest("hex");
+      const result = await support.sendReply({ threadRef: ref, content: payload.content, idempotencyKey });
+      if (!result.ok) {
+        const status = result.code === "TIMEOUT" || result.code === "AMBIGUOUS" ? "ambiguous" : "retry";
+        await outboxRepo.updateStatus(outboxId, status, { lastError: result.message ?? result.code }, now);
+        return;
+      }
+      await outboxRepo.updateStatus(
+        outboxId,
+        "delivered",
+        {
+          deliveredAt: now,
+          ...(result.providerMessageId ? { providerMessageId: result.providerMessageId } : {}),
+        },
+        now,
+      );
     } else if (row.actionType === "handoff") {
-      await chatwoot.requestHandoff(row.conversationRef, payload.labels ?? ["human-required"]);
+      const handoff =
+        payload.intent
+          ? buildHandoffCommand(ref, payload.intent as import("@yubie/domain").AssistantIntent, payload.handoffReason)
+          : {
+              threadRef: ref,
+              labels: payload.labels ?? ["human-required"],
+              ...(payload.groupId ? { groupId: payload.groupId } : {}),
+              ...(payload.priorityId ? { priorityId: payload.priorityId } : {}),
+            };
+      const result = await support.handoff(handoff);
+      if (!result.ok) {
+        const status = result.code === "TIMEOUT" || result.code === "AMBIGUOUS" ? "ambiguous" : "retry";
+        await outboxRepo.updateStatus(outboxId, status, { lastError: result.message ?? result.code }, now);
+        return;
+      }
+      await outboxRepo.updateStatus(outboxId, "delivered", { deliveredAt: now }, now);
     }
-    await outboxRepo.updateStatus(outboxId, "delivered", { deliveredAt: now }, now);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const status = message.includes("timeout") ? "ambiguous" : "retry";
@@ -49,10 +101,12 @@ export async function deliverChatwootOutbox(database: Database, chatwoot: Chatwo
   }
 }
 
-export async function processPendingOutbox(database: Database, chatwoot: ChatwootClient) {
+export async function processPendingOutbox(database: Database, support: SupportConversationProvider) {
   const outboxRepo = new PostgresAssistantOutboxRepository(database);
   const pending = await outboxRepo.claimPending(20);
   for (const row of pending) {
-    await deliverChatwootOutbox(database, chatwoot, row.id);
+    await deliverSupportOutbox(database, support, row.id);
   }
 }
+
+export const deliverChatwootOutbox = deliverSupportOutbox;

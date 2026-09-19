@@ -14,6 +14,7 @@ export class PostgresWebhookInboxRepository {
     deliveryId?: string;
     dedupeKey?: string;
     eventType: string;
+    providerEventType?: string;
     payloadHash: string;
     rawBody?: string;
     conversationRef?: string;
@@ -54,6 +55,7 @@ export class PostgresWebhookInboxRepository {
       deliveryId: event.deliveryId ?? null,
       dedupeKey: event.dedupeKey ?? event.deliveryId ?? null,
       eventType: event.eventType,
+      providerEventType: event.providerEventType ?? null,
       payloadHash: event.payloadHash,
       conversationRef: event.conversationRef ?? null,
       messageRef: event.messageRef ?? null,
