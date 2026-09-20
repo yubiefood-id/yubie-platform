@@ -8,7 +8,7 @@
 | Item | Value |
 |------|-------|
 | M5-D code baseline | `796d923` (feat bot engine) |
-| M5-D RC baseline | `6bfe60a` (docs RC evidence) |
+| M5-D RC baseline | `e212cd8` (gate evidence + SHAs) |
 | RC commits | `df615c0`..`6bfe60a` (migration proof, business hours, zammad tags, worker tests, docs) |
 | Branch | `main` |
 | Working tree | clean after RC commits |

@@ -7,8 +7,8 @@
 | | SHA |
 |--|-----|
 | M5-D application | `796d923`..`9df933f` |
-| M5-D RC docs | `6bfe60a` |
-| Graphify baseline | post-RC `npm run graph:context` |
+| M5-D RC docs | `e212cd8` |
+| Graphify baseline | FRESH at `e212cd8` (`npm run graph:doctor`) |
 
 ## Independent axis verdicts
 
