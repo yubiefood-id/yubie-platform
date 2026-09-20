@@ -20,7 +20,22 @@ Verifies:
 
 Same harness bootstraps schema through 0004, seeds `conversation_sessions`, applies 0005, asserts row preserved.
 
-### Rollback policy
+### Evidence (2026-09-20)
+
+```text
+bash scripts/migration-proof-0005.sh
+# [migration-proof] PASS fresh + upgrade scenarios
+# DATABASE_URL=postgresql://yubie:yubie_local@127.0.0.1:55432/yubie_migration_proof
+```
+
+Worker persistence integration (requires migrated Postgres):
+
+```text
+DATABASE_URL=postgresql://yubie:yubie_local@127.0.0.1:55433/yubie_test \
+  node --test apps/worker/tests/deterministic-integration.test.mjs
+# 6/6 PASS
+```
+
 
 Migration 0005 is additive. Operational rollback ignores flow tables; no destructive DROP.
 

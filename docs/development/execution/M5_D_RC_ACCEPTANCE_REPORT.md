@@ -6,7 +6,8 @@
 
 | | SHA |
 |--|-----|
-| M5-D application | `796d923`..RC HEAD |
+| M5-D application | `796d923`..`9df933f` |
+| M5-D RC docs | `6bfe60a` |
 | Graphify baseline | post-RC `npm run graph:context` |
 
 ## Independent axis verdicts

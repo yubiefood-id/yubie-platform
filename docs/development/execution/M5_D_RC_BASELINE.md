@@ -8,13 +8,14 @@
 | Item | Value |
 |------|-------|
 | M5-D code baseline | `796d923` (feat bot engine) |
-| M5-D docs baseline | `c360699` (pre-RC hardening) |
+| M5-D RC baseline | `6bfe60a` (docs RC evidence) |
+| RC commits | `df615c0`..`6bfe60a` (migration proof, business hours, zammad tags, worker tests, docs) |
 | Branch | `main` |
 | Working tree | clean after RC commits |
 
 ## Quality gate evidence
 
-Commands run on 2026-09-20:
+Commands run on 2026-09-20 (post-RC hardening):
 
 ```bash
 npm ci          # PASS
@@ -23,6 +24,9 @@ npm run typecheck # PASS
 npm run test    # PASS
 npm run check   # PASS
 npm run build   # PASS
+bash scripts/migration-proof-0005.sh  # PASS (fresh + upgrade)
+DATABASE_URL=postgresql://yubie:yubie_local@127.0.0.1:55433/yubie_test \
+  node --test apps/worker/tests/deterministic-integration.test.mjs  # 6/6 PASS
 ```
 
 ## Graphify state (post-M5-D commit)
