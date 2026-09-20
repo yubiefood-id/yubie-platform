@@ -54,3 +54,39 @@ test("delivers reply when conversation is not human active", { skip: !databaseUr
   assert.equal(chatwoot.messages[0].content, "Halo dari Yubie");
   await closeDatabase(database);
 });
+
+test("marks outbox failed when local session is HUMAN_ACTIVE", { skip: !databaseUrl }, async () => {
+  const { PostgresConversationSessionRepository } = await import("@yubie/persistence");
+  const database = createDatabase(databaseUrl);
+  const chatwoot = new FakeChatwootClient();
+  const support = new ChatwootSupportProvider(chatwoot);
+  const outbox = new PostgresAssistantOutboxRepository(database);
+  const sessions = new PostgresConversationSessionRepository(database);
+  const conversationRef = `human-session-${Date.now()}`;
+  const now = new Date().toISOString();
+
+  await sessions.upsert({
+    provider: "chatwoot",
+    providerThreadId: conversationRef,
+    providerCustomerId: "c1",
+    providerInboxOrChannelId: "i1",
+    state: "HUMAN_ACTIVE",
+    lastActivityAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const inserted = await outbox.enqueue({
+    provider: "chatwoot",
+    providerThreadId: conversationRef,
+    conversationRef,
+    actionType: "reply",
+    payloadFingerprint: `fp-human-${Date.now()}`,
+    payloadJson: JSON.stringify({ content: "blocked bot reply" }),
+    createdAt: now,
+  });
+
+  await deliverSupportOutbox(database, support, inserted.value.id);
+  assert.equal(chatwoot.messages.length, 0);
+  await closeDatabase(database);
+});

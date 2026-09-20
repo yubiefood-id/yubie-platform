@@ -296,11 +296,14 @@ export async function processAssistantInbox(
   if (engineResult.kind === "handoff") {
     await sessions.updateState(provider, message.conversationId, "HANDOFF_REQUESTED", now);
     const dest = mapHandoffDestination(engineResult.handoffDestination);
+    const handoffConfig: Parameters<typeof buildHandoffCommand>[3] = {};
+    if (dest) handoffConfig.destination = dest;
+    if (engineResult.nodeId) handoffConfig.nodeId = engineResult.nodeId;
     const handoff = buildHandoffCommand(
       threadRef,
       engineResult.intent,
       engineResult.handoffReason,
-      dest ? { destination: dest } : undefined,
+      handoffConfig,
     );
     const payload = JSON.stringify({
       labels: handoff.labels,
