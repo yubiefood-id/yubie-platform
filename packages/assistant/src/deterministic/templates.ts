@@ -107,6 +107,12 @@ const templates: Record<string, (ctx?: Record<string, unknown>) => string> = {
     `Ketik nomor yang tersedia, *menu* untuk menu utama, atau *0* untuk Customer Service.`,
   "handoff.queued.v1": () =>
     `Permintaan Anda sudah diteruskan ke tim Customer Service Yubie. Mohon tunggu sebentar.`,
+  "handoff.in_hours.v1": () =>
+    `Baik, kami hubungkan ke Customer Service Yubie.`,
+  "handoff.after_hours.v1": () =>
+    `Pesanmu sudah diteruskan ke tim Yubie dan akan ditangani pada jam operasional berikutnya.`,
+  "handoff.food_safety.v1": () =>
+    `Terima kasih sudah memberi tahu. Tim Food Safety Yubie akan segera menindaklanjuti.`,
 };
 
 export function renderTemplate(templateId: string, ctx?: Record<string, unknown>): string {

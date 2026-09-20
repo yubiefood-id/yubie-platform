@@ -14,6 +14,7 @@ export * from "./deterministic/types.js";
 export * from "./deterministic/engine.js";
 export * from "./deterministic/flows.js";
 export * from "./deterministic/validation.js";
+export * from "./deterministic/business-hours.js";
 export * from "./engine/types.js";
 export * from "./engine/router.js";
 export * from "./engine/deterministic-engine.js";

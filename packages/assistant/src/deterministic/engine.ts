@@ -7,6 +7,7 @@ import {
   resolvePublishedRecipes,
 } from "./guards.js";
 import { preRoute } from "./pre-router.js";
+import { selectHandoffTemplateId } from "./business-hours.js";
 import { renderTemplate } from "./templates.js";
 import { assertValidFlow } from "./validation.js";
 import {
@@ -64,7 +65,10 @@ async function renderNode(
   if (!node) throw new Error(`unknown_node:${nodeId}`);
 
   if (node.action === "handoff") {
-    const text = node.templateId ? renderTemplate(node.templateId, context) : renderTemplate("handoff.queued.v1");
+    const templateId =
+      node.templateId ??
+      (node.handoffDestination === "FOOD_SAFETY" ? "handoff.food_safety.v1" : selectHandoffTemplateId());
+    const text = renderTemplate(templateId, context);
     return {
       text,
       handoff: handoffAction(
