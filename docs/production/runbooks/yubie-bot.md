@@ -16,6 +16,11 @@
 | `ASSISTANT_MODE` | `shadow` / `suggestion` / `auto` |
 | `MODEL_PROVIDER` | `fake` or `vllm` |
 | `CHAT_PROVIDER` | `fake` or `chatwoot` |
+| `SUPPORT_PROVIDER` | `fake`, `chatwoot`, or `zammad` |
+| `BOT_ENGINE` | `deterministic` (default) or `legacy` |
+| `ZAMMAD_*` | Required when `SUPPORT_PROVIDER=zammad` |
+
+Zammad webhook: `POST /webhooks/zammad`
 
 ## Health
 
@@ -32,11 +37,15 @@
 ## Rollback
 
 1. **Emergency OFF (no rebuild):** `POST /ops/assistant/emergency-off` with `Authorization: Bearer $OPS_API_TOKEN`
-2. Set `ASSISTANT_AUTO_REPLY=false` and restart worker
-3. Scale bot to zero if needed; Chatwoot human agents continue
+2. **Human-first:** disable automation; route to human operators
+3. `BOT_ENGINE=legacy` + `ASSISTANT_MODE=shadow` — never uncontrolled generative production
+4. Set `ASSISTANT_AUTO_REPLY=false` and restart worker
+5. Scale bot to zero if needed; human agents continue in Zammad
 
-## M3 pipeline
+Migration 0005 is additive; do not DROP flow tables during rollback.
 
-Bot: verify → `webhook_inbox` (refs + raw TTL) → `assistant.process`  
-Worker: pipeline → `assistant_runs` + `assistant_outbox` → `chatwoot.reply`  
-Scheduled: `chatwoot.reconcile`, `webhook.cleanup`
+## M5-D deterministic pipeline
+
+Bot: verify → `webhook_inbox` → `assistant.process`  
+Worker: `ConversationEngineRouter` → `conversation_flow_state` → `assistant_outbox` → `support.reply`  
+Scheduled: `support.reconcile`, `webhook.cleanup`

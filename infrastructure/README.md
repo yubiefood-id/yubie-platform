@@ -68,6 +68,12 @@ Production PostgreSQL requires encrypted off-host backup and tested restore.
 
 Once durable automation matters, use PITR-capable base-backup + WAL archival rather than relying on `pg_dump` or a VPS snapshot alone.
 
+**M5-D scope (Yubie Postgres):** include `conversation_flow_state`, `conversation_flow_events`, `webhook_inbox`, `assistant_outbox`, `conversation_sessions`, and assistant run/audit tables required to resume deterministic flows.
+
+**Zammad scope:** separate VPS backup via `infrastructure/zammad/scripts/backup.sh` — not covered by Yubie DB backup.
+
+Restore drills run on isolated staging only; never destructive test on production.
+
 ## 8. Network warning
 
 Docker-published ports may bypass UFW assumptions. Publish only intended reverse-proxy ports, keep DB/Redis/internal APIs private, and verify externally after changes.

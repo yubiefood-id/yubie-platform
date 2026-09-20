@@ -40,6 +40,19 @@ curl -s https://api.yubie.id/ops/assistant
 curl -X POST https://api.yubie.id/ops/assistant/emergency-off -H "Authorization: Bearer ..."
 ~~~
 
+## Deterministic concierge (M5-D)
+
+- Default `BOT_ENGINE=deterministic` — zero LLM on hot path
+- Logical handoffs: CUSTOMER_SUPPORT, SALES_PARTNERSHIP, FOOD_SAFETY
+- Record real group IDs via `infrastructure/zammad/scripts/provision.mjs`
+- CS lifecycle: see [M5_D_RC_CS_OPERATIONS.md](../../development/execution/M5_D_RC_CS_OPERATIONS.md)
+
+Deterministic metrics (worker):
+
+- `deterministic_message_total`, `deterministic_transition_total`
+- `deterministic_handoff_*`, `deterministic_fallback_total`
+- `deterministic_task_completed_total`, `deterministic_purchase_option_total`
+
 ## Common issues
 
 | Symptom | Check |
