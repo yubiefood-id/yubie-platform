@@ -3,38 +3,37 @@
 const baseUrl = process.env.ZAMMAD_BASE_URL;
 const token = process.env.ZAMMAD_API_TOKEN;
 const dryRun = process.argv.includes("--dry-run");
+const outputPath = process.env.ZAMMAD_PROVISION_OUTPUT;
 
 if (!baseUrl || !token) {
   console.error("ZAMMAD_BASE_URL and ZAMMAD_API_TOKEN are required");
   process.exit(1);
 }
 
-const groups = [
-  "Yubie Bot Queue",
-  "Customer Support",
-  "Sales / Partnership",
-  "Food Safety",
-];
+const groupNames = {
+  botQueue: "Yubie Bot Queue",
+  customerSupport: "Customer Support",
+  salesPartnership: "Sales / Partnership",
+  foodSafety: "Food Safety",
+};
 
 const tags = [
+  "bot:deterministic-v1",
+  "channel:whatsapp",
   "yubie-ai",
   "b2c",
   "b2b",
-  "bulk",
-  "sample",
-  "product-development",
   "complaint",
   "food-safety",
   "human-required",
-  "priority",
-];
-
-const customAttributes = [
-  { name: "yubie_bot_mode", display: "Yubie Bot Mode", data_type: "select", data_option: { options: { OFF: "OFF", SHADOW: "SHADOW", SUGGEST: "SUGGEST", AUTO: "AUTO" } } },
-  { name: "yubie_ai_state", display: "Yubie AI State", data_type: "select", data_option: { options: { IDLE: "IDLE", PROCESSING: "PROCESSING", SENT: "SENT", HANDOFF: "HANDOFF", FAILED: "FAILED" } } },
-  { name: "yubie_handoff_reason", display: "Yubie Handoff Reason", data_type: "input" },
-  { name: "yubie_customer_type", display: "Yubie Customer Type", data_type: "select", data_option: { options: { UNKNOWN: "UNKNOWN", B2C: "B2C", B2B: "B2B" } } },
-  { name: "yubie_product_interest", display: "Yubie Product Interest", data_type: "input" },
+  "handoff:human-request",
+  "handoff:food-safety",
+  "intent:buy",
+  "intent:product-info",
+  "intent:order-help",
+  "intent:b2b",
+  "intent:complaint",
+  "product:flour",
 ];
 
 async function api(path, init = {}) {
@@ -56,38 +55,64 @@ async function api(path, init = {}) {
 
 async function ensureGroup(name) {
   const existing = await api("/api/v1/groups");
-  if (existing.some((g) => g.name === name)) {
-    console.log(`group exists: ${name}`);
-    return;
+  const found = existing.find((g) => g.name === name);
+  if (found) {
+    console.log(JSON.stringify({ event: "zammad.group.exists", name, id: String(found.id) }));
+    return String(found.id);
   }
   if (dryRun) {
-    console.log(`[dry-run] would create group: ${name}`);
-    return;
+    console.log(JSON.stringify({ event: "zammad.group.dry_run", name }));
+    return null;
   }
-  await api("/api/v1/groups", { method: "POST", body: JSON.stringify({ name, active: true }) });
-  console.log(`created group: ${name}`);
+  const created = await api("/api/v1/groups", { method: "POST", body: JSON.stringify({ name, active: true }) });
+  console.log(JSON.stringify({ event: "zammad.group.created", name, id: String(created.id) }));
+  return String(created.id);
+}
+
+async function resolvePriorityHigh() {
+  const priorities = await api("/api/v1/ticket_priorities");
+  const high = priorities.find((p) => /high|urgent|3/i.test(String(p.name)));
+  if (high) return String(high.id);
+  return priorities[0] ? String(priorities[0].id) : null;
 }
 
 async function main() {
   console.log(JSON.stringify({ event: "zammad.provision.start", dryRun, baseUrl }));
 
-  for (const group of groups) {
-    await ensureGroup(group);
+  const groupIds = {};
+  for (const [key, name] of Object.entries(groupNames)) {
+    groupIds[key] = await ensureGroup(name);
   }
 
-  for (const tag of tags) {
-    console.log(dryRun ? `[dry-run] ensure tag: ${tag}` : `tag catalog note: create/use tag ${tag} via tickets`);
-  }
+  const priorityHigh = dryRun ? null : await resolvePriorityHigh();
 
-  for (const attr of customAttributes) {
-    console.log(
-      dryRun
-        ? `[dry-run] custom attribute: ${attr.name}`
-        : `custom attribute ${attr.name}: configure via Object Manager if API create unsupported on this Zammad version`,
-    );
-  }
+  const artifact = {
+    generatedAt: new Date().toISOString(),
+    baseUrl,
+    dryRun,
+    groupIds,
+    priorityIds: { high: priorityHigh },
+    envMapping: {
+      ZAMMAD_GROUP_BOT_QUEUE: groupIds.botQueue,
+      ZAMMAD_GROUP_CUSTOMER_SUPPORT: groupIds.customerSupport,
+      ZAMMAD_GROUP_SALES_PARTNERSHIP: groupIds.salesPartnership,
+      ZAMMAD_GROUP_FOOD_SAFETY: groupIds.foodSafety,
+      ZAMMAD_PRIORITY_HIGH: priorityHigh,
+    },
+    tags,
+    notes: [
+      "Configure Zammad triggers/webhooks separately; this script only ensures groups and records IDs.",
+      "Never commit real API tokens. Store IDs in deployment secrets manager.",
+    ],
+  };
 
-  console.log(JSON.stringify({ event: "zammad.provision.complete", dryRun }));
+  console.log(JSON.stringify({ event: "zammad.provision.complete", artifact }, null, 2));
+
+  if (outputPath && !dryRun) {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(outputPath, `${JSON.stringify(artifact, null, 2)}\n`);
+    console.log(JSON.stringify({ event: "zammad.provision.wrote", outputPath }));
+  }
 }
 
 main().catch((error) => {

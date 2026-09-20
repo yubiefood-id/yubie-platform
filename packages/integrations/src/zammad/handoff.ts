@@ -1,5 +1,6 @@
 import type { AssistantIntent } from "@yubie/domain";
 import type { HandoffCommand, HandoffDestination, SupportThreadRef } from "@yubie/application";
+import { buildDeterministicHandoffLabels } from "./handoff-tags.js";
 
 export interface ZammadHandoffConfig {
   groupIds: {
@@ -31,9 +32,8 @@ export function buildHandoffCommand(
   ref: SupportThreadRef,
   intent: AssistantIntent,
   handoffReason?: string,
-  config?: Partial<ZammadHandoffConfig> & { destination?: HandoffDestination },
+  config?: Partial<ZammadHandoffConfig> & { destination?: HandoffDestination; nodeId?: string },
 ): HandoffCommand {
-  const labels = ["human-required"];
   const cfg: ZammadHandoffConfig = {
     groupIds: {
       customerSupport: config?.groupIds?.customerSupport ?? process.env.ZAMMAD_GROUP_CUSTOMER_SUPPORT ?? "2",
@@ -41,14 +41,20 @@ export function buildHandoffCommand(
       foodSafety: config?.groupIds?.foodSafety ?? process.env.ZAMMAD_GROUP_FOOD_SAFETY ?? "4",
       botQueue: config?.groupIds?.botQueue ?? process.env.ZAMMAD_GROUP_BOT_QUEUE ?? "1",
     },
-    priorityIds: config?.priorityIds ?? {},
+    priorityIds: {
+      ...(process.env.ZAMMAD_PRIORITY_HIGH ? { high: process.env.ZAMMAD_PRIORITY_HIGH } : {}),
+      ...(config?.priorityIds ?? {}),
+    },
     stateIds: config?.stateIds ?? {},
   };
 
   const dest = resolveDestination(intent, handoffReason, config?.destination);
+  const tagInput: import("./handoff-tags.js").HandoffTagInput = { intent, destination: dest };
+  if (handoffReason) tagInput.handoffReason = handoffReason;
+  if (config?.nodeId) tagInput.nodeId = config.nodeId;
+  const labels = buildDeterministicHandoffLabels(tagInput);
 
   if (dest === "SALES_PARTNERSHIP") {
-    labels.push("b2b");
     return {
       threadRef: ref,
       labels,
@@ -58,7 +64,6 @@ export function buildHandoffCommand(
   }
 
   if (dest === "FOOD_SAFETY") {
-    labels.push("food-safety");
     return {
       threadRef: ref,
       labels,
