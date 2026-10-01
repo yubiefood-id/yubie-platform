@@ -4,10 +4,11 @@
 
 ## Prerequisites
 
+- [ ] `npm run config:validate` passes against the staging env shell (no network required)
 - [ ] `ZAMMAD_BASE_URL`, `ZAMMAD_API_TOKEN`, webhook secret/bearer configured
 - [ ] Run `infrastructure/zammad/scripts/provision.mjs` and record real group IDs
-- [ ] Set `ZAMMAD_GROUP_*`, `ZAMMAD_PRIORITY_HIGH` in staging env
-- [ ] `BOT_ENGINE=deterministic`, `SUPPORT_PROVIDER=zammad`
+- [ ] Set `ZAMMAD_GROUP_*`, `ZAMMAD_PRIORITY_HIGH`, `ZAMMAD_WHATSAPP_ARTICLE_TYPE` in staging env (fail-closed validation rejects staging without them)
+- [ ] `BOT_ENGINE=deterministic`, `SUPPORT_PROVIDER=zammad`, `YUBIE_ENV=staging`
 - [ ] Approved WhatsApp test/staging number only
 
 ## Phase 8 — Zammad staging smoke

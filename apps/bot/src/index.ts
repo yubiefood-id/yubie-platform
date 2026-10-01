@@ -1,4 +1,5 @@
 import PgBoss from "pg-boss";
+import { inspectRuntimeConfig } from "@yubie/config";
 import {
   buildZammadDedupeKey,
   hashPayload,
@@ -100,6 +101,14 @@ export async function handleRequest(request: Request): Promise<Response> {
   }
 
   if (request.method === "GET" && url.pathname === "/readyz") {
+    // Readiness includes configuration validity: a misconfigured
+    // staging/production runtime (for example SUPPORT_PROVIDER=zammad without
+    // ZAMMAD_API_TOKEN) must not become ready for provider traffic. Errors
+    // name configuration variables only — never secret values.
+    const config = inspectRuntimeConfig(process.env);
+    if (!config.ok) {
+      return Response.json({ ready: false, reason: "config_error", errors: config.errors }, { status: 503 });
+    }
     if (!databaseUrl) {
       return Response.json({ ready: false, reason: "no_database" }, { status: 503 });
     }

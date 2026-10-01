@@ -1,4 +1,5 @@
 import PgBoss from "pg-boss";
+import { inspectRuntimeConfig } from "@yubie/config";
 import { checkListingHealth, FixedClock, SequentialIdGenerator } from "@yubie/application";
 import { createSupportProvider, HttpLinkHealthChecker } from "@yubie/integrations";
 import { closeDatabase, createWorkerRepositories } from "@yubie/persistence";
@@ -6,6 +7,18 @@ import { processAssistantJob } from "./assistant-handler.js";
 import { startMetricsServer } from "./metrics-server.js";
 import { reconcileSupport } from "./reconcile-handler.js";
 import { deliverSupportOutbox, processPendingOutbox } from "./reply-delivery-handler.js";
+
+// Fail closed before any queue starts processing: an invalid runtime
+// configuration (unknown provider, missing Zammad values in
+// staging/production, typo'd BOT_ENGINE) must stop the worker, not surface as
+// a fake provider silently handling production traffic.
+const startupConfig = inspectRuntimeConfig(process.env);
+if (!startupConfig.ok) {
+  console.error(
+    JSON.stringify({ level: "error", event: "worker.config_error", errors: startupConfig.errors }),
+  );
+  process.exit(1);
+}
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {

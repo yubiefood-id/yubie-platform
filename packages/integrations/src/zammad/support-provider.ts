@@ -27,7 +27,7 @@ export class ZammadSupportProvider implements SupportConversationProvider {
 
   constructor(
     private readonly client: ZammadClient,
-    private readonly whatsappArticleType = process.env.ZAMMAD_WHATSAPP_ARTICLE_TYPE ?? "whatsapp",
+    private readonly whatsappArticleType: string,
   ) {}
 
   private ref(threadId: string): SupportThreadRef {

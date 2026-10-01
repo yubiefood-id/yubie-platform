@@ -45,6 +45,7 @@ curl -X POST https://api.yubie.id/ops/assistant/emergency-off -H "Authorization:
 - Default `BOT_ENGINE=deterministic` — zero LLM on hot path
 - Logical handoffs: CUSTOMER_SUPPORT, SALES_PARTNERSHIP, FOOD_SAFETY
 - Record real group IDs via `infrastructure/zammad/scripts/provision.mjs`
+- Fail-closed config: staging/production without explicit `ZAMMAD_GROUP_*`, `ZAMMAD_PRIORITY_HIGH`, `ZAMMAD_WHATSAPP_ARTICLE_TYPE` refuse to start (`npm run config:validate` to pre-check; contract table in `infrastructure/zammad/README.md`)
 - CS lifecycle: see [M5_D_RC_CS_OPERATIONS.md](../../development/execution/M5_D_RC_CS_OPERATIONS.md)
 
 Deterministic metrics (worker):

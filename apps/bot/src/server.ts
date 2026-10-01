@@ -1,6 +1,15 @@
+import { inspectRuntimeConfig } from "@yubie/config";
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
 import { handleRequest } from "./index.js";
+
+const startupConfig = inspectRuntimeConfig(process.env);
+if (!startupConfig.ok) {
+  console.error(
+    JSON.stringify({ level: "error", event: "bot.config_error", errors: startupConfig.errors }),
+  );
+  process.exit(1);
+}
 
 const port = Number(process.env.PORT ?? 8788);
 

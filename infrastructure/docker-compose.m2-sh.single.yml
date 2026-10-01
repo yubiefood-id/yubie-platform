@@ -17,7 +17,17 @@ services:
       SUPPORT_PROVIDER: ${SUPPORT_PROVIDER:-fake}
       ZAMMAD_BASE_URL: ${ZAMMAD_BASE_URL:-}
       ZAMMAD_API_TOKEN: ${ZAMMAD_API_TOKEN:-}
-      ZAMMAD_WHATSAPP_ARTICLE_TYPE: ${ZAMMAD_WHATSAPP_ARTICLE_TYPE:-whatsapp}
+      # No default here: the runtime validates fail-closed. Development falls
+      # back to the documented local default; staging/production must set the
+      # article type discovered from the real Zammad instance.
+      ZAMMAD_WHATSAPP_ARTICLE_TYPE: ${ZAMMAD_WHATSAPP_ARTICLE_TYPE:-}
+      ZAMMAD_GROUP_BOT_QUEUE: ${ZAMMAD_GROUP_BOT_QUEUE:-}
+      ZAMMAD_GROUP_CUSTOMER_SUPPORT: ${ZAMMAD_GROUP_CUSTOMER_SUPPORT:-}
+      ZAMMAD_GROUP_SALES_PARTNERSHIP: ${ZAMMAD_GROUP_SALES_PARTNERSHIP:-}
+      ZAMMAD_GROUP_FOOD_SAFETY: ${ZAMMAD_GROUP_FOOD_SAFETY:-}
+      ZAMMAD_PRIORITY_HIGH: ${ZAMMAD_PRIORITY_HIGH:-}
+      YUBIE_ENV: ${YUBIE_ENV:-development}
+      BOT_ENGINE: ${BOT_ENGINE:-deterministic}
       MODEL_PROVIDER: ${MODEL_PROVIDER:-fake}
       ASSISTANT_AUTO_REPLY: ${ASSISTANT_AUTO_REPLY:-false}
       ASSISTANT_MODE: ${ASSISTANT_MODE:-shadow}

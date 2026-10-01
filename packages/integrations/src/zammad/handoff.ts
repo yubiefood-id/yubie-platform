@@ -1,5 +1,6 @@
 import type { AssistantIntent } from "@yubie/domain";
 import type { HandoffCommand, HandoffDestination, SupportThreadRef } from "@yubie/application";
+import { resolveZammadRouting, type RuntimeEnvSource } from "@yubie/config";
 import { buildDeterministicHandoffLabels } from "./handoff-tags.js";
 
 export interface ZammadHandoffConfig {
@@ -33,16 +34,23 @@ export function buildHandoffCommand(
   intent: AssistantIntent,
   handoffReason?: string,
   config?: Partial<ZammadHandoffConfig> & { destination?: HandoffDestination; nodeId?: string },
+  env: RuntimeEnvSource = process.env,
 ): HandoffCommand {
+  // Routing IDs come from validated configuration: explicit call-site values,
+  // then environment, then — only when the runtime is not
+  // staging/production-zammad — the documented development fixture IDs.
+  // Staging/production deployments are gated by parseRuntimeConfig at startup;
+  // resolveZammadRouting keeps the guarantee at the point of use.
+  const routing = resolveZammadRouting(env);
   const cfg: ZammadHandoffConfig = {
     groupIds: {
-      customerSupport: config?.groupIds?.customerSupport ?? process.env.ZAMMAD_GROUP_CUSTOMER_SUPPORT ?? "2",
-      salesPartnership: config?.groupIds?.salesPartnership ?? process.env.ZAMMAD_GROUP_SALES_PARTNERSHIP ?? "3",
-      foodSafety: config?.groupIds?.foodSafety ?? process.env.ZAMMAD_GROUP_FOOD_SAFETY ?? "4",
-      botQueue: config?.groupIds?.botQueue ?? process.env.ZAMMAD_GROUP_BOT_QUEUE ?? "1",
+      customerSupport: config?.groupIds?.customerSupport ?? routing.groupIds.customerSupport,
+      salesPartnership: config?.groupIds?.salesPartnership ?? routing.groupIds.salesPartnership,
+      foodSafety: config?.groupIds?.foodSafety ?? routing.groupIds.foodSafety,
+      botQueue: config?.groupIds?.botQueue ?? routing.groupIds.botQueue,
     },
     priorityIds: {
-      ...(process.env.ZAMMAD_PRIORITY_HIGH ? { high: process.env.ZAMMAD_PRIORITY_HIGH } : {}),
+      ...(routing.priorityHigh ? { high: routing.priorityHigh } : {}),
       ...(config?.priorityIds ?? {}),
     },
     stateIds: config?.stateIds ?? {},

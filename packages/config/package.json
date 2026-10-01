@@ -2,5 +2,19 @@
   "name": "@yubie/config",
   "version": "0.1.0",
   "private": true,
-  "files": ["tsconfig.base.json"]
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./tsconfig.base.json": "./tsconfig.base.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs"
+  },
+  "files": ["tsconfig.base.json", "dist"]
 }

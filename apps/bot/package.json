@@ -8,9 +8,10 @@
     "dev": "npm run build && node dist/server.js",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test tests/*.test.mjs"
+    "test": "npm run build --workspace @yubie/config && npm run build && node --test tests/*.test.mjs"
   },
   "dependencies": {
+    "@yubie/config": "*",
     "@yubie/integrations": "*",
     "@yubie/persistence": "*",
     "pg-boss": "10.3.2"

@@ -53,12 +53,53 @@ DNS: `support-staging.yubie.id` (staging), `support.yubie.id` (production later)
 | API | `ZAMMAD_BASE_URL`, `ZAMMAD_API_TOKEN` |
 | Webhook | `ZAMMAD_WEBHOOK_SECRET`, `ZAMMAD_WEBHOOK_BEARER` |
 | WhatsApp article type | `ZAMMAD_WHATSAPP_ARTICLE_TYPE` (discover in staging) |
+| Routing | `ZAMMAD_GROUP_*`, `ZAMMAD_PRIORITY_HIGH` |
 
 Provision groups/tags/custom fields:
 
 ~~~bash
 npm run zammad:provision -- --dry-run
 npm run zammad:provision
+~~~
+
+### Configuration contract (fail-closed)
+
+Validated at startup by `packages/config` (`@yubie/config`). Unknown
+`SUPPORT_PROVIDER`/`BOT_ENGINE` values and missing required staging/production
+variables stop the service with `CONFIG_ERROR` before traffic is accepted —
+there is **no silent fallback** to `FakeZammadClient`, fixture routing IDs, or
+a guessed WhatsApp article type. `YUBIE_ENV` selects the tier: `fake` providers
+and fixture IDs are allowed only in `development`/`test`.
+
+| Variable | Dev | Staging | Production | Source / classification |
+|----------|-----|---------|------------|------------------------|
+| `SUPPORT_PROVIDER` | yes | yes (`zammad`) | yes (`zammad`) | operator — STATIC |
+| `BOT_ENGINE` | yes | yes (`deterministic`) | yes (`deterministic`) | operator — STATIC |
+| `YUBIE_ENV` | yes | yes (`staging`) | yes (`production`) | operator — STATIC |
+| `ZAMMAD_BASE_URL` | when `zammad` | yes | yes | deployment — STATIC |
+| `ZAMMAD_API_TOKEN` | when `zammad` | yes | yes | Zammad service account — GENERATED, SECRET |
+| `ZAMMAD_WEBHOOK_SECRET` | optional local | at least one of secret/bearer (both recommended) | at least one (both recommended) | operator — GENERATED, SECRET |
+| `ZAMMAD_WEBHOOK_BEARER` | optional local | at least one of secret/bearer | at least one (both recommended) | operator — GENERATED, SECRET |
+| `ZAMMAD_GROUP_BOT_QUEUE` | fixture allowed | yes | yes | DISCOVERED_FROM_ZAMMAD |
+| `ZAMMAD_GROUP_CUSTOMER_SUPPORT` | fixture allowed | yes | yes | DISCOVERED_FROM_ZAMMAD |
+| `ZAMMAD_GROUP_SALES_PARTNERSHIP` | fixture allowed | yes | yes | DISCOVERED_FROM_ZAMMAD |
+| `ZAMMAD_GROUP_FOOD_SAFETY` | fixture allowed | yes | yes | DISCOVERED_FROM_ZAMMAD |
+| `ZAMMAD_PRIORITY_HIGH` | fixture allowed | yes | yes | DISCOVERED_FROM_ZAMMAD |
+| `ZAMMAD_WHATSAPP_ARTICLE_TYPE` | local default (`whatsapp`) allowed | yes | yes | DISCOVERED_FROM_ZAMMAD |
+
+Rules:
+
+- "Fixture allowed" means development/test may omit the variable and the
+  documented fixture IDs (`1`–`4`) apply locally. Fixture/placeholder values
+  must **never** be used as staging/production values; a real installation
+  whose IDs genuinely are 1–4 simply sets them explicitly.
+- The article type and all routing IDs are discovered from the real staging
+  Zammad instance (`npm run zammad:provision` prints them); they are not
+  guessed defaults in staging/production.
+- Validate any environment shell without contacting Zammad:
+
+~~~bash
+npm run config:validate
 ~~~
 
 ## Backups

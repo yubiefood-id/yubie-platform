@@ -1,3 +1,4 @@
+import { parseBotEngineName } from "@yubie/config";
 import type { KnowledgeLookup } from "../knowledge-tools.js";
 import type { DeterministicEngineDeps } from "../deterministic/engine.js";
 import { DeterministicConversationEngineAdapter } from "./deterministic-engine.js";
@@ -6,8 +7,10 @@ import type { ConversationEngine, ConversationEngineInput, ConversationEngineRes
 export type BotEngine = "deterministic" | "legacy";
 
 export function resolveBotEngine(): BotEngine {
-  const value = (process.env.BOT_ENGINE ?? "deterministic").toLowerCase();
-  return value === "legacy" ? "legacy" : "deterministic";
+  // Unset resolves to the ADR-011 default; invalid values (for example
+  // BOT_ENGINE=determinitsic) must fail configuration parsing instead of
+  // silently selecting an engine.
+  return parseBotEngineName(process.env.BOT_ENGINE);
 }
 
 export interface ConversationEngineRouterDeps extends DeterministicEngineDeps {
