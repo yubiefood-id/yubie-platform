@@ -29,13 +29,14 @@ DATABASE_URL=postgresql://yubie:yubie_local@127.0.0.1:55433/yubie_test \
   node --test apps/worker/tests/deterministic-integration.test.mjs  # 6/6 PASS
 ```
 
-## Graphify state (post-M5-D commit)
+## Graphify state (post-RC)
 
 | Item | Value |
 |------|-------|
 | Doctor | 0 errors |
-| Freshness target | CODE_FRESH + release-relevant semantic docs |
-| Query graph | `graphify-out/engineering-graph.json` |
+| Freshness | **FRESH** (code + semantic) |
+| Semantic indexed | ADR-011, M5_D_*, M5_D_RC_*, runbooks (zammad, yubie-bot, assistant-emergency-off) |
+| Query graph | `graphify-out/engineering-graph.json` (4898 nodes) |
 
 ## Architecture
 

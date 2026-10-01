@@ -112,10 +112,11 @@ Use `npm run graph:query` for contracts, infrastructure, boundaries, database, s
 - Run read-only codebase or doc audits before large implementation or release-candidate work.
 - Verify execution docs and acceptance claims against code evidence; flag aspirational or overstated claims.
 - Prefer minimal, focused diffs scoped to the current milestone rather than broad rewrites.
+- Mark live Zammad/WhatsApp staging acceptance axes BLOCKED_EXTERNAL when credentials are unavailable; do not fabricate pass verdicts.
 
 ## Learned Workspace Facts
 
-- Milestones progress M0 → M1 → M2-SH → M3-PROD → M4-Z → M4.5-RC for marketplace, assistant, and support cutover.
+- Milestones progress M0 → M1 → M2-SH → M3-PROD → M4-Z → M4.5-RC → M5-D for marketplace, assistant, support cutover, and deterministic concierge.
 - Production support authority is self-hosted Zammad (ADR-009); Chatwoot remains for migration rollback only.
 - Support provider is selected via `SUPPORT_PROVIDER` (falls back to `CHAT_PROVIDER`); implementations live in `packages/integrations`.
 - `SupportConversationProvider` port in `packages/application` abstracts Zammad and Chatwoot; `packages/assistant` has no provider imports.
@@ -123,3 +124,6 @@ Use `npm run graph:query` for contracts, infrastructure, boundaries, database, s
 - Migration `0004_m4_zammad_provider.sql` adds provider columns; legacy `chatwoot_*` columns retained until post-cutover cleanup.
 - Zammad stack is pinned in `infrastructure/zammad/zammad.lock.json` (image `ghcr.io/zammad/zammad:7.1.3-0014`).
 - Graphify incremental workflow (`npm run graph:context`) lets agents query an architectural code graph instead of repeated manual audits.
+- `BOT_ENGINE` defaults to `deterministic` (ADR-011); production hot path uses `deterministic-v1` FSM with zero LLM invocation.
+- Migration `0005_m5_deterministic_concierge.sql` adds `conversation_flow_state` tables separate from human-control session state.
+- Live Zammad/WhatsApp staging validation remains BLOCKED_EXTERNAL until real staging credentials are provisioned.
