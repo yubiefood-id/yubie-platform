@@ -9,6 +9,7 @@ test("newsletter validation requires explicit consent", () => {
 
 test("product waitlist is scoped to a coming-soon product and explicit consent", () => {
   assert.equal(productWaitlistSchema.safeParse({ email: "hello@yubiefood.id", productId: "shake", consent: true }).success, true);
+  assert.equal(productWaitlistSchema.safeParse({ email: "hello@yubiefood.id", productId: "mie", consent: true }).success, true);
   assert.equal(productWaitlistSchema.safeParse({ email: "hello@yubiefood.id", productId: "flour", consent: true }).success, false);
   assert.equal(productWaitlistSchema.safeParse({ email: "hello@yubiefood.id", productId: "ppang", consent: false }).success, false);
 });

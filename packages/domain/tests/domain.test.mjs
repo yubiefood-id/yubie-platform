@@ -1,12 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calculateSubtotal, filterRecipes, productClaims, productRootOfferings, rootVarieties } from "../dist/index.js";
+import { calculateSubtotal, filterRecipes, productClaims, productFamilies, productRootOfferings, removeCartLine, rootVarieties, upsertCartLine } from "../dist/index.js";
 
 test("calculateSubtotal totals Indonesian rupiah line items", () => {
   assert.equal(calculateSubtotal([
     { id: "flour-250g", productId: "flour", name: "Yubie Flour", sizeId: "250g", sizeLabel: "250 g", quantity: 2, unitPrice: 15000, image: "/flour.webp" },
     { id: "flour-500g", productId: "flour", name: "Yubie Flour", sizeId: "500g", sizeLabel: "500 g", quantity: 1, unitPrice: 28000, image: "/flour.webp" },
   ]), 58000);
+});
+
+test("catalog lists four families while only Flour stays commercially available", () => {
+  assert.deepEqual(productFamilies.map((product) => product.id), ["flour", "shake", "ppang", "mie"]);
+  const available = productFamilies.filter((product) => product.status === "available");
+  assert.deepEqual(available.map((product) => product.id), ["flour"]);
+  const mie = productFamilies.find((product) => product.id === "mie");
+  assert.equal(mie.status, "coming-soon");
+  assert.equal(mie.verificationStatus, "required");
+  assert.deepEqual(mie.sizes, []);
+  assert.equal(productRootOfferings.some((offering) => offering.productId === "mie"), false);
+});
+
+test("cart line helpers merge, clamp, and remove without duplicating lines", () => {
+  let lines = upsertCartLine([], "flour", "250g", 1);
+  lines = upsertCartLine(lines, "flour", "250g", 2);
+  lines = upsertCartLine(lines, "flour", "500g", 1);
+  assert.deepEqual(lines, [
+    { productId: "flour", sizeId: "250g", quantity: 2 },
+    { productId: "flour", sizeId: "500g", quantity: 1 },
+  ]);
+  assert.equal(upsertCartLine(lines, "flour", "250g", 99)[0].quantity, 20);
+  assert.deepEqual(upsertCartLine(lines, "flour", "250g", 0), lines.slice(1));
+  assert.deepEqual(removeCartLine(lines, "flour", "500g"), lines.slice(0, 1));
 });
 
 test("canonical root discovery contains five reusable varieties", () => {

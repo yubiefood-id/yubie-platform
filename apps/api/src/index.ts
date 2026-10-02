@@ -1,10 +1,17 @@
 import { PreviewCommerceProvider } from "@yubie/commerce";
 import {
+  createFirstPartyCheckout,
+  getCheckoutStatus,
   getPurchaseOptions,
+  googleLogin,
+  logout,
+  processPaymentWebhook,
   resolveMarketplaceRedirect,
+  resolveSession,
   resolveWhatsAppRedirect,
+  webhookError,
 } from "@yubie/application";
-import { b2bLeadSchema, checkoutRequestSchema, newsletterSubmissionSchema, productWaitlistSchema } from "@yubie/validation";
+import { b2bLeadSchema, checkoutRequestSchema, googleLoginSchema, newsletterSubmissionSchema, productWaitlistSchema } from "@yubie/validation";
 import { catalog } from "./catalog.js";
 import { createAppContext, type AppContext } from "./composition/create-app.js";
 import { createRequestId } from "./middleware/request-id.js";
@@ -119,6 +126,27 @@ export async function handleRequest(request: Request): Promise<Response> {
   if (request.method === "POST" && url.pathname === "/v1/checkouts" && process.env.COMMERCE_PROVIDER !== "disabled") {
     const parsed = checkoutRequestSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    if (ctx.paymentMode === "xendit" && ctx.paymentProvider) {
+      // First-party flow (ADR-012): server re-prices every line from the
+      // canonical catalog, creates the order + Xendit payment session, and
+      // returns only {checkoutId, redirectUrl, ...} to the browser.
+      const sessionUser = await resolveSession(readSessionToken(request), { sessions: ctx.authSessions, users: ctx.users, tokens: ctx.tokens, clock: ctx.clock });
+      const appOrigin = process.env.APP_ORIGIN ?? url.origin;
+      const result = await createFirstPartyCheckout({
+        lines: parsed.data.lines,
+        customerEmail: parsed.data.customerEmail,
+        ...(parsed.data.customerName ? { customerName: parsed.data.customerName } : {}),
+        ...(parsed.data.delivery ? { delivery: parsed.data.delivery } : {}),
+        userId: sessionUser.value?.id ?? null,
+        successReturnUrl: `${appOrigin}/checkout/success`,
+        cancelReturnUrl: `${appOrigin}/checkout/cancel`,
+      }, { orders: ctx.orders, payments: ctx.payments, provider: ctx.paymentProvider, clock: ctx.clock, ids: ctx.ids });
+      if (!result.ok) {
+        const status = result.error.code === "validation" ? 400 : 409;
+        return json({ ok: false, code: result.error.code === "validation" ? "INVALID_REQUEST" : "UNAVAILABLE_LINE" }, { status });
+      }
+      return json({ ok: true, data: result.value }, { status: 201 });
+    }
     const lines = parsed.data.lines.map((line) => {
       const product = catalog.find((item) => item.id === line.productId);
       const size = product?.sizes.find((item) => item.id === line.sizeId && item.available);
@@ -131,7 +159,117 @@ export async function handleRequest(request: Request): Promise<Response> {
     return json({ ok: true, data: session }, { status: 202 });
   }
 
+  const checkoutStatusMatch = url.pathname.match(/^\/v1\/checkouts\/([^/]+)$/);
+  if (request.method === "GET" && checkoutStatusMatch?.[1]) {
+    const result = await getCheckoutStatus(decodeURIComponent(checkoutStatusMatch[1]), {
+      orders: ctx.orders,
+      payments: ctx.payments,
+      paymentEvents: ctx.paymentEvents,
+      ...(ctx.paymentProvider ? { provider: ctx.paymentProvider } : {}),
+      clock: ctx.clock,
+      ids: ctx.ids,
+    }, { poll: true });
+    if (!result.ok) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    if (!result.value) return json({ ok: false, code: "NOT_FOUND" }, { status: 404 });
+    return json({ ok: true, data: result.value });
+  }
+
+  if (request.method === "POST" && url.pathname === "/v1/webhooks/xendit/payment-session") {
+    if (!ctx.webhookToken) return json({ ok: false, code: "WEBHOOK_NOT_CONFIGURED" }, { status: 503 });
+    const payload = await request.json().catch(() => null);
+    const outcome = await processPaymentWebhook({
+      callbackToken: request.headers.get("x-callback-token"),
+      expectedToken: ctx.webhookToken,
+      payload,
+    }, { orders: ctx.orders, payments: ctx.payments, paymentEvents: ctx.paymentEvents, clock: ctx.clock, ids: ctx.ids });
+    if (outcome.result === "rejected") {
+      return json({ ok: false, code: outcome.code }, { status: outcome.status });
+    }
+    if (outcome.result === "ignored") {
+      return json({ ok: true, data: { result: "ignored" } }, { status: 202 });
+    }
+    return json({ ok: true, data: { result: outcome.result } });
+  }
+
+  if (request.method === "POST" && url.pathname === "/v1/auth/google") {
+    if (!ctx.verifier) return json({ ok: false, code: "AUTH_NOT_CONFIGURED" }, { status: 503 });
+    const parsed = googleLoginSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    const csrfCookie = request.headers.get("cookie")?.match(/(?:^|;\s*)g_csrf_token=([^;]+)/)?.[1] ?? null;
+    const result = await googleLogin({
+      credential: parsed.data.credential,
+      csrfToken: parsed.data.g_csrf_token,
+      csrfCookie,
+    }, { verifier: ctx.verifier, users: ctx.users, sessions: ctx.authSessions, tokens: ctx.tokens, clock: ctx.clock, ids: ctx.ids });
+    if (!result.ok) return json({ ok: false, code: "AUTH_FAILED" }, { status: 401 });
+    return json({ ok: true, data: { user: result.value.user } }, {
+      status: 200,
+      headers: { "set-cookie": sessionCookie(result.value.sessionToken, result.value.expiresAt, url.protocol === "https:") },
+    });
+  }
+
+  if (request.method === "POST" && url.pathname === "/v1/auth/logout") {
+    await logout(readSessionToken(request), { sessions: ctx.authSessions, tokens: ctx.tokens, clock: ctx.clock });
+    return json({ ok: true, data: { revoked: true } }, { headers: { "set-cookie": clearSessionCookie() } });
+  }
+
+  if (request.method === "GET" && url.pathname === "/v1/auth/session") {
+    const user = await resolveSession(readSessionToken(request), { sessions: ctx.authSessions, users: ctx.users, tokens: ctx.tokens, clock: ctx.clock });
+    if (!user.ok) return json({ ok: false, code: "AUTH_FAILED" }, { status: 500 });
+    return json({ ok: true, data: { authenticated: user.value !== null, user: user.value, googleClientId: ctx.googleClientId } });
+  }
+
+  const accountOrderMatch = url.pathname.match(/^\/v1\/account\/orders(?:\/([^/]+))?$/);
+  if (request.method === "GET" && accountOrderMatch) {
+    const sessionUser = await resolveSession(readSessionToken(request), { sessions: ctx.authSessions, users: ctx.users, tokens: ctx.tokens, clock: ctx.clock });
+    if (!sessionUser.ok || !sessionUser.value) return json({ ok: false, code: "UNAUTHORIZED" }, { status: 401 });
+    if (accountOrderMatch[1]) {
+      const result = await getCheckoutStatus(decodeURIComponent(accountOrderMatch[1]), {
+        orders: ctx.orders,
+        payments: ctx.payments,
+        paymentEvents: ctx.paymentEvents,
+        clock: ctx.clock,
+        ids: ctx.ids,
+      });
+      if (!result.ok || !result.value || !(await ownsOrder(ctx, result.value.checkoutId, sessionUser.value.id))) {
+        return json({ ok: false, code: "NOT_FOUND" }, { status: 404 });
+      }
+      return json({ ok: true, data: result.value });
+    }
+    const orders = await ctx.orders.listForUser(sessionUser.value.id);
+    if (!orders.ok) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    return json({ ok: true, data: orders.value.map((order) => ({
+      checkoutId: order.id,
+      orderStatus: order.status,
+      totalAmount: order.totalAmount,
+      currency: order.currency,
+      createdAt: order.createdAt,
+      lineCount: order.lines.length,
+    })) });
+  }
+
   return json({ ok: false, code: "NOT_FOUND" }, { status: 404 });
+}
+
+async function ownsOrder(ctx: AppContext, orderId: string, userId: string): Promise<boolean> {
+  const order = await ctx.orders.findById(orderId);
+  return order.ok && order.value !== null && order.value.userId === userId;
+}
+
+const SESSION_COOKIE = "yubie_session";
+
+function readSessionToken(request: Request): string | null {
+  const match = request.headers.get("cookie")?.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
+function sessionCookie(token: string, expiresAt: string, secure: boolean): string {
+  const maxAge = Math.max(0, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000));
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
+}
+
+function clearSessionCookie(): string {
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
 }
 
 function buildAttribution(url: URL): Partial<import("@yubie/domain").AttributionContext> {

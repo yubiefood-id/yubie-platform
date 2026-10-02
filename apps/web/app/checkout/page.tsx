@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
+import { CheckoutView } from "@/components/checkout/checkout-view";
 
 export const metadata: Metadata = {
   title: "Checkout",
@@ -7,5 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function CheckoutPage() {
-  redirect("/products/yubie-flour");
+  return <main id="main"><CheckoutView /></main>;
 }

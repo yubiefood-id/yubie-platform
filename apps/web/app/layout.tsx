@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Cormorant_Garamond, Manrope } from "next/font/google";
 import { Footer } from "@/components/layout/footer";
 import { Header } from "@/components/layout/header";
+import { CartProvider } from "@/features/cart/cart-context";
 import "./globals.css";
 
 const manrope = Manrope({ variable: "--font-sans", subsets: ["latin"] });
@@ -17,5 +18,5 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const jsonLd = { "@context": "https://schema.org", "@type": "Organization", name: "Yubie", slogan: "Rooted here. Made for now.", address: { "@type": "PostalAddress", addressLocality: "Bogor", addressCountry: "ID" } };
-  return <html lang="id"><body className={`${manrope.variable} ${cormorant.variable}`}><Header />{children}<Footer /><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} /></body></html>;
+  return <html lang="id"><body className={`${manrope.variable} ${cormorant.variable}`}><CartProvider><Header />{children}<Footer /></CartProvider><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} /></body></html>;
 }

@@ -90,8 +90,11 @@ test("whatsapp redirect unavailable without configured intent", async () => {
 test("catalog exposes public products without enabling coming-soon checkout", async () => {
   const response = await handleRequest(new Request("https://api.yubiefood.id/v1/catalog"));
   const payload = await response.json();
-  assert.equal(payload.meta.count, 3);
+  assert.equal(payload.meta.count, 4);
   assert.equal(payload.data.find((product) => product.id === "shake").status, "coming-soon");
+  const mie = payload.data.find((product) => product.id === "mie");
+  assert.equal(mie.status, "coming-soon");
+  assert.deepEqual(mie.sizes, []);
 });
 
 test("invalid newsletter submissions are rejected", async () => {

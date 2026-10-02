@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
+import { CartView } from "@/components/cart/cart-view";
 
 export const metadata: Metadata = {
   title: "Keranjang",
@@ -7,5 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function CartPage() {
-  redirect("/shop");
+  return <main id="main"><CartView /></main>;
 }

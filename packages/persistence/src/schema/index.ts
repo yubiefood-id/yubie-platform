@@ -338,3 +338,75 @@ export const conversationFlowEvents = pgTable("conversation_flow_events", {
 }, (table) => [
   index("conversation_flow_events_thread_created").on(table.provider, table.providerThreadId, table.createdAt),
 ]);
+
+// ADR-012: Google identity + first-party orders/payments (Xendit).
+
+export const users = pgTable("users", {
+  id: text("id").primaryKey(),
+  googleSub: text("google_sub").notNull(),
+  email: text("email"),
+  name: text("name"),
+  picture: text("picture"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("users_google_sub").on(table.googleSub),
+]);
+
+export const authSessions = pgTable("auth_sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  tokenHash: text("token_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+}, (table) => [
+  index("auth_sessions_token_hash").on(table.tokenHash),
+]);
+
+export const firstPartyOrders = pgTable("orders", {
+  id: text("id").primaryKey(),
+  checkoutRef: text("checkout_ref").notNull(),
+  status: text("status").notNull().default("pending_payment"),
+  userId: text("user_id").references(() => users.id),
+  customerEmail: text("customer_email").notNull(),
+  customerName: text("customer_name"),
+  deliveryJsonb: jsonb("delivery_jsonb"),
+  currency: text("currency").notNull().default("IDR"),
+  totalAmount: integer("total_amount").notNull(),
+  linesJsonb: jsonb("lines_jsonb").notNull().default([]),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("orders_checkout_ref").on(table.checkoutRef),
+  index("orders_user_created").on(table.userId, table.createdAt),
+]);
+
+export const orderPayments = pgTable("order_payments", {
+  id: text("id").primaryKey(),
+  orderId: text("order_id").notNull().references(() => firstPartyOrders.id),
+  provider: text("provider").notNull(),
+  providerSessionId: text("provider_session_id").notNull(),
+  redirectUrl: text("redirect_url"),
+  currency: text("currency").notNull().default("IDR"),
+  amount: integer("amount").notNull(),
+  status: text("status").notNull().default("pending"),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("order_payments_provider_session").on(table.provider, table.providerSessionId),
+  index("order_payments_order").on(table.orderId),
+]);
+
+export const paymentEvents = pgTable("payment_events", {
+  id: text("id").primaryKey(),
+  paymentId: text("payment_id").notNull().references(() => orderPayments.id),
+  dedupeKey: text("dedupe_key").notNull(),
+  event: text("event").notNull(),
+  outcome: text("outcome").notNull(),
+  receivedAt: timestamp("received_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("payment_events_dedupe").on(table.dedupeKey),
+  index("payment_events_payment").on(table.paymentId),
+]);

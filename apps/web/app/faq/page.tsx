@@ -1,6 +1,6 @@
 const faqs = [
-  ["Apa itu Yubie?", "Yubie adalah startup pangan Indonesia yang mengembangkan produk kontemporer berbasis ubi lokal."],
-  ["Produk apa yang sudah tersedia?", "Yubie Flour memiliki ukuran dan harga awal terverifikasi. Yubie Shake dan Yubie Ppang masih Coming Soon."],
+  ["Apa itu Yubie?", "Yubie adalah startup pangan Indonesia yang mengembangkan produk kontemporer berbahan ubi lokal."],
+  ["Produk apa yang sudah tersedia?", "Yubie Flour memiliki ukuran dan harga awal terverifikasi. Yubie Shake, Yubie Ppang, dan Yubie Mie masih Coming Soon."],
   ["Apakah produk sudah tersertifikasi?", "Informasi sertifikasi akan dipublikasikan setelah final verification. Situs ini tidak menampilkan sertifikasi yang belum disetujui."],
   ["Bagaimana untuk kebutuhan bisnis?", "Silakan gunakan halaman B2B untuk memulai diskusi kebutuhan, sampling, dan aplikasi produk."],
 ];

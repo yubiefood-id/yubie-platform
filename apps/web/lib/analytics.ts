@@ -11,7 +11,17 @@ export type YubieAnalyticsEvent =
   | "whatsapp_intent_click"
   | "b2b_sample_click"
   | "b2b_product_development_click"
-  | "product_waitlist_submit";
+  | "product_waitlist_submit"
+  | "hero_cta_click"
+  | "add_to_cart"
+  | "view_cart"
+  | "begin_checkout"
+  | "add_payment_info"
+  | "purchase"
+  | "login_start"
+  | "login_success"
+  | "login_failed"
+  | "account_view";
 
 type SafeValue = string | number | boolean;
 

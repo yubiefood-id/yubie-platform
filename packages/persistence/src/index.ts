@@ -18,4 +18,6 @@ export * from "./repositories/assistant-outbox-repository.js";
 export * from "./repositories/knowledge-repository.js";
 export * from "./repositories/runtime-config-repository.js";
 export * from "./repositories/reconcile-checkpoint-repository.js";
+export * from "./repositories/order-repository.js";
+export * from "./repositories/identity-repository.js";
 export * from "./schema/index.js";

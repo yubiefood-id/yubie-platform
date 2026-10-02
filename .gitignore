@@ -56,3 +56,10 @@ graphify-out/engineering-graph.json
 
 # cursor local hook state
 .cursor/hooks/
+
+# local agent/tool artifacts (never commit)
+.v2c/
+.video_agent/
+.zcode/
+.zcodeignore
+valkey-mcp-server.log

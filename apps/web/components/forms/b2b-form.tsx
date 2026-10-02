@@ -46,15 +46,15 @@ export function B2BForm() {
   const submit = async (data: Data) => { const response = await fetch("/api/b2b", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) }); if (response.ok) setSent(true); };
   if (sent) return <div className="b2b-success" role="status"><span>01</span><h2>Enquiry tervalidasi.</h2><p>Ini adalah prototype aman. Integrasi CRM/email belum diaktifkan, jadi belum ada pesan yang dikirim keluar.</p></div>;
   return <form className="b2b-form" onSubmit={handleSubmit(submit)} noValidate>
-    <label>Nama<input {...register("name")} />{errors.name && <small>{errors.name.message}</small>}</label>
-    <label>Nama bisnis<input {...register("business")} />{errors.business && <small>{errors.business.message}</small>}</label>
-    <label>Jenis bisnis<select {...register("type")} defaultValue=""><option value="" disabled>Pilih</option><option>Bakery</option><option>Café</option><option>Food Manufacturer</option><option>Retailer</option><option>UMKM Kuliner</option><option>Lainnya</option></select>{errors.type && <small>{errors.type.message}</small>}</label>
-    <label>Kota<input {...register("city")} />{errors.city && <small>{errors.city.message}</small>}</label>
-    <label>Email<input type="email" {...register("email")} />{errors.email && <small>{errors.email.message}</small>}</label>
-    <label>WhatsApp<input {...register("whatsapp")} inputMode="tel" />{errors.whatsapp && <small>{errors.whatsapp.message}</small>}</label>
+    <label>Nama<input {...register("name")} aria-invalid={!!errors.name} />{errors.name && <small>{errors.name.message}</small>}</label>
+    <label>Nama bisnis<input {...register("business")} aria-invalid={!!errors.business} />{errors.business && <small>{errors.business.message}</small>}</label>
+    <label>Jenis bisnis<select {...register("type")} defaultValue="" aria-invalid={!!errors.type}><option value="" disabled>Pilih</option><option>Bakery</option><option>Café</option><option>Food Manufacturer</option><option>Retailer</option><option>UMKM Kuliner</option><option>Lainnya</option></select>{errors.type && <small>{errors.type.message}</small>}</label>
+    <label>Kota<input {...register("city")} aria-invalid={!!errors.city} />{errors.city && <small>{errors.city.message}</small>}</label>
+    <label>Email<input type="email" {...register("email")} aria-invalid={!!errors.email} />{errors.email && <small>{errors.email.message}</small>}</label>
+    <label>WhatsApp<input {...register("whatsapp")} inputMode="tel" aria-invalid={!!errors.whatsapp} />{errors.whatsapp && <small>{errors.whatsapp.message}</small>}</label>
     <label>Estimasi kebutuhan / bulan<input {...register("need")} placeholder="Contoh: 20 kg" /></label>
     <label>Jenis kebutuhan<select {...register("intent")}>{Object.entries(intentLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>{errors.intent && <small>{errors.intent.message}</small>}</label>
-    <label>Produk yang diminati<select {...register("interest")} defaultValue=""><option value="" disabled>Pilih</option><option>Yubie Flour</option><option>Yubie Shake</option><option>Yubie Ppang</option><option>Collaboration</option></select>{errors.interest && <small>{errors.interest.message}</small>}</label>
+    <label>Produk yang diminati<select {...register("interest")} defaultValue="" aria-invalid={!!errors.interest}><option value="" disabled>Pilih</option><option>Yubie Flour</option><option>Yubie Shake</option><option>Yubie Ppang</option><option>Yubie Mie</option><option>Collaboration</option></select>{errors.interest && <small>{errors.interest.message}</small>}</label>
     <label className="wide">Pesan<textarea {...register("message")} rows={5} placeholder={intent === "sample" ? "Ceritakan use case sampel yang Anda butuhkan." : intent === "bulk" ? "Ceritakan volume dan jadwal kebutuhan bulk." : "Ceritakan kebutuhan Anda."} /></label>
     <label className="check wide"><input type="checkbox" {...register("consent")} /><span>Saya setuju data ini diproses untuk menindaklanjuti enquiry dan telah membaca <a href="/privacy">Privacy Policy</a>.</span></label>{errors.consent && <small className="wide">{errors.consent.message}</small>}
     <button className="button gold wide" disabled={isSubmitting}>{isSubmitting ? "Validating…" : intentLabels[intent]}<span>→</span></button>

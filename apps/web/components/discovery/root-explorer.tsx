@@ -55,7 +55,7 @@ export function RootExplorer({ compact = false }: { compact?: boolean }) {
         <p className="root-character">{active.sensoryCharacter}</p>
         <p>{active.textureCharacter}</p>
         <dl><div><dt>Best applications</dt><dd>{applications.map((item) => item?.name).join(" · ")}</dd></div><div><dt>Related products</dt><dd>{products.map((item) => item?.name).join(" · ")}</dd></div></dl>
-        {!compact && <Link className="text-link" href={`/recipes?root=${active.slug}`}>Explore recipes <span>→</span></Link>}
+        {!compact && <Link className="text-link" href="/our-roots#everyday-use">Explore everyday use <span>→</span></Link>}
       </div>
     </section>
   </div>;

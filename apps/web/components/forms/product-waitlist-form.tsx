@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { trackEvent } from "@/lib/analytics";
 
-export function ProductWaitlistForm({ productId, productName }: { productId: "shake" | "ppang"; productName: string }) {
+export function ProductWaitlistForm({ productId, productName }: { productId: "shake" | "ppang" | "mie"; productName: string }) {
   const [sent, setSent] = useState(false);
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<ProductWaitlistSubmission>({
     resolver: zodResolver(productWaitlistSchema),

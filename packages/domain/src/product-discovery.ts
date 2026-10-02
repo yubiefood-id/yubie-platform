@@ -62,8 +62,8 @@ export const productFamilies: Product[] = [
     positioning: "EVERYDAY INGREDIENT",
     format: "flour",
     status: "available",
-    image: "/photography/hero-lifestyle.webp",
-    imageAlt: "Rangkaian produk Yubie termasuk kemasan Yubie Flour",
+    image: "/products/yubie-flour.webp",
+    imageAlt: "Konsep kemasan Yubie Flour—pouch tepung ubi jalar ungu",
     eyebrow: "EVERYDAY INGREDIENT",
     story: "Satu format ingredient untuk kreasi B2C sehari-hari dan eksplorasi produk B2B.",
     sizes: [
@@ -82,7 +82,7 @@ export const productFamilies: Product[] = [
     format: "shake",
     status: "coming-soon",
     image: "/products/yubie-shake.webp",
-    imageAlt: "Konsep kemasan pouch Yubie Shake",
+    imageAlt: "Konsep kemasan Yubie Shake—pouch minuman serbuk instan ubi ungu",
     eyebrow: "PREMIUM CONVENIENCE · COMING SOON",
     story: "Konsep format instan yang mudah disimpan, dibawa, dan disiapkan untuk ritme modern.",
     sizes: [],
@@ -104,6 +104,25 @@ export const productFamilies: Product[] = [
     sizes: [],
     verificationStatus: "required",
     usageSteps: ["Keep Frozen", "Heat", "Enjoy"],
+  },
+  {
+    // Fourth family from the Eny Palupi product-information source. Every
+    // commercial fact (pack, price, ingredients, positioning) is unverified
+    // until the product-truth gate approves it, so it ships without sizes,
+    // without an offering, and with an awaiting-verification descriptor.
+    id: "mie",
+    slug: "yubie-mie",
+    name: "Yubie Mie",
+    descriptor: "Format mie dari keluarga Yubie — informasi produk menyusul.",
+    positioning: "COMING SOON",
+    format: "mie",
+    status: "coming-soon",
+    image: "/photography/ingredient-table.webp",
+    imageAlt: "Studi bahan Yubie; foto produk Yubie Mie menyusul setelah verifikasi",
+    eyebrow: "COMING SOON · AWAITING VERIFICATION",
+    story: "Format keempat dari keluarga produk Yubie. Detail kemasan dan informasi produk akan dibagikan setelah proses verifikasi selesai.",
+    sizes: [],
+    verificationStatus: "required",
   },
 ];
 
@@ -243,7 +262,7 @@ export const foodApplications: FoodApplication[] = [
   { id: "brownies", slug: "brownies", name: "Brownies", descriptor: "Format panggang dengan visual root yang distinctive.", image: "/photography/photography-direction.webp", imageAlt: "Arah fotografi Yubie sebagai visual sementara untuk aplikasi brownies", productIds: ["flour"], rootIds: ["ubi-ungu", "ubi-merah"], recipeIds: ["yubie-brownies"] },
   { id: "cake", slug: "cake", name: "Cake", descriptor: "Ruang eksplorasi untuk cake rumahan dan pengembangan bakery.", image: "/photography/ingredient-table.webp", imageAlt: "Studi bahan Yubie sebagai visual sementara untuk aplikasi cake", productIds: ["flour"], rootIds: ["ubi-madu", "ubi-oranye", "ubi-jepang"], recipeIds: [] },
   { id: "noodles", slug: "noodles", name: "Noodles", descriptor: "Aplikasi savoury yang memperluas kemungkinan tepung ubi.", image: "/photography/brand-foundation.webp", imageAlt: "Studi bahan Yubie sebagai visual sementara untuk aplikasi noodles", productIds: ["flour"], rootIds: ["ubi-merah", "ubi-jepang"], recipeIds: [] },
-  { id: "porridge", slug: "porridge", name: "Porridge", descriptor: "Ide breakfast lembut berbasis eksplorasi root.", image: "/photography/shake-preparation.webp", imageAlt: "Studi penyajian Yubie sebagai visual sementara untuk aplikasi porridge", productIds: ["flour", "shake"], rootIds: ["ubi-ungu", "ubi-oranye"], recipeIds: ["creamy-bowl"] },
+  { id: "porridge", slug: "porridge", name: "Porridge", descriptor: "Ide breakfast lembut berbahan eksplorasi root.", image: "/photography/shake-preparation.webp", imageAlt: "Studi penyajian Yubie sebagai visual sementara untuk aplikasi porridge", productIds: ["flour", "shake"], rootIds: ["ubi-ungu", "ubi-oranye"], recipeIds: ["creamy-bowl"] },
 ];
 
 export const recipes: RecipeSummary[] = [
