@@ -1,9 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { ok } from "@yubie/domain";
 import type { OutboxRepository } from "@yubie/application";
 import type { Database } from "../client.js";
 import { outboxEvents } from "../schema/index.js";
-
-let outboxCounter = 0;
 
 export class PostgresOutboxRepository implements OutboxRepository {
   constructor(private readonly database: Database) {}
@@ -16,9 +15,10 @@ export class PostgresOutboxRepository implements OutboxRepository {
     payloadJson: string;
     availableAt: string;
   }) {
-    outboxCounter += 1;
+    // Opaque per-row ids: a process-local counter would collide across
+    // restarts and break the PRIMARY KEY on insert.
     await this.database.db.insert(outboxEvents).values({
-      id: `outbox-${outboxCounter}`,
+      id: `outbox_${randomUUID()}`,
       eventType: event.eventType,
       aggregateType: event.aggregateType,
       aggregateId: event.aggregateId,

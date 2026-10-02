@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "node:crypto";
+import { parseYubieEnvName } from "@yubie/config";
 import {
   createDatabase,
   PostgresAssistantOutboxRepository,
@@ -6,10 +8,17 @@ import {
 } from "@yubie/persistence";
 
 function authorizeOps(request: Request): boolean {
-  const token = process.env.OPS_API_TOKEN;
-  if (!token) return process.env.NODE_ENV !== "production";
-  const auth = request.headers.get("authorization");
-  return auth === `Bearer ${token}`;
+  const token = process.env.OPS_API_TOKEN ?? "";
+  if (token) {
+    const auth = request.headers.get("authorization") ?? "";
+    const expected = `Bearer ${token}`;
+    if (auth.length !== expected.length) return false;
+    return timingSafeEqual(Buffer.from(auth), Buffer.from(expected));
+  }
+  // Without a token the ops surface is reachable only in explicitly local
+  // environments — never staging/preview/production deployments.
+  const env = parseYubieEnvName(process.env.YUBIE_ENV);
+  return (env === "development" || env === "test") && process.env.NODE_ENV !== "production";
 }
 
 export async function handleOpsAssistant(request: Request, database: Database): Promise<Response | null> {

@@ -1,5 +1,6 @@
 export * from "./client.js";
 export * from "./health-probe.js";
+export * from "./tx-manager.js";
 export * from "./worker-repos.js";
 export * from "./repositories/marketplace-listing-repository.js";
 export * from "./repositories/outbound-intent-repository.js";
@@ -19,5 +20,8 @@ export * from "./repositories/knowledge-repository.js";
 export * from "./repositories/runtime-config-repository.js";
 export * from "./repositories/reconcile-checkpoint-repository.js";
 export * from "./repositories/order-repository.js";
+export * from "./repositories/payment-webhook-inbox-repository.js";
+export * from "./repositories/inventory-repository.js";
+export * from "./repositories/growth-repository.js";
 export * from "./repositories/identity-repository.js";
 export * from "./schema/index.js";

@@ -1,9 +1,8 @@
-import { NextResponse } from "next/server";
-import { newsletterSubmissionSchema } from "@yubie/validation";
+import { proxyApi } from "@/lib/api-proxy";
 
+// Durable submission (B9): the same-origin proxy forwards to apps/api, which
+// persists the row + consent ledger entry transactionally. The old local
+// "validated-prototype" 202 dropped every submission.
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => null);
-  const parsed = newsletterSubmissionSchema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ ok: false, message: "Invalid submission" }, { status: 400 });
-  return NextResponse.json({ ok: true, mode: "validated-prototype", message: "Validated locally; external delivery integration pending." }, { status: 202 });
+  return proxyApi(request, "/v1/newsletter");
 }

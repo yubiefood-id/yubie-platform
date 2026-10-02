@@ -1,4 +1,5 @@
-import { index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb } from "drizzle-orm/pg-core";
+import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const listingStatusEnum = pgEnum("listing_status", ["draft", "active", "paused", "broken", "retired"]);
 export const marketplaceEnum = pgEnum("marketplace", ["shopee", "tokopedia"]);
@@ -66,6 +67,7 @@ export const idempotencyKeys = pgTable("idempotency_keys", {
   idempotencyKey: text("idempotency_key").notNull(),
   requestHash: text("request_hash").notNull(),
   status: text("status").notNull(),
+  responseJson: text("response_json"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
 }, (table) => [
   uniqueIndex("idempotency_keys_unique").on(table.scope, table.principalKey, table.operation, table.idempotencyKey),
@@ -367,18 +369,26 @@ export const authSessions = pgTable("auth_sessions", {
 export const firstPartyOrders = pgTable("orders", {
   id: text("id").primaryKey(),
   checkoutRef: text("checkout_ref").notNull(),
+  checkoutPublicToken: text("checkout_public_token").notNull(),
   status: text("status").notNull().default("pending_payment"),
   userId: text("user_id").references(() => users.id),
   customerEmail: text("customer_email").notNull(),
   customerName: text("customer_name"),
   deliveryJsonb: jsonb("delivery_jsonb"),
   currency: text("currency").notNull().default("IDR"),
+  subtotalAmount: integer("subtotal_amount").notNull(),
+  shippingAmount: integer("shipping_amount").notNull().default(0),
+  discountAmount: integer("discount_amount").notNull().default(0),
+  taxAmount: integer("tax_amount").notNull().default(0),
+  grandTotalAmount: integer("grand_total_amount").notNull(),
   totalAmount: integer("total_amount").notNull(),
+  shippingJsonb: jsonb("shipping_jsonb"),
   linesJsonb: jsonb("lines_jsonb").notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
 }, (table) => [
   uniqueIndex("orders_checkout_ref").on(table.checkoutRef),
+  uniqueIndex("orders_checkout_public_token").on(table.checkoutPublicToken),
   index("orders_user_created").on(table.userId, table.createdAt),
 ]);
 
@@ -386,16 +396,19 @@ export const orderPayments = pgTable("order_payments", {
   id: text("id").primaryKey(),
   orderId: text("order_id").notNull().references(() => firstPartyOrders.id),
   provider: text("provider").notNull(),
-  providerSessionId: text("provider_session_id").notNull(),
+  providerSessionId: text("provider_session_id"),
   redirectUrl: text("redirect_url"),
   currency: text("currency").notNull().default("IDR"),
   amount: integer("amount").notNull(),
   status: text("status").notNull().default("pending"),
   expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }),
+  providerBusinessId: text("provider_business_id"),
+  providerPaymentId: text("provider_payment_id"),
+  reconciliationState: text("reconciliation_state"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
 }, (table) => [
-  uniqueIndex("order_payments_provider_session").on(table.provider, table.providerSessionId),
+  uniqueIndex("order_payments_provider_session").on(table.provider, table.providerSessionId).where(sql`provider_session_id IS NOT NULL`),
   index("order_payments_order").on(table.orderId),
 ]);
 
@@ -410,3 +423,109 @@ export const paymentEvents = pgTable("payment_events", {
   uniqueIndex("payment_events_dedupe").on(table.dedupeKey),
   index("payment_events_payment").on(table.paymentId),
 ]);
+
+export const inventoryLotStatusEnum = pgEnum("inventory_lot_status", ["received", "quarantined", "released", "recalled", "depleted"]);
+export const inventoryReservationStatusEnum = pgEnum("inventory_reservation_status", ["active", "consumed", "released"]);
+
+export const inventoryLots = pgTable("inventory_lots", {
+  id: text("id").primaryKey(),
+  productId: text("product_id").notNull(),
+  sizeId: text("size_id").notNull(),
+  lotCode: text("lot_code").notNull(),
+  quantityOnHand: integer("quantity_on_hand").notNull(),
+  expiryDate: date("expiry_date").notNull(),
+  status: inventoryLotStatusEnum("status").notNull().default("received"),
+  releasedAt: timestamp("released_at", { withTimezone: true, mode: "string" }),
+  releaseReason: text("release_reason"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("inventory_lots_sku_code").on(table.productId, table.sizeId, table.lotCode),
+]);
+
+export const inventoryReservations = pgTable("inventory_reservations", {
+  id: text("id").primaryKey(),
+  orderId: text("order_id").notNull().references(() => firstPartyOrders.id),
+  lotId: text("lot_id").notNull().references(() => inventoryLots.id),
+  productId: text("product_id").notNull(),
+  sizeId: text("size_id").notNull(),
+  quantity: integer("quantity").notNull(),
+  status: inventoryReservationStatusEnum("status").notNull().default("active"),
+  reason: text("reason"),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+});
+
+export const inventoryMovements = pgTable("inventory_movements", {
+  id: text("id").primaryKey(),
+  lotId: text("lot_id").notNull().references(() => inventoryLots.id),
+  productId: text("product_id").notNull(),
+  sizeId: text("size_id").notNull(),
+  movementType: text("movement_type").notNull(),
+  quantityDelta: integer("quantity_delta").notNull(),
+  orderId: text("order_id"),
+  reason: text("reason"),
+  occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "string" }).notNull(),
+});
+
+// --- Growth + consent (migration 0010) ---
+
+export const newsletterSubscriptions = pgTable("newsletter_subscriptions", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull(),
+  status: text("status").notNull().default("pending"),
+  name: text("name"),
+  source: text("source").notNull(),
+  consentVersion: text("consent_version").notNull(),
+  consentedAt: timestamp("consented_at", { withTimezone: true, mode: "string" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("newsletter_subscriptions_email").on(table.email),
+]);
+
+export const productWaitlistEntries = pgTable("product_waitlist_entries", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull(),
+  productId: text("product_id").notNull(),
+  status: text("status").notNull().default("waiting"),
+  source: text("source").notNull(),
+  consentVersion: text("consent_version").notNull(),
+  consentedAt: timestamp("consented_at", { withTimezone: true, mode: "string" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("product_waitlist_email_product").on(table.email, table.productId),
+]);
+
+export const b2bLeads = pgTable("b2b_leads", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  business: text("business").notNull(),
+  type: text("type").notNull(),
+  city: text("city").notNull(),
+  email: text("email").notNull(),
+  whatsapp: text("whatsapp").notNull(),
+  need: text("need"),
+  intent: text("intent").notNull(),
+  interest: text("interest").notNull(),
+  message: text("message"),
+  status: text("status").notNull().default("new"),
+  source: text("source").notNull(),
+  consentVersion: text("consent_version").notNull(),
+  consentedAt: timestamp("consented_at", { withTimezone: true, mode: "string" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+});
+
+export const consentLedger = pgTable("consent_ledger", {
+  id: text("id").primaryKey(),
+  subjectType: text("subject_type").notNull(),
+  subjectKey: text("subject_key").notNull(),
+  purpose: text("purpose").notNull(),
+  action: text("action").notNull(),
+  consentVersion: text("consent_version").notNull(),
+  source: text("source").notNull(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "string" }).notNull(),
+});

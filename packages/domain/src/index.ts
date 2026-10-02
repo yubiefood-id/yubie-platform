@@ -123,4 +123,5 @@ export * from "./product-discovery.js";
 export * from "./channel.js";
 export * from "./assistant.js";
 export * from "./orders.js";
+export * from "./inventory.js";
 export * from "./identity.js";

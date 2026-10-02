@@ -24,7 +24,7 @@ Production D2C is marketplace-first.
 
 - Public purchase CTAs route to approved marketplace listings.
 - WhatsApp is used for questions, assisted B2C and B2B.
-- Direct payment on yubie.id is deferred by ADR-004.
+- Direct payment on yubie.id is implemented per ADR-012 (Xendit TEST mode only; LIVE prohibited until the sandbox matrix passes). ADR-004's marketplace-first posture remains the rollback path.
 - Do not connect production payment credentials to the current preview checkout.
 - Do not scrape Shopee, Tokopedia, TikTok Shop or Seller Center. Use approved APIs, webhooks, official exports or explicit operator imports.
 

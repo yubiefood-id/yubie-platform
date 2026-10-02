@@ -1,6 +1,17 @@
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
-import { handleRequest } from "./index.js";
+import { handleRequest, setAppContext } from "./index.js";
+import { createAppContext } from "./composition/create-app.js";
+
+// Fail closed at process start, not on first request: invalid commerce
+// configuration (CONFIG_ERROR) must stop the server before it can serve a
+// half-configured payments mode.
+try {
+  setAppContext(createAppContext());
+} catch (error) {
+  console.error(JSON.stringify({ level: "error", event: "api.config_error", message: String(error) }));
+  process.exit(1);
+}
 
 const port = Number(process.env.PORT ?? 8787);
 

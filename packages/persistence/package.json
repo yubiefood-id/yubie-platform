@@ -13,7 +13,7 @@
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test tests/*.test.mjs",
+    "test": "npm run build && node --test --test-concurrency=1 tests/*.test.mjs",
     "db:migrate": "node dist/scripts/migrate.js",
     "db:seed": "node dist/scripts/seed.js",
     "db:seed:assistant": "node dist/scripts/seed-assistant.js",

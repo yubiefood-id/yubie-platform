@@ -63,7 +63,7 @@ test("migrations 0006+0007 fresh database creates auth and order tables", { skip
   try {
     await sql`DROP SCHEMA public CASCADE`;
     await sql`CREATE SCHEMA public`;
-    await applyMigrations(sql);
+    await applyMigrations(sql, "0007_orders.sql");
     await assertAuthAndOrderTables(sql);
   } finally {
     await sql.end();
@@ -75,7 +75,7 @@ test("migrations 0006+0007 upgrade preserves existing orders data", { skip: !dat
   const checkoutRef = `upgrade-proof-${Date.now()}`;
   const now = new Date().toISOString();
   try {
-    await applyMigrations(sql);
+    await applyMigrations(sql, "0007_orders.sql");
     await sql`
       INSERT INTO users (id, google_sub, email, name, created_at, updated_at)
       VALUES ('usr-proof', 'proof-sub', 'proof@example.com', 'Proof', ${now}, ${now})
@@ -84,7 +84,7 @@ test("migrations 0006+0007 upgrade preserves existing orders data", { skip: !dat
       INSERT INTO orders (id, checkout_ref, status, user_id, customer_email, total_amount, created_at, updated_at)
       VALUES ('ord-proof', ${checkoutRef}, 'paid', 'usr-proof', 'proof@example.com', 30000, ${now}, ${now})
     `;
-    await applyMigrations(sql);
+    await applyMigrations(sql, "0007_orders.sql");
     const orders = await sql`SELECT status, total_amount FROM orders WHERE checkout_ref = ${checkoutRef}`;
     assert.equal(orders[0]?.status, "paid");
     assert.equal(orders[0]?.total_amount, 30000);

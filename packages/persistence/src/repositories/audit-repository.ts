@@ -1,9 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { ok } from "@yubie/domain";
 import type { AuditRepository } from "@yubie/application";
 import type { Database } from "../client.js";
 import { auditEvents } from "../schema/index.js";
-
-let auditCounter = 0;
 
 export class PostgresAuditRepository implements AuditRepository {
   constructor(private readonly database: Database) {}
@@ -15,9 +14,10 @@ export class PostgresAuditRepository implements AuditRepository {
     actor: string;
     occurredAt: string;
   }) {
-    auditCounter += 1;
+    // Opaque per-row ids: a process-local counter would collide across
+    // restarts and break the PRIMARY KEY on insert.
     await this.database.db.insert(auditEvents).values({
-      id: `audit-${auditCounter}`,
+      id: `audit_${randomUUID()}`,
       actor: event.actor,
       action: event.action,
       resourceType: event.resourceType,

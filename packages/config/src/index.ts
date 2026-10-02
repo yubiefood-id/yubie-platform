@@ -339,3 +339,168 @@ function configMessage(error: unknown): string {
   if (error instanceof RuntimeConfigError) return error.message.replace("CONFIG_ERROR: ", "");
   return String(error);
 }
+
+// --- ADR-012: first-party commerce selection (fail-closed) ---
+
+export type CommerceProviderName = "preview" | "xendit" | "disabled";
+export type PurchaseOptionsSourceName = "static" | "database";
+export type InventoryModeName = "none" | "lots";
+
+const COMMERCE_PROVIDER_NAMES: readonly CommerceProviderName[] = ["preview", "xendit", "disabled"];
+const PURCHASE_OPTIONS_SOURCE_NAMES: readonly PurchaseOptionsSourceName[] = ["static", "database"];
+const INVENTORY_MODE_NAMES: readonly InventoryModeName[] = ["none", "lots"];
+
+export interface CommerceRuntimeConfig {
+  provider: CommerceProviderName;
+  purchaseOptionsSource: PurchaseOptionsSourceName;
+  /** "lots" gates checkout on released, unexpired lot stock (food-safety). */
+  inventoryMode: InventoryModeName;
+  /** Whether DATABASE_URL is present. The value itself never leaves this boundary. */
+  databaseConfigured: boolean;
+  /** Public web origin used for Xendit return URLs; validated https when xendit. */
+  appOrigin: string | null;
+}
+
+export type CommerceRuntimeConfigInspection =
+  | { ok: true; config: CommerceRuntimeConfig }
+  | { ok: false; errors: string[] };
+
+/**
+ * Resolve the commerce provider with finite values only. Unknown values fail
+ * instead of silently degrading to preview: a typo like COMMERCE_PROVIDER=xendti
+ * must stop the deployment, not leave payments half-configured.
+ */
+export function parseCommerceProviderName(raw: string | undefined): CommerceProviderName {
+  if (raw === undefined || raw === "") return "preview";
+  const match = COMMERCE_PROVIDER_NAMES.find((name) => name === raw.toLowerCase());
+  if (!match) {
+    throw new RuntimeConfigError(
+      `COMMERCE_PROVIDER must be one of: ${COMMERCE_PROVIDER_NAMES.join(", ")} (received "${raw}")`,
+    );
+  }
+  return match;
+}
+
+/**
+ * Resolve the purchase-options source. Unset defaults to database when
+ * DATABASE_URL is present, else static. "database" without DATABASE_URL fails:
+ * a typo must not silently drop transactional persistence to memory.
+ */
+export function parsePurchaseOptionsSourceName(env: RuntimeEnvSource): PurchaseOptionsSourceName {
+  const raw = env.PURCHASE_OPTIONS_SOURCE ?? "";
+  if (raw === "") return env.DATABASE_URL ? "database" : "static";
+  const match = PURCHASE_OPTIONS_SOURCE_NAMES.find((name) => name === raw.toLowerCase());
+  if (!match) {
+    throw new RuntimeConfigError(
+      `PURCHASE_OPTIONS_SOURCE must be one of: ${PURCHASE_OPTIONS_SOURCE_NAMES.join(", ")} (received "${raw}")`,
+    );
+  }
+  if (match === "database" && !env.DATABASE_URL) {
+    throw new RuntimeConfigError(
+      "PURCHASE_OPTIONS_SOURCE=database requires DATABASE_URL (never fall back to in-memory repositories)",
+    );
+  }
+  return match;
+}
+
+/**
+ * Resolve the inventory mode. First-party payments in staging/production must
+ * be lot-gated: sellability requires a released, unexpired lot, and a typo
+ * must stop startup rather than silently selling unproven stock.
+ */
+export function parseInventoryModeName(raw: string | undefined): InventoryModeName {
+  if (raw === undefined || raw === "") return "none";
+  const match = INVENTORY_MODE_NAMES.find((name) => name === raw.toLowerCase());
+  if (!match) {
+    throw new RuntimeConfigError(
+      `INVENTORY_MODE must be one of: ${INVENTORY_MODE_NAMES.join(", ")} (received "${raw}")`,
+    );
+  }
+  return match;
+}
+
+/**
+ * Validate commerce runtime configuration. First-party payments (xendit) fail
+ * closed: they require durable PostgreSQL, the provider secret, the webhook
+ * callback token, the business id used for webhook validation, and an https
+ * APP_ORIGIN (Xendit return URLs must be HTTPS). In staging/production, xendit
+ * additionally requires lot-gated inventory. Error messages name variables
+ * only — never secret values.
+ */
+export function parseCommerceRuntimeConfig(env: RuntimeEnvSource = process.env): CommerceRuntimeConfig {
+  const errors: string[] = [];
+
+  let provider: CommerceProviderName = "preview";
+  try {
+    provider = parseCommerceProviderName(env.COMMERCE_PROVIDER);
+  } catch (error) {
+    errors.push(configMessage(error));
+  }
+
+  let purchaseOptionsSource: PurchaseOptionsSourceName = "static";
+  try {
+    purchaseOptionsSource = parsePurchaseOptionsSourceName(env);
+  } catch (error) {
+    errors.push(configMessage(error));
+  }
+
+  let inventoryMode: InventoryModeName = "none";
+  try {
+    inventoryMode = parseInventoryModeName(env.INVENTORY_MODE);
+  } catch (error) {
+    errors.push(configMessage(error));
+  }
+
+  const databaseConfigured = Boolean(env.DATABASE_URL);
+  const appOrigin = (env.APP_ORIGIN ?? "").trim() || null;
+
+  const deployment = parseYubieEnvName(env.YUBIE_ENV) === "staging" || parseYubieEnvName(env.YUBIE_ENV) === "production";
+
+  if (provider === "xendit") {
+    if (!databaseConfigured) {
+      errors.push(
+        "COMMERCE_PROVIDER=xendit requires DATABASE_URL (first-party orders/payments must be durable; in-memory commerce is never a payments fallback)",
+      );
+    }
+    for (const varName of ["XENDIT_SECRET_KEY", "XENDIT_WEBHOOK_TOKEN", "XENDIT_BUSINESS_ID"] as const) {
+      if (!env[varName]) {
+        errors.push(`COMMERCE_PROVIDER=xendit requires ${varName}`);
+      }
+    }
+    if (!appOrigin) {
+      errors.push("COMMERCE_PROVIDER=xendit requires APP_ORIGIN");
+    } else {
+      try {
+        const parsed = new URL(appOrigin);
+        if (parsed.protocol !== "https:") {
+          errors.push("APP_ORIGIN must be an https URL when COMMERCE_PROVIDER=xendit (Xendit return URLs must be HTTPS)");
+        }
+      } catch {
+        errors.push("APP_ORIGIN must be a valid URL when COMMERCE_PROVIDER=xendit");
+      }
+    }
+    if (deployment && inventoryMode !== "lots") {
+      errors.push(
+        `COMMERCE_PROVIDER=xendit in ${parseYubieEnvName(env.YUBIE_ENV)} requires INVENTORY_MODE=lots (direct commerce must not sell without released, unexpired lots)`,
+      );
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new RuntimeConfigError(errors.join("; "));
+  }
+
+  return { provider, purchaseOptionsSource, inventoryMode, databaseConfigured, appOrigin };
+}
+
+/** Non-throwing variant for readiness endpoints and operator tooling. */
+export function inspectCommerceRuntimeConfig(env: RuntimeEnvSource = process.env): CommerceRuntimeConfigInspection {
+  try {
+    return { ok: true, config: parseCommerceRuntimeConfig(env) };
+  } catch (error) {
+    if (error instanceof RuntimeConfigError) {
+      return { ok: false, errors: [error.message] };
+    }
+    return { ok: false, errors: [String(error)] };
+  }
+}

@@ -1,12 +1,13 @@
 import PgBoss from "pg-boss";
 import { inspectRuntimeConfig } from "@yubie/config";
-import { checkListingHealth, FixedClock, SequentialIdGenerator } from "@yubie/application";
+import { checkListingHealth, SystemClock } from "@yubie/application";
 import { createSupportProvider, HttpLinkHealthChecker } from "@yubie/integrations";
 import { closeDatabase, createWorkerRepositories } from "@yubie/persistence";
 import { processAssistantJob } from "./assistant-handler.js";
 import { startMetricsServer } from "./metrics-server.js";
 import { reconcileSupport } from "./reconcile-handler.js";
 import { deliverSupportOutbox, processPendingOutbox } from "./reply-delivery-handler.js";
+import { runPaymentReconcile } from "./payment-reconcile-handler.js";
 
 // Fail closed before any queue starts processing: an invalid runtime
 // configuration (unknown provider, missing Zammad values in
@@ -29,7 +30,7 @@ if (!databaseUrl) {
 const boss = new PgBoss({ connectionString: databaseUrl });
 const repos = createWorkerRepositories(databaseUrl);
 const checker = new HttpLinkHealthChecker();
-const clock = new FixedClock(new Date().toISOString());
+const clock = new SystemClock();
 
 async function start() {
   if (process.env.WORKER_METRICS_ENABLED !== "false") {
@@ -83,6 +84,15 @@ async function start() {
     const inbox = new PostgresWebhookInboxRepository(repos.database);
     await inbox.purgeExpiredRawBodies(new Date().toISOString());
   });
+
+  // First-party payment recovery (ADR-012): stale drafts, pending payments
+  // past expiry, unknown provider outcomes. The handler no-ops unless
+  // COMMERCE_PROVIDER=xendit is fully configured.
+  await boss.createQueue("payment.reconcile");
+  await boss.work("payment.reconcile", async () => {
+    await runPaymentReconcile(repos.database);
+  });
+  await boss.schedule("payment.reconcile", "*/5 * * * *", {});
 
   await boss.work("listing.health", async (jobs) => {
     for (const job of jobs) {

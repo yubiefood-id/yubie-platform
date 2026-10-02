@@ -1,20 +1,25 @@
 import { PreviewCommerceProvider } from "@yubie/commerce";
 import {
   createFirstPartyCheckout,
+  getAccountOrder,
   getCheckoutStatus,
   getPurchaseOptions,
   googleLogin,
+  joinProductWaitlist,
   logout,
   processPaymentWebhook,
   resolveMarketplaceRedirect,
   resolveSession,
   resolveWhatsAppRedirect,
+  submitB2bLead,
+  subscribeNewsletter,
   webhookError,
 } from "@yubie/application";
 import { b2bLeadSchema, checkoutRequestSchema, googleLoginSchema, newsletterSubmissionSchema, productWaitlistSchema } from "@yubie/validation";
 import { catalog } from "./catalog.js";
 import { createAppContext, type AppContext } from "./composition/create-app.js";
 import { createRequestId } from "./middleware/request-id.js";
+import { logEvent } from "./middleware/log.js";
 
 const commerce = new PreviewCommerceProvider();
 let appContext: AppContext | null = null;
@@ -112,26 +117,67 @@ export async function handleRequest(request: Request): Promise<Response> {
   }
 
   if (request.method === "POST" && url.pathname === "/v1/newsletter") {
-    return validateJson(request, newsletterSubmissionSchema);
+    const parsed = newsletterSubmissionSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    const result = await subscribeNewsletter(
+      { email: parsed.data.email, ...(parsed.data.name ? { name: parsed.data.name } : {}), source: "web" },
+      { tx: ctx.tx, clock: ctx.clock, ids: ctx.ids },
+    );
+    if (!result.ok) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    return json({ ok: true, data: { outcome: result.value.outcome } }, { status: 201 });
   }
 
   if (request.method === "POST" && url.pathname === "/v1/waitlist") {
-    return validateJson(request, productWaitlistSchema);
+    const parsed = productWaitlistSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    const result = await joinProductWaitlist(
+      { email: parsed.data.email, productId: parsed.data.productId, source: "web" },
+      { tx: ctx.tx, clock: ctx.clock, ids: ctx.ids },
+    );
+    if (!result.ok) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    return json({ ok: true, data: { outcome: result.value.outcome } }, { status: 201 });
   }
 
   if (request.method === "POST" && url.pathname === "/v1/b2b-leads") {
-    return validateJson(request, b2bLeadSchema);
+    const parsed = b2bLeadSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    const result = await submitB2bLead(
+      {
+        name: parsed.data.name,
+        business: parsed.data.business,
+        type: parsed.data.type,
+        city: parsed.data.city,
+        email: parsed.data.email,
+        whatsapp: parsed.data.whatsapp,
+        ...(parsed.data.need ? { need: parsed.data.need } : {}),
+        intent: parsed.data.intent,
+        interest: parsed.data.interest,
+        ...(parsed.data.message ? { message: parsed.data.message } : {}),
+        source: "web",
+      },
+      { tx: ctx.tx, clock: ctx.clock, ids: ctx.ids },
+    );
+    if (!result.ok) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    return json({ ok: true, data: { outcome: result.value.outcome } }, { status: 201 });
   }
 
   if (request.method === "POST" && url.pathname === "/v1/checkouts" && process.env.COMMERCE_PROVIDER !== "disabled") {
-    const parsed = checkoutRequestSchema.safeParse(await request.json().catch(() => null));
+    const rawBody = await request.text();
+    let parsedJson: unknown = null;
+    try {
+      parsedJson = JSON.parse(rawBody);
+    } catch {
+      parsedJson = null;
+    }
+    const parsed = checkoutRequestSchema.safeParse(parsedJson);
     if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
     if (ctx.paymentMode === "xendit" && ctx.paymentProvider) {
       // First-party flow (ADR-012): server re-prices every line from the
       // canonical catalog, creates the order + Xendit payment session, and
-      // returns only {checkoutId, redirectUrl, ...} to the browser.
+      // returns only {checkoutToken, redirectUrl, ...} to the browser. The
+      // Idempotency-Key makes duplicate submits replay the first response.
       const sessionUser = await resolveSession(readSessionToken(request), { sessions: ctx.authSessions, users: ctx.users, tokens: ctx.tokens, clock: ctx.clock });
-      const appOrigin = process.env.APP_ORIGIN ?? url.origin;
+      const appOrigin = ctx.appOrigin ?? url.origin;
       const result = await createFirstPartyCheckout({
         lines: parsed.data.lines,
         customerEmail: parsed.data.customerEmail,
@@ -140,11 +186,18 @@ export async function handleRequest(request: Request): Promise<Response> {
         userId: sessionUser.value?.id ?? null,
         successReturnUrl: `${appOrigin}/checkout/success`,
         cancelReturnUrl: `${appOrigin}/checkout/cancel`,
-      }, { orders: ctx.orders, payments: ctx.payments, provider: ctx.paymentProvider, clock: ctx.clock, ids: ctx.ids });
+        ...(process.env.SHIPPING_POLICY ? { shippingPolicy: process.env.SHIPPING_POLICY } : {}),
+        inventoryMode: ctx.inventoryMode,
+        idempotencyKey: request.headers.get("idempotency-key"),
+        idempotencyPrincipal: sessionUser.value?.id ?? "guest",
+        rawRequestBody: rawBody,
+      }, { tx: ctx.tx, provider: ctx.paymentProvider, clock: ctx.clock, ids: ctx.ids });
       if (!result.ok) {
-        const status = result.error.code === "validation" ? 400 : 409;
-        return json({ ok: false, code: result.error.code === "validation" ? "INVALID_REQUEST" : "UNAVAILABLE_LINE" }, { status });
+        logEvent("api.checkout_failed", { requestId, errorCode: result.error.code });
+        const status = result.error.code === "validation" ? 400 : result.error.code === "conflict" ? 409 : 502;
+        return json({ ok: false, code: result.error.code === "validation" ? "INVALID_REQUEST" : result.error.code === "conflict" ? "IDEMPOTENCY_KEY_REUSED" : "UNAVAILABLE_LINE" }, { status });
       }
+      logEvent("api.checkout_created", { requestId, checkoutRef: result.value.checkoutRef, totalAmount: result.value.totalAmount, currency: result.value.currency, mode: result.value.mode });
       return json({ ok: true, data: result.value }, { status: 201 });
     }
     const lines = parsed.data.lines.map((line) => {
@@ -161,10 +214,12 @@ export async function handleRequest(request: Request): Promise<Response> {
 
   const checkoutStatusMatch = url.pathname.match(/^\/v1\/checkouts\/([^/]+)$/);
   if (request.method === "GET" && checkoutStatusMatch?.[1]) {
+    // Public, token-scoped, PII-free: only opaque-token lookups answer here;
+    // full order views live behind the authenticated account endpoint.
     const result = await getCheckoutStatus(decodeURIComponent(checkoutStatusMatch[1]), {
+      tx: ctx.tx,
       orders: ctx.orders,
       payments: ctx.payments,
-      paymentEvents: ctx.paymentEvents,
       ...(ctx.paymentProvider ? { provider: ctx.paymentProvider } : {}),
       clock: ctx.clock,
       ids: ctx.ids,
@@ -175,13 +230,15 @@ export async function handleRequest(request: Request): Promise<Response> {
   }
 
   if (request.method === "POST" && url.pathname === "/v1/webhooks/xendit/payment-session") {
-    if (!ctx.webhookToken) return json({ ok: false, code: "WEBHOOK_NOT_CONFIGURED" }, { status: 503 });
+    if (!ctx.webhookToken || !ctx.xenditBusinessId) return json({ ok: false, code: "WEBHOOK_NOT_CONFIGURED" }, { status: 503 });
     const payload = await request.json().catch(() => null);
     const outcome = await processPaymentWebhook({
       callbackToken: request.headers.get("x-callback-token"),
       expectedToken: ctx.webhookToken,
+      expectedBusinessId: ctx.xenditBusinessId,
       payload,
-    }, { orders: ctx.orders, payments: ctx.payments, paymentEvents: ctx.paymentEvents, clock: ctx.clock, ids: ctx.ids });
+    }, { tx: ctx.tx, clock: ctx.clock, ids: ctx.ids });
+    logEvent("api.payment_webhook", { requestId, outcome: outcome.result, ...(outcome.result === "rejected" ? { code: outcome.code } : {}) });
     if (outcome.result === "rejected") {
       return json({ ok: false, code: outcome.code }, { status: outcome.status });
     }
@@ -202,15 +259,20 @@ export async function handleRequest(request: Request): Promise<Response> {
       csrfCookie,
     }, { verifier: ctx.verifier, users: ctx.users, sessions: ctx.authSessions, tokens: ctx.tokens, clock: ctx.clock, ids: ctx.ids });
     if (!result.ok) return json({ ok: false, code: "AUTH_FAILED" }, { status: 401 });
+    // Secure follows the CONFIGURED origin, not the per-request protocol
+    // reconstruction: behind a TLS-terminating proxy (Caddy) the incoming
+    // scheme can look plain and would silently drop the Secure attribute.
+    const secure = (ctx.appOrigin ?? url.origin).startsWith("https://");
     return json({ ok: true, data: { user: result.value.user } }, {
       status: 200,
-      headers: { "set-cookie": sessionCookie(result.value.sessionToken, result.value.expiresAt, url.protocol === "https:") },
+      headers: { "set-cookie": sessionCookie(result.value.sessionToken, result.value.expiresAt, secure) },
     });
   }
 
   if (request.method === "POST" && url.pathname === "/v1/auth/logout") {
     await logout(readSessionToken(request), { sessions: ctx.authSessions, tokens: ctx.tokens, clock: ctx.clock });
-    return json({ ok: true, data: { revoked: true } }, { headers: { "set-cookie": clearSessionCookie() } });
+    const secure = (ctx.appOrigin ?? url.origin).startsWith("https://");
+    return json({ ok: true, data: { revoked: true } }, { headers: { "set-cookie": clearSessionCookie(secure) } });
   }
 
   if (request.method === "GET" && url.pathname === "/v1/auth/session") {
@@ -224,12 +286,9 @@ export async function handleRequest(request: Request): Promise<Response> {
     const sessionUser = await resolveSession(readSessionToken(request), { sessions: ctx.authSessions, users: ctx.users, tokens: ctx.tokens, clock: ctx.clock });
     if (!sessionUser.ok || !sessionUser.value) return json({ ok: false, code: "UNAUTHORIZED" }, { status: 401 });
     if (accountOrderMatch[1]) {
-      const result = await getCheckoutStatus(decodeURIComponent(accountOrderMatch[1]), {
+      const result = await getAccountOrder(decodeURIComponent(accountOrderMatch[1]), {
         orders: ctx.orders,
         payments: ctx.payments,
-        paymentEvents: ctx.paymentEvents,
-        clock: ctx.clock,
-        ids: ctx.ids,
       });
       if (!result.ok || !result.value || !(await ownsOrder(ctx, result.value.checkoutId, sessionUser.value.id))) {
         return json({ ok: false, code: "NOT_FOUND" }, { status: 404 });
@@ -268,8 +327,8 @@ function sessionCookie(token: string, expiresAt: string, secure: boolean): strin
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
 }
 
-function clearSessionCookie(): string {
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+function clearSessionCookie(secure: boolean): string {
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? "; Secure" : ""}`;
 }
 
 function buildAttribution(url: URL): Partial<import("@yubie/domain").AttributionContext> {
@@ -285,12 +344,6 @@ function buildAttribution(url: URL): Partial<import("@yubie/domain").Attribution
   if (productId) attribution.productId = productId;
   if (rootId) attribution.rootId = rootId;
   return attribution;
-}
-
-async function validateJson(request: Request, schema: { safeParse(value: unknown): { success: boolean } }): Promise<Response> {
-  const result = schema.safeParse(await request.json().catch(() => null));
-  if (!result.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
-  return json({ ok: true, mode: "validated-prototype" }, { status: 202 });
 }
 
 export default { fetch: handleRequest };

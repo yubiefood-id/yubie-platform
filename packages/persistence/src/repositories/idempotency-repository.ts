@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
-import { err, ok } from "@yubie/domain";
+import { err, ok, type UseCaseResult } from "@yubie/domain";
+import type { IdempotencyClaim, IdempotencyClaimOutcome, IdempotencyRepository } from "@yubie/application";
 import type { Database } from "../client.js";
 import { idempotencyKeys } from "../schema/index.js";
 
@@ -11,49 +13,69 @@ export interface IdempotencyRecord {
   requestHash: string;
 }
 
-let idempotencyCounter = 0;
+function claimFilter(record: { scope: string; principalKey: string; operation: string; idempotencyKey: string }) {
+  return and(
+    eq(idempotencyKeys.scope, record.scope),
+    eq(idempotencyKeys.principalKey, record.principalKey),
+    eq(idempotencyKeys.operation, record.operation),
+    eq(idempotencyKeys.idempotencyKey, record.idempotencyKey),
+  );
+}
 
-export class PostgresIdempotencyRepository {
+/**
+ * Claims (scope, principal, operation, key) rows in idempotency_keys. The
+ * unique index makes concurrent claims race-safe without aborting the
+ * surrounding transaction: onConflictDoNothing lets exactly one insert win;
+ * everyone else reads the winner's request hash and reports duplicate (with
+ * the stored first response) or conflict — never a silent re-execute.
+ */
+export class PostgresIdempotencyRepository implements IdempotencyRepository {
   constructor(private readonly database: Database) {}
 
-  async claim(record: IdempotencyRecord & { createdAt: string }) {
+  async claim(record: IdempotencyClaim): Promise<UseCaseResult<IdempotencyClaimOutcome>> {
+    const inserted = await this.database.db
+      .insert(idempotencyKeys)
+      .values({
+        id: `idem_${randomUUID()}`,
+        scope: record.scope,
+        principalKey: record.principalKey,
+        operation: record.operation,
+        idempotencyKey: record.idempotencyKey,
+        requestHash: record.requestHash,
+        status: "claimed",
+        createdAt: record.createdAt,
+      })
+      .onConflictDoNothing({ target: [idempotencyKeys.scope, idempotencyKeys.principalKey, idempotencyKeys.operation, idempotencyKeys.idempotencyKey] })
+      .returning({ id: idempotencyKeys.id });
+
+    if (inserted.length > 0) return ok({ status: "claimed" });
+
     const existing = await this.database.db
       .select()
       .from(idempotencyKeys)
-      .where(
-        and(
-          eq(idempotencyKeys.scope, record.scope),
-          eq(idempotencyKeys.principalKey, record.principalKey),
-          eq(idempotencyKeys.operation, record.operation),
-          eq(idempotencyKeys.idempotencyKey, record.idempotencyKey),
-        ),
-      )
+      .where(claimFilter(record))
       .limit(1);
 
-    if (existing.length > 0) {
-      const row = existing[0]!;
-      if (row.requestHash === record.requestHash) {
-        return ok({ status: "duplicate" as const });
-      }
-      return err({
-        code: "conflict",
-        message: "Idempotency key reused with different request",
-        retryable: false,
-        requestId: "idempotency",
-      });
+    const row = existing[0];
+    if (row && row.requestHash === record.requestHash) {
+      return ok({ status: "duplicate", responseJson: row.responseJson });
     }
-
-    idempotencyCounter += 1;
-    await this.database.db.insert(idempotencyKeys).values({
-      id: `idem-${idempotencyCounter}`,
-      scope: record.scope,
-      principalKey: record.principalKey,
-      operation: record.operation,
-      idempotencyKey: record.idempotencyKey,
-      requestHash: record.requestHash,
-      status: "claimed",
-      createdAt: record.createdAt,
+    return err({
+      code: "conflict",
+      message: "Idempotency key reused with different request",
+      retryable: false,
+      requestId: "idempotency",
     });
-    return ok({ status: "claimed" as const });
+  }
+
+  async attachResponse(
+    record: Omit<IdempotencyClaim, "createdAt" | "requestHash">,
+    responseJson: string,
+  ): Promise<UseCaseResult<void>> {
+    await this.database.db
+      .update(idempotencyKeys)
+      .set({ responseJson, status: "completed" })
+      .where(claimFilter(record));
+    return ok(undefined);
   }
 }

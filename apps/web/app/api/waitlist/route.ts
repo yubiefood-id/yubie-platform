@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
-import { productWaitlistSchema } from "@yubie/validation";
+import { proxyApi } from "@/lib/api-proxy";
 
+// Durable submission (B9): the same-origin proxy forwards to apps/api, which
+// persists the row + consent ledger entry transactionally. The old local
+// "validated-prototype" 202 dropped every submission.
 export async function POST(request: Request) {
-  const parsed = productWaitlistSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ ok: false, message: "Invalid waitlist submission" }, { status: 400 });
-  return NextResponse.json({ ok: true, mode: "validated-prototype", productId: parsed.data.productId }, { status: 202 });
+  return proxyApi(request, "/v1/waitlist");
 }

@@ -18,13 +18,19 @@ interface XenditSessionResponse {
   payment_link_url?: unknown;
   status?: unknown;
   expires_at?: unknown;
+  business_id?: unknown;
+  payment_id?: unknown;
   [key: string]: unknown;
 }
 
 /**
- * Xendit Payment Session adapter behind PaymentProviderPort. Plain fetch, no
- * SDK: session_type PAY, hosted PAYMENT_LINK flow, country ID, currency IDR,
- * capture_method AUTOMATIC. React components never see these types.
+ * Xendit Payment Session adapter behind PaymentProviderPort (official
+ * Payments API, docs.xendit.co, verified 2026-10): hosted PAYMENT_LINK flow —
+ * POST /sessions {session_type: PAY, mode: PAYMENT_LINK, country: ID,
+ * currency: IDR, capture_method: AUTOMATIC}, GET /sessions/{id},
+ * POST /sessions/{id}/cancel. Plain fetch, no SDK: React components never see
+ * these types. The optional inline `customer` object is deliberately NOT sent
+ * until its reference_id reuse semantics are verified against TEST mode.
  */
 export class XenditPaymentProvider implements PaymentProviderPort {
   private readonly baseUrl: string;
@@ -41,6 +47,7 @@ export class XenditPaymentProvider implements PaymentProviderPort {
     const body: Record<string, unknown> = {
       reference_id: input.referenceId,
       session_type: "PAY",
+      mode: "PAYMENT_LINK",
       currency: input.currency,
       amount: input.amount,
       country: "ID",
@@ -53,6 +60,7 @@ export class XenditPaymentProvider implements PaymentProviderPort {
         reference_id: item.referenceId,
         name: item.name,
         type: "PHYSICAL_PRODUCT",
+        category: "food",
         quantity: item.quantity,
         net_unit_amount: item.netUnitAmount,
         currency: input.currency,
@@ -60,7 +68,7 @@ export class XenditPaymentProvider implements PaymentProviderPort {
     };
     if (input.expiresAt) body.expires_at = input.expiresAt;
 
-    const response = await this.request("POST", "/payment_sessions", body);
+    const response = await this.request("POST", "/sessions", body);
     if (!response.ok) {
       return err({ code: "unavailable", message: "Xendit payment session creation failed.", retryable: true, requestId: "xendit" });
     }
@@ -74,11 +82,13 @@ export class XenditPaymentProvider implements PaymentProviderPort {
       redirectUrl: json.payment_link_url,
       rawStatus: typeof json.status === "string" ? json.status : "ACTIVE",
       expiresAt: typeof json.expires_at === "string" ? json.expires_at : null,
+      ...(typeof json.business_id === "string" ? { providerBusinessId: json.business_id } : {}),
+      ...(typeof json.payment_id === "string" ? { providerPaymentId: json.payment_id } : {}),
     });
   }
 
   async getPaymentSession(providerSessionId: string): Promise<UseCaseResult<PaymentSessionHandle | null>> {
-    const response = await this.request("GET", `/payment_sessions/${encodeURIComponent(providerSessionId)}`);
+    const response = await this.request("GET", `/sessions/${encodeURIComponent(providerSessionId)}`);
     if (response.status === 404) return ok(null);
     if (!response.ok) {
       return err({ code: "unavailable", message: "Xendit payment session lookup failed.", retryable: true, requestId: "xendit" });
@@ -91,12 +101,15 @@ export class XenditPaymentProvider implements PaymentProviderPort {
       redirectUrl: typeof json.payment_link_url === "string" ? json.payment_link_url : "",
       rawStatus: typeof json.status === "string" ? json.status : "UNKNOWN",
       expiresAt: typeof json.expires_at === "string" ? json.expires_at : null,
+      ...(typeof json.business_id === "string" ? { providerBusinessId: json.business_id } : {}),
+      ...(typeof json.payment_id === "string" ? { providerPaymentId: json.payment_id } : {}),
     });
   }
 
   async cancelPaymentSession(providerSessionId: string): Promise<UseCaseResult<{ accepted: boolean }>> {
-    const response = await this.request("POST", `/payment_sessions/${encodeURIComponent(providerSessionId)}/cancel`, {});
+    const response = await this.request("POST", `/sessions/${encodeURIComponent(providerSessionId)}/cancel`);
     if (response.status === 404) return ok({ accepted: false });
+    if (response.status === 422) return ok({ accepted: false });
     if (!response.ok) {
       return err({ code: "unavailable", message: "Xendit payment session cancel failed.", retryable: true, requestId: "xendit" });
     }
@@ -110,9 +123,8 @@ export class XenditPaymentProvider implements PaymentProviderPort {
         headers: {
           authorization: this.authorization,
           "content-type": "application/json",
-          "x-api-version": "2025-01-01",
         },
-        body: method === "GET" ? undefined : JSON.stringify(body),
+        body: method === "GET" || body === undefined ? undefined : JSON.stringify(body),
       });
       const json = await response.json().catch(() => ({}));
       return { ok: response.ok, status: response.status, json };

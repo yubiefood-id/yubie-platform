@@ -83,6 +83,7 @@ export class InMemoryOperatorTaskRepository implements OperatorTaskRepository {
   }
 }
 
+/** Test-only clock (frozen instant). Production wiring uses SystemClock. */
 export class FixedClock implements Clock {
   constructor(private readonly iso: string) {}
   now() {
@@ -90,6 +91,7 @@ export class FixedClock implements Clock {
   }
 }
 
+/** Test-only id generator (per-process counter; resets on restart). Production uses CryptoIdGenerator. */
 export class SequentialIdGenerator implements IdGenerator {
   private counter = 0;
   nextId() {

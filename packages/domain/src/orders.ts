@@ -35,17 +35,37 @@ export interface OrderDelivery {
   notes?: string | undefined;
 }
 
+/** Shipping policy snapshot stored on the order at purchase time. */
+export interface OrderShipping {
+  policy: "free_promotional";
+  amount: number;
+  reason?: string | undefined;
+}
+
+export interface OrderTotals {
+  subtotalAmount: number;
+  shippingAmount: number;
+  discountAmount: number;
+  taxAmount: number;
+  grandTotalAmount: number;
+}
+
 export interface OrderRecord {
   id: string;
-  /** Xendit reference_id (<=64 chars); the public checkout identifier. */
+  /** Xendit reference_id (<=64 chars). */
   checkoutRef: string;
+  /** Opaque >=128-bit token: the ONLY public checkout identifier. */
+  checkoutPublicToken: string;
   status: FirstPartyOrderStatus;
   userId: string | null;
   customerEmail: string;
   customerName: string | null;
   delivery: OrderDelivery | null;
   currency: "IDR";
+  totals: OrderTotals;
+  /** Legacy single total == grandTotalAmount; kept for compatible consumers. */
   totalAmount: number;
+  shipping: OrderShipping | null;
   lines: OrderLineRecord[];
   createdAt: string;
   updatedAt: string;
@@ -57,12 +77,17 @@ export interface PaymentRecord {
   id: string;
   orderId: string;
   provider: PaymentProviderKind;
-  providerSessionId: string;
+  /** Null until the provider session is attached (payment-intent phase). */
+  providerSessionId: string | null;
   redirectUrl: string | null;
   currency: "IDR";
   amount: number;
   status: PaymentStatus;
   expiresAt: string | null;
+  providerBusinessId?: string | null;
+  providerPaymentId?: string | null;
+  /** "ambiguous" when the provider outcome is unknown and needs reconciliation. */
+  reconciliationState?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -80,7 +105,7 @@ export interface PaymentEventRecord {
 
 /** Legal order-status transitions; anything else is a bug or replay. */
 const ORDER_TRANSITIONS: Record<FirstPartyOrderStatus, FirstPartyOrderStatus[]> = {
-  draft: ["pending_payment", "cancelled"],
+  draft: ["pending_payment", "paid", "cancelled"],
   pending_payment: ["paid", "cancelled"],
   paid: ["processing"],
   processing: ["shipped"],
@@ -122,9 +147,32 @@ export function paymentStatusFromProviderSession(rawStatus: string): PaymentStat
     case "EXPIRED":
       return "expired";
     case "CANCELLED":
+    case "CANCELED":
     case "VOIDED":
       return "cancelled";
     default:
       return null;
   }
+}
+
+/**
+ * Shipping policies the server may charge. Every policy is explicit: the
+ * charged amount always equals the policy snapshot stored on the order — the
+ * store never promises unpriced shipping. New policies must be added here (a
+ * config typo is a validation error, never a silent zero).
+ */
+export type ShippingPolicyName = "free_promotional";
+
+export function resolveShippingPolicy(policy: string | undefined): { policy: ShippingPolicyName; amount: number; reason: string } {
+  const value = policy ?? "free_promotional";
+  if (value === "free_promotional") {
+    return { policy: "free_promotional", amount: 0, reason: "Promotional free shipping (time-limited, operator approved)" };
+  }
+  throw new Error(`Unknown SHIPPING_POLICY "${value}" — supported: free_promotional`);
+}
+
+/** Integer-IDR totals; the charged grand total is always the exact sum. */
+export function buildOrderTotals(subtotalAmount: number, shippingAmount: number, taxAmount: number, discountAmount: number): OrderTotals {
+  const grandTotalAmount = subtotalAmount + shippingAmount + taxAmount - discountAmount;
+  return { subtotalAmount, shippingAmount, discountAmount, taxAmount, grandTotalAmount };
 }

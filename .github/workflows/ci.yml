@@ -23,6 +23,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # check = lint + typecheck + secret:scan + test (DB-gated suites skip)
       - run: npm run check
       - run: npm run build
 
@@ -53,10 +54,25 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # Fresh install + seeded schema, then the DB-gated suites: migration
+      # fresh/upgrade proofs (0005/0007/0008/0009/0010), transaction manager,
+      # commerce saga + webhook exactly-once, inventory FEFO, growth consent.
       - run: npm run db:migrate
       - run: npm run db:seed
       - run: npm run test --workspace @yubie/persistence
+      - run: npm run test --workspace @yubie/api
       - run: npm run test --workspace @yubie/assistant
       - run: npm run test --workspace @yubie/worker
       - run: npm run test --workspace @yubie/bot
       - run: npm run test --workspace @yubie/integrations
+
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      # Build-only gate (no push): production images must always be buildable
+      # from a clean checkout. Publishing/scanning happens in the deploy flow.
+      - run: docker build -f infrastructure/docker/Dockerfile.api -t yubie-api:ci .
+      - run: docker build -f infrastructure/docker/Dockerfile.worker -t yubie-worker:ci .
+      - run: docker build -f infrastructure/docker/Dockerfile.bot -t yubie-bot:ci .

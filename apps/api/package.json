@@ -19,6 +19,7 @@
   "dependencies": {
     "@yubie/application": "*",
     "@yubie/commerce": "*",
+    "@yubie/config": "*",
     "@yubie/domain": "*",
     "@yubie/integrations": "*",
     "@yubie/persistence": "*",

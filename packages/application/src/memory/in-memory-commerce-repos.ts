@@ -20,8 +20,21 @@ export class InMemoryOrderRepository implements OrderRepository {
     return ok([...this.items.values()].find((item) => item.checkoutRef === checkoutRef) ?? null);
   }
 
+  async findByPublicToken(token: string) {
+    return ok([...this.items.values()].find((item) => item.checkoutPublicToken === token) ?? null);
+  }
+
   async listForUser(userId: string) {
     return ok([...this.items.values()].filter((item) => item.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  }
+
+  async listStaleDrafts(olderThan: string, limit: number) {
+    return ok(
+      [...this.items.values()]
+        .filter((item) => item.status === "draft" && item.createdAt < olderThan)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+        .slice(0, limit),
+    );
   }
 
   async save(order: OrderRecord) {
@@ -38,11 +51,22 @@ export class InMemoryPaymentRepository implements PaymentRepository {
   }
 
   async findByProviderSession(provider: string, providerSessionId: string) {
-    return ok([...this.items.values()].find((item) => item.provider === provider && item.providerSessionId === providerSessionId) ?? null);
+    return ok(
+      [...this.items.values()].find((item) => item.provider === provider && item.providerSessionId === providerSessionId) ?? null,
+    );
   }
 
   async findByOrderId(orderId: string) {
     return ok([...this.items.values()].filter((item) => item.orderId === orderId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  }
+
+  async listPendingExpired(now: string, limit: number) {
+    return ok(
+      [...this.items.values()]
+        .filter((item) => item.status === "pending" && item.expiresAt !== null && item.expiresAt < now)
+        .sort((a, b) => (a.expiresAt ?? "").localeCompare(b.expiresAt ?? ""))
+        .slice(0, limit),
+    );
   }
 
   async save(payment: PaymentRecord) {

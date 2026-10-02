@@ -3,9 +3,22 @@ import test from "node:test";
 import { handleRequest, setAppContext } from "../dist/index.js";
 import {
   AllowlistAttributionPolicy,
+  CryptoSessionTokenService,
   FixedClock,
+  InMemoryAuditRepository,
+  InMemoryGrowthRepository,
+  InMemoryIdempotencyRepository,
+  InMemoryInventoryRepository,
   InMemoryMarketplaceListingRepository,
+  InMemoryOrderRepository,
   InMemoryOutboundIntentRepository,
+  InMemoryOutboxRepository,
+  InMemoryPaymentEventRepository,
+  InMemoryPaymentRepository,
+  InMemorySessionRepository,
+  InMemoryTransactionManager,
+  InMemoryUserRepository,
+  InMemoryWebhookInboxRepository,
   InMemoryWhatsAppIntentRepository,
   SequentialIdGenerator,
 } from "@yubie/application";
@@ -28,6 +41,11 @@ const activeListing = {
 
 const pausedListing = { ...activeListing, listingKey: "paused-listing", status: "paused" };
 
+const stubOrders = new InMemoryOrderRepository();
+const stubPayments = new InMemoryPaymentRepository();
+const stubPaymentEvents = new InMemoryPaymentEventRepository();
+const stubGrowth = new InMemoryGrowthRepository();
+
 setAppContext({
   listings: new InMemoryMarketplaceListingRepository([activeListing, pausedListing]),
   whatsapp: new InMemoryWhatsAppIntentRepository(),
@@ -38,6 +56,31 @@ setAppContext({
   ids: new SequentialIdGenerator(),
   healthProbe: { async check() { return { ok: true, value: { ready: true } }; } },
   releaseSha: "test",
+  orders: stubOrders,
+  payments: stubPayments,
+  paymentEvents: stubPaymentEvents,
+  users: new InMemoryUserRepository(),
+  authSessions: new InMemorySessionRepository(),
+  tokens: new CryptoSessionTokenService(),
+  paymentMode: "preview",
+  paymentProvider: null,
+  webhookToken: null,
+  xenditBusinessId: null,
+  inventoryMode: "none",
+  appOrigin: null,
+  verifier: null,
+  googleClientId: null,
+  tx: new InMemoryTransactionManager({
+    orders: stubOrders,
+    payments: stubPayments,
+    paymentEvents: stubPaymentEvents,
+    audit: new InMemoryAuditRepository(),
+    outbox: new InMemoryOutboxRepository(),
+    idempotency: new InMemoryIdempotencyRepository(),
+    inbox: new InMemoryWebhookInboxRepository(),
+    inventory: new InMemoryInventoryRepository(),
+    growth: stubGrowth,
+  }),
 });
 
 test("health endpoint exposes service status", async () => {
@@ -117,6 +160,13 @@ test("waitlist accepts only scoped coming-soon product interest", async () => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: "hello@yubiefood.id", productId: "flour", consent: true })
   }));
-  assert.equal(accepted.status, 202);
+  assert.equal(accepted.status, 201);
+  assert.equal((await accepted.json()).data.outcome, "joined");
+  assert.equal(stubGrowth.waitlist.size, 1, "the waitlist row is durable");
+  assert.deepEqual(
+    [...stubGrowth.consentLedger].map((entry) => entry.purpose),
+    ["product_waitlist"],
+    "a waitlist sign-up records waitlist contact consent, never marketing",
+  );
   assert.equal(rejected.status, 400);
 });
