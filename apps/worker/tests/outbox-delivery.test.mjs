@@ -70,6 +70,8 @@ test("marks outbox failed when local session is HUMAN_ACTIVE", { skip: !database
     providerThreadId: conversationRef,
     providerCustomerId: "c1",
     providerInboxOrChannelId: "i1",
+    // inbox_id is NOT NULL without a database default — the port requires it.
+    inboxId: "i1",
     state: "HUMAN_ACTIVE",
     lastActivityAt: now,
     createdAt: now,
