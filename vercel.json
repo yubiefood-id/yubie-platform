@@ -1,3 +1,4 @@
 {
-  "outputDirectory": "apps/web/dist/client"
+  "outputDirectory": "apps/web/dist/client",
+  "cleanUrls": true
 }
