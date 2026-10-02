@@ -1,0 +1,17 @@
+# Vercel builds the full workspace chain from the root package.json.
+.git
+.v2c
+.video_agent
+.zcode
+.zcodeignore
+.wrangler
+.sites-runtime
+graphify-out
+valkey-mcp-server.log
+docs
+infrastructure
+.github
+**/node_modules
+**/dist
+**/.vinext
+**/tests
