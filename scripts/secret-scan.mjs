@@ -17,6 +17,7 @@ const ALLOWLIST = new Set([
   "docs/production/vps/05_SECRETS_IDENTITY_ACCESS.md",
   "scripts/graphify/secret-scan.mjs",
   "scripts/graphify/tests/secret-scan.test.mjs",
+  "scripts/secret-scan.mjs",
   ".agents/skills/api-design-principles/references/rest-best-practices.md",
 ]);
 
