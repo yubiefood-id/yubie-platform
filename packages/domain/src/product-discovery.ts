@@ -97,8 +97,8 @@ export const productFamilies: Product[] = [
     positioning: "FROZEN ONE-BITE",
     format: "ppang",
     status: "coming-soon",
-    image: "/photography/ppang-box.webp",
-    imageAlt: "Konsep Yubie Ppang dalam kotak premium",
+    image: "/products/yubie-ppang-concept.webp",
+    imageAlt: "Studi visual Yubie Ppang berupa roti ubi one-bite dalam kotak ungu tanpa klaim kemasan",
     eyebrow: "FROZEN ONE-BITE · COMING SOON",
     story: "Frozen convenience untuk disimpan, dipanaskan saat dibutuhkan, lalu dinikmati dalam format one-bite.",
     sizes: [],
@@ -117,8 +117,8 @@ export const productFamilies: Product[] = [
     positioning: "COMING SOON",
     format: "mie",
     status: "coming-soon",
-    image: "/photography/ingredient-table.webp",
-    imageAlt: "Studi bahan Yubie; foto produk Yubie Mie menyusul setelah verifikasi",
+    image: "/products/yubie-mie-concept.webp",
+    imageAlt: "Studi visual Yubie Mie berupa sajian mie ubi dengan kemasan konsep tanpa klaim",
     eyebrow: "COMING SOON · AWAITING VERIFICATION",
     story: "Format keempat dari keluarga produk Yubie. Detail kemasan dan informasi produk akan dibagikan setelah proses verifikasi selesai.",
     sizes: [],
@@ -159,8 +159,8 @@ export const rootVarieties: RootVariety[] = [
     bestApplicationIds: ["pancakes", "brownies", "porridge"],
     relatedProductIds: ["flour", "shake", "ppang"],
     claimIds: ["root-purple-anthocyanin"],
-    image: "/photography/ingredient-table.webp",
-    imageAlt: "Studi bahan Yubie; foto spesifik Ubi Ungu masih menunggu produksi aset",
+    image: "/photography/roots/ubi-ungu.webp",
+    imageAlt: "Studi visual ubi ungu utuh dan terbelah dengan daging berwarna ungu alami",
   },
   {
     id: "ubi-madu",
@@ -173,8 +173,8 @@ export const rootVarieties: RootVariety[] = [
     bestApplicationIds: ["cookies", "cake"],
     relatedProductIds: ["flour"],
     claimIds: ["root-honey-fibre", "root-honey-less-sugar"],
-    image: "/photography/ingredient-table.webp",
-    imageAlt: "Studi bahan Yubie; foto spesifik Ubi Madu masih menunggu produksi aset",
+    image: "/photography/roots/ubi-madu.webp",
+    imageAlt: "Studi visual ubi madu dengan kulit kemerahan dan daging berwarna kuning madu",
   },
   {
     id: "ubi-oranye",
@@ -187,8 +187,8 @@ export const rootVarieties: RootVariety[] = [
     bestApplicationIds: ["cake", "porridge"],
     relatedProductIds: ["flour"],
     claimIds: ["root-orange-beta-carotene"],
-    image: "/photography/ingredient-table.webp",
-    imageAlt: "Studi bahan Yubie; foto spesifik Ubi Oranye masih menunggu produksi aset",
+    image: "/photography/roots/ubi-oranye.webp",
+    imageAlt: "Studi visual ubi oranye utuh dan terbelah dengan warna oranye hangat",
   },
   {
     id: "ubi-merah",
@@ -201,8 +201,8 @@ export const rootVarieties: RootVariety[] = [
     bestApplicationIds: ["brownies", "noodles"],
     relatedProductIds: ["flour"],
     claimIds: ["root-red-fibre", "root-red-texture"],
-    image: "/photography/ingredient-table.webp",
-    imageAlt: "Studi bahan Yubie; foto spesifik Ubi Merah masih menunggu produksi aset",
+    image: "/photography/roots/ubi-merah.webp",
+    imageAlt: "Studi visual ubi merah dengan kulit merah tanah dan tekstur panen yang alami",
   },
   {
     id: "ubi-jepang",
@@ -215,8 +215,8 @@ export const rootVarieties: RootVariety[] = [
     bestApplicationIds: ["cake", "noodles"],
     relatedProductIds: ["flour", "ppang"],
     claimIds: ["root-japanese-polyphenol", "root-japanese-binding"],
-    image: "/photography/ingredient-table.webp",
-    imageAlt: "Studi bahan Yubie; foto spesifik Ubi Jepang masih menunggu produksi aset",
+    image: "/photography/roots/ubi-jepang.webp",
+    imageAlt: "Studi visual ubi Jepang dengan kulit ungu kemerahan dan daging krem keemasan",
   },
 ];
 
@@ -257,20 +257,20 @@ export const productRootOfferings: ProductRootOffering[] = [
 ];
 
 export const foodApplications: FoodApplication[] = [
-  { id: "pancakes", slug: "pancakes", name: "Pancakes", descriptor: "Breakfast canvas dengan karakter warna dan rasa dari root pilihan.", image: "/photography/ingredient-table.webp", imageAlt: "Studi bahan Yubie sebagai visual sementara untuk aplikasi pancakes", productIds: ["flour"], rootIds: ["ubi-ungu"], recipeIds: ["purple-pancakes"] },
-  { id: "cookies", slug: "cookies", name: "Cookies", descriptor: "Eksplorasi tekstur dan warna untuk everyday baking.", image: "/photography/brand-foundation.webp", imageAlt: "Studi produk Yubie sebagai visual sementara untuk aplikasi cookies", productIds: ["flour"], rootIds: ["ubi-madu"], recipeIds: ["soft-cookies"] },
-  { id: "brownies", slug: "brownies", name: "Brownies", descriptor: "Format panggang dengan visual root yang distinctive.", image: "/photography/photography-direction.webp", imageAlt: "Arah fotografi Yubie sebagai visual sementara untuk aplikasi brownies", productIds: ["flour"], rootIds: ["ubi-ungu", "ubi-merah"], recipeIds: ["yubie-brownies"] },
-  { id: "cake", slug: "cake", name: "Cake", descriptor: "Ruang eksplorasi untuk cake rumahan dan pengembangan bakery.", image: "/photography/ingredient-table.webp", imageAlt: "Studi bahan Yubie sebagai visual sementara untuk aplikasi cake", productIds: ["flour"], rootIds: ["ubi-madu", "ubi-oranye", "ubi-jepang"], recipeIds: [] },
-  { id: "noodles", slug: "noodles", name: "Noodles", descriptor: "Aplikasi savoury yang memperluas kemungkinan tepung ubi.", image: "/photography/brand-foundation.webp", imageAlt: "Studi bahan Yubie sebagai visual sementara untuk aplikasi noodles", productIds: ["flour"], rootIds: ["ubi-merah", "ubi-jepang"], recipeIds: [] },
-  { id: "porridge", slug: "porridge", name: "Porridge", descriptor: "Ide breakfast lembut berbahan eksplorasi root.", image: "/photography/shake-preparation.webp", imageAlt: "Studi penyajian Yubie sebagai visual sementara untuk aplikasi porridge", productIds: ["flour", "shake"], rootIds: ["ubi-ungu", "ubi-oranye"], recipeIds: ["creamy-bowl"] },
+  { id: "pancakes", slug: "pancakes", name: "Pancakes", descriptor: "Breakfast canvas dengan karakter warna dan rasa dari root pilihan.", image: "/photography/applications/pancakes.webp", imageAlt: "Studi sajian pancake ubi ungu dengan pisang dan taburan kelapa", productIds: ["flour"], rootIds: ["ubi-ungu"], recipeIds: ["purple-pancakes"] },
+  { id: "cookies", slug: "cookies", name: "Cookies", descriptor: "Eksplorasi tekstur dan warna untuk everyday baking.", image: "/photography/applications/cookies.webp", imageAlt: "Studi sajian soft cookies ubi dengan marbling ungu dan keemasan", productIds: ["flour"], rootIds: ["ubi-madu"], recipeIds: ["soft-cookies"] },
+  { id: "brownies", slug: "brownies", name: "Brownies", descriptor: "Format panggang dengan visual root yang distinctive.", image: "/photography/applications/brownies.webp", imageAlt: "Studi sajian brownies ubi ungu bertekstur lembut", productIds: ["flour"], rootIds: ["ubi-ungu", "ubi-merah"], recipeIds: ["yubie-brownies"] },
+  { id: "cake", slug: "cake", name: "Cake", descriptor: "Ruang eksplorasi untuk cake rumahan dan pengembangan bakery.", image: "/photography/applications/cake.webp", imageAlt: "Studi sajian cake ubi keemasan dengan marbling ungu", productIds: ["flour"], rootIds: ["ubi-madu", "ubi-oranye", "ubi-jepang"], recipeIds: [] },
+  { id: "noodles", slug: "noodles", name: "Noodles", descriptor: "Aplikasi savoury yang memperluas kemungkinan tepung ubi.", image: "/photography/applications/noodles.webp", imageAlt: "Studi sajian mie ubi dengan sayuran hijau dan potongan ubi panggang", productIds: ["flour"], rootIds: ["ubi-merah", "ubi-jepang"], recipeIds: [] },
+  { id: "porridge", slug: "porridge", name: "Porridge", descriptor: "Ide breakfast lembut berbahan eksplorasi root.", image: "/photography/applications/porridge.webp", imageAlt: "Studi sajian bubur ubi ungu dengan pisang dan taburan wijen", productIds: ["flour", "shake"], rootIds: ["ubi-ungu", "ubi-oranye"], recipeIds: ["creamy-bowl"] },
 ];
 
 export const recipes: RecipeSummary[] = [
-  { id: "purple-pancakes", slug: "purple-pancakes", title: "Purple Pancakes", category: "Breakfast", productIds: ["flour"], rootIds: ["ubi-ungu"], applicationId: "pancakes", publicationStatus: "concept", image: "/photography/ingredient-table.webp", imageAlt: "Studi bahan Yubie untuk konsep Purple Pancakes" },
-  { id: "yubie-brownies", slug: "yubie-brownies", title: "Yubie Brownies", category: "Baking", productIds: ["flour"], rootIds: ["ubi-ungu", "ubi-merah"], applicationId: "brownies", publicationStatus: "concept", image: "/photography/photography-direction.webp", imageAlt: "Arah fotografi Yubie untuk konsep brownies" },
-  { id: "soft-cookies", slug: "soft-cookies", title: "Soft Sweet Potato Cookies", category: "Snacks", productIds: ["flour"], rootIds: ["ubi-madu"], applicationId: "cookies", publicationStatus: "concept", image: "/photography/brand-foundation.webp", imageAlt: "Studi produk Yubie untuk konsep cookies" },
-  { id: "yubie-ppang", slug: "yubie-ppang", title: "Yubie Ppang", category: "One-bite", productIds: ["ppang"], rootIds: ["ubi-ungu", "ubi-jepang"], applicationId: "cake", publicationStatus: "concept", image: "/photography/ppang-box.webp", imageAlt: "Konsep Yubie Ppang dalam kotak premium" },
-  { id: "creamy-bowl", slug: "creamy-bowl", title: "Creamy Breakfast Bowl", category: "Breakfast", productIds: ["shake"], rootIds: ["ubi-ungu"], applicationId: "porridge", publicationStatus: "concept", image: "/photography/shake-preparation.webp", imageAlt: "Studi penyajian Yubie untuk konsep breakfast bowl" },
+  { id: "purple-pancakes", slug: "purple-pancakes", title: "Purple Pancakes", category: "Breakfast", productIds: ["flour"], rootIds: ["ubi-ungu"], applicationId: "pancakes", publicationStatus: "concept", image: "/photography/applications/pancakes.webp", imageAlt: "Konsep Purple Pancakes Yubie dengan pisang dan kelapa" },
+  { id: "yubie-brownies", slug: "yubie-brownies", title: "Yubie Brownies", category: "Baking", productIds: ["flour"], rootIds: ["ubi-ungu", "ubi-merah"], applicationId: "brownies", publicationStatus: "concept", image: "/photography/applications/brownies.webp", imageAlt: "Konsep brownies ubi ungu Yubie" },
+  { id: "soft-cookies", slug: "soft-cookies", title: "Soft Sweet Potato Cookies", category: "Snacks", productIds: ["flour"], rootIds: ["ubi-madu"], applicationId: "cookies", publicationStatus: "concept", image: "/photography/applications/cookies.webp", imageAlt: "Konsep soft cookies berbahan ubi untuk Yubie" },
+  { id: "yubie-ppang", slug: "yubie-ppang", title: "Yubie Ppang", category: "One-bite", productIds: ["ppang"], rootIds: ["ubi-ungu", "ubi-jepang"], applicationId: "cake", publicationStatus: "concept", image: "/products/yubie-ppang-concept.webp", imageAlt: "Studi visual Yubie Ppang one-bite dalam kotak ungu tanpa klaim kemasan" },
+  { id: "creamy-bowl", slug: "creamy-bowl", title: "Creamy Breakfast Bowl", category: "Breakfast", productIds: ["shake"], rootIds: ["ubi-ungu"], applicationId: "porridge", publicationStatus: "concept", image: "/photography/applications/porridge.webp", imageAlt: "Konsep creamy breakfast bowl ubi ungu Yubie" },
 ];
 
 export function filterRecipes(productId?: string, rootId?: string): RecipeSummary[] {

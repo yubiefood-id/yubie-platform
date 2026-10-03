@@ -29,7 +29,7 @@ conflicting value is silently promoted to customer-facing copy.
 | 3 | Shake/Ppang descriptors | Newer packaging wording TBD | **PENDING (B2)** — existing copy retained; no new claims introduced. |
 | 4 | Rendered copy "berbasis ubi" (faq, shop, b2b alt, porridge descriptor) | "berbahan" per stakeholder mandate | **DONE:** copy sweep in this revision; code identifiers untouched. |
 | 5 | Direct payment on yubie.id forbidden (ADR-004, AGENTS.md §2) | Stakeholder wants eventual on-site purchase | **BLOCKED (B1):** requires a superseding ADR + gateway selection + credentials. Until then the cart/checkout UI renders honest "not yet enabled" states and purchase completes through allowlisted marketplace redirects. No payment is ever faked. |
-| 6 | Five root varieties share one placeholder photo | Distinct photography per variety | **BLOCKED (B5):** asset-gap manifest maintained in the frontend plan; honest placeholder alts remain. |
+| 6 | Five root varieties shared one placeholder photo | Distinct visual per variety | **PARTIALLY RESOLVED (B5):** five root-specific visual studies now replace the repeated placeholder. They are creative direction assets, not documentary sourcing evidence. |
 
 ## Render rules for the storefront
 
@@ -52,7 +52,7 @@ conflicting value is silently promoted to customer-facing copy.
 - ~~B4~~ **RESOLVED (ADR-012):** Google Identity Services implemented (`/login`, `/account*`); needs a real `GOOGLE_CLIENT_ID` with the production origin allow-listed. Until then the login page renders an honest "sedang disiapkan" state.
 - **B2** Commit sanitized extracts of the Eny Palupi and 20-story documents to the repo so facts and Our Roots chapters can be frozen against them. Still the gate for PH-4 (product re-audit) and PH-5 (scrollytelling copy).
 - **B3** **PARTIALLY RESOLVED:** `transparent_yubie.png` was supplied and ingested. Its alpha channel was a noisy semi-transparent black matte; the alpha was rebuilt (hard threshold of the original alpha, cropped to content) and verified clean at render scale. A cleaner vector master from the designer remains desirable but is no longer blocking. Note: the supplied file renders best on light surfaces; the dark footer uses it at reduced prominence.
-- **B5** **PARTIALLY RESOLVED:** hero video supplied and transcoded (720p 1.9 MB / 540p 0.4 MB H.264 + poster WebP, poster-first LCP, reduced-motion + data-saver safe). Still missing: five-root varietal photography, Ppang/Mie pack imagery, per-page OG images.
+- **B5** **PARTIALLY RESOLVED:** hero video supplied and transcoded (720p 1.9 MB / 540p 0.4 MB H.264 + poster WebP, poster-first LCP, reduced-motion + data-saver safe). Root-varietal, application, preparation, harvest, B2B, Ppang, and Mie visual studies have been added. Still missing: approved documentary farm photography, final Ppang/Mie packaging photography, and a complete per-page OG image set.
 
 ## Asset provenance notes (2026-10-02)
 
@@ -66,3 +66,17 @@ conflicting value is silently promoted to customer-facing copy.
   into site copy — that conversion stays behind the product-truth gate.
 - `yubie.id Design Brand Guidelines (2).pdf` is available in the shared
   vault as a design reference; it is not a product-truth source.
+
+## Generated visual-study notes (2026-10-03)
+
+- Root-varietal, recipe/application, harvest, B2B, Shake-preparation, Ppang,
+  and Mie visuals are AI-generated **creative studies** produced for this
+  storefront revision. They are not evidence of an ingredient, supplier,
+  batch, certification, nutrition value, or commercial product specification.
+- Ppang and Mie remain `coming-soon`. Their images deliberately avoid prices,
+  certification marks, nutrition claims, and final packaging copy.
+- Flour and Shake storefront pack shots were remapped from the user-supplied
+  source files by visible product identity because the original filenames were
+  swapped. Generated context images use those supplied packs as references.
+- Every new visual is stored locally as optimized WebP so customer pages do
+  not depend on third-party image hosts.

@@ -47,7 +47,7 @@ export function RootExplorer({ compact = false }: { compact?: boolean }) {
     <section id="root-panel" className="root-panel" role="tabpanel" aria-labelledby={`root-tab-${active.id}`} tabIndex={0}>
       <div className="root-visual">
         <Image src={active.image} alt={active.imageAlt} fill sizes="(max-width: 800px) 100vw, 48vw" unoptimized />
-        <span className="asset-note">Approved Yubie ingredient study · varietal photography pending</span>
+        <span className="asset-note">Yubie varietal visual study · sourcing approval pending</span>
       </div>
       <div className="root-detail">
         <span className="eyebrow">{active.colour}</span>

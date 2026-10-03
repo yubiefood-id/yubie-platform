@@ -78,10 +78,9 @@ h1, h2, h3, p { margin-top: 0; }
 .product-grid { width: var(--container); margin: 0 auto; display: grid; grid-template-columns: 1.15fr .85fr; gap: 2rem; }
 .product-card { position: relative; }
 .product-card-1 { grid-row: span 2; }
-.product-image { display: block; height: 100%; min-height: 530px; position: relative; overflow: hidden; background: var(--lilac); }
+.product-image { display: block; height: 100%; min-height: 530px; position: relative; overflow: hidden; background: radial-gradient(circle at 50% 38%, #fff 0 26%, #f4ecf8 72%, #eadcf2 100%); }
 .product-card-2 .product-image, .product-card-3 .product-image, .product-card-4 .product-image { min-height: 330px; }
-.product-image img { object-fit: cover; transition: transform .8s var(--ease); }
-.product-card-2 .product-image img { object-fit: contain; background: #faf7f2; padding: 1.2rem; }
+.product-image img { object-fit: contain; padding: clamp(1rem, 2.5vw, 2.5rem); transition: transform .8s var(--ease); }
 .product-card:hover .product-image img { transform: scale(1.035); }
 .product-meta { padding: 1.5rem 0 1.2rem; }
 .product-meta h3 { font-size: clamp(1.8rem, 2.8vw, 3.2rem); letter-spacing: -.045em; margin: .6rem 0 .3rem; }
@@ -213,8 +212,8 @@ h1, h2, h3, p { margin-top: 0; }
 .shop-toolbar button.active, .recipe-filters button.active { background: var(--ink); color: white; }
 
 .product-hero { min-height: 860px; display: grid; grid-template-columns: 1.08fr .92fr; }
-.product-detail-image { position: sticky; top: 88px; height: calc(100vh - 88px); min-height: 700px; background: var(--lilac); }
-.product-detail-image img { object-fit: cover; }
+.product-detail-image { position: sticky; top: 88px; height: calc(100vh - 88px); min-height: 700px; background: radial-gradient(circle at 50% 38%, #fff 0 22%, #f4ecf8 68%, #eadcf2 100%); }
+.product-detail-image img { object-fit: contain; padding: clamp(1.5rem, 4vw, 4rem); }
 .product-detail-copy { padding: clamp(5rem, 8vw, 8rem) max(4vw, 2rem); align-self: center; }
 .product-detail-copy h1 { font-size: clamp(4rem, 7vw, 7.5rem); line-height: .82; letter-spacing: -.06em; margin: 1.2rem 0 .8rem; }
 .product-detail-copy .descriptor { font-family: var(--font-serif); font-size: 1.5rem; color: var(--purple); }
@@ -427,6 +426,8 @@ h1, h2, h3, p { margin-top: 0; }
 .usage-section { background: var(--lilac); }
 .usage-section > h2 { max-width: 1100px; margin: 1rem 0 4rem; font-size: clamp(3.5rem, 8vw, 9rem); line-height: .8; letter-spacing: -.06em; }
 .usage-section > div { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); }
+.usage-visual { position: relative; width: var(--container); min-height: clamp(360px, 56vw, 760px); margin: 0 auto 3rem; overflow: hidden; background: var(--lilac); }
+.usage-visual img { object-fit: cover; }
 .usage-section article { padding: 2rem; border-right: 1px solid var(--line); }
 .usage-section article:last-child { border-right: 0; }
 .usage-section article b { font-family: var(--font-serif); color: var(--purple); font-size: 2rem; }

@@ -35,7 +35,7 @@ export default function Home() {
     </section>
 
     <section className="story-section" data-home-section="our-roots-story">
-      <div className="story-image"><Image src="/photography/shake-preparation.webp" alt="Proses menyiapkan bahan Yubie untuk penggunaan modern" fill sizes="(max-width: 800px) 100vw, 50vw" unoptimized /></div>
+      <div className="story-image"><Image src="/photography/context/root-harvest.webp" alt="Panen ubi ungu dari bedengan tanah dengan keranjang bambu di lahan Indonesia" fill sizes="(max-width: 800px) 100vw, 50vw" unoptimized /></div>
       <div className="story-copy"><span className="chapter">OUR ROOTS</span><h2>FROM INDONESIAN ROOT TO <em>MODERN USE.</em></h2><p>Yubie menjembatani ubi Indonesia dengan cara makan hari ini—dari pemilihan varietas, pengolahan, hingga produk yang praktis untuk baking, breakfast, dan kreasi sehari-hari.</p><Link className="text-link" href="/our-roots">Discover the ingredient story <span>→</span></Link><div className="story-note"><b>Our direction</b><span>Root discovery</span><span>Responsible food technology</span><span>B2C and B2B applications</span></div></div>
     </section>
 
@@ -50,7 +50,7 @@ export default function Home() {
     </section>
 
     <section className="lifestyle-section" data-home-section="lifestyle" aria-labelledby="lifestyle-title">
-      <Image src="/photography/ingredient-table.webp" alt="Hiasan bahan ubi segar di atas meja kayu" fill sizes="100vw" unoptimized />
+      <Image src="/photography/context/lifestyle-breakfast.webp" alt="Dua perempuan Indonesia menikmati sarapan dengan Yubie Flour dan Yubie Shake" fill sizes="100vw" unoptimized />
       <div className="lifestyle-copy"><span className="eyebrow light-text">NOURISH NATURALLY</span><h2 id="lifestyle-title">Local roots.<br /><em>Everyday goodness.</em></h2></div>
     </section>
 
