@@ -8,6 +8,7 @@ import {
   orderStatusForPayment,
   paymentStatusFromProviderSession,
   productFamilies,
+  quotePromotion,
   resolveShippingPolicy,
   type AppError,
   type OrderLineRecord,
@@ -54,6 +55,8 @@ export interface CreateFirstPartyCheckoutInput {
   idempotencyPrincipal: string;
   /** Canonical request for hash comparison on key replay. */
   rawRequestBody: string;
+  /** Public promotion identifier. The server is always the pricing authority. */
+  promoCode?: string;
 }
 
 export interface CreateFirstPartyCheckoutResult {
@@ -163,7 +166,8 @@ export async function createFirstPartyCheckout(
     return err({ code: "validation", message: String(error), retryable: false, requestId: "checkout" });
   }
   const subtotalAmount = priced.reduce((total, line) => total + line.unitPrice * line.quantity, 0);
-  const totals = buildOrderTotals(subtotalAmount, shipping.amount, 0, 0);
+  const promotion = quotePromotion(input.promoCode, subtotalAmount);
+  const totals = buildOrderTotals(subtotalAmount, shipping.amount, 0, promotion?.discountAmount ?? 0);
 
   // Idempotent replay: same key + same request returns the stored first
   // response verbatim; a different request under the same key is a conflict.

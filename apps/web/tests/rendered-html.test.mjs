@@ -27,7 +27,7 @@ test("renders catalog, product, and supporting routes", async () => {
     ["/products", /Yubie Flour[\s\S]*Yubie Mie/],
     ["/products", /Mulai/],
     ["/products/yubie-flour", /BELI RESMI|Memuat opsi beli/],
-    ["/products/yubie-mie", /COMING SOON/i],
+    ["/products/yubie-mie", /Add to Cart/i],
     ["/our-roots", /FIVE ROOTS[\s\S]*Purple Pancakes/],
     ["/b2b", /BUILD YOUR NEXT PRODUCT/],
     ["/impact", /Responsible evidence/],
@@ -82,14 +82,14 @@ test("homepage preserves hero and follows required semantic section order", asyn
   const response = await worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), env, ctx);
   const html = await response.text();
   assert.match(html, /ROOTED HERE[\s\S]*MADE FOR NOW/);
-  assert.match(html, /Four formats/);
+  assert.match(html, /Four ways to enjoy/);
   const order = ["products", "our-roots-story", "five-roots", "why-yubie", "lifestyle", "b2b", "community"].map((section) => html.indexOf(`data-home-section="${section}"`));
   assert.ok(order.every((position) => position >= 0));
   assert.deepEqual(order, [...order].sort((a, b) => a - b));
   assert.doesNotMatch(html, /antosianin|beta-karoten|polifenol|kaya serat/i);
 });
 
-test("flour PDP exposes add-to-cart with verified pricing; coming-soon family stays gated", async () => {
+test("all approved product PDPs expose their exact verified variants", async () => {
   const { default: worker } = await makeWorker();
   const fetchText = async (path) => await (await worker.fetch(new Request(`http://localhost${path}`, { headers: { accept: "text/html" } }), env, ctx)).text();
   const flourHtml = await fetchText("/products/yubie-flour");
@@ -98,13 +98,13 @@ test("flour PDP exposes add-to-cart with verified pricing; coming-soon family st
   const mieHtml = await fetchText("/products/yubie-mie");
   assert.match(flourHtml, /CHOOSE YOUR ROOT/i);
   assert.match(flourHtml, /Add to Cart/);
-  assert.match(flourHtml, /15\.000/);
+  assert.match(flourHtml, /35\.000/);
   assert.match(shakeHtml, /POUR[\s\S]*ADD WATER[\s\S]*MIX/);
   assert.match(ppangHtml, /KEEP FROZEN[\s\S]*HEAT[\s\S]*ENJOY/);
-  for (const html of [shakeHtml, ppangHtml, mieHtml]) {
-    assert.doesNotMatch(html, /Add to Cart/);
-    assert.doesNotMatch(html, /Mulai Rp/);
-  }
+  for (const html of [shakeHtml, ppangHtml, mieHtml]) assert.match(html, /Add to Cart/);
+  assert.match(shakeHtml, /19\.500/);
+  assert.match(ppangHtml, /9\.000/);
+  assert.match(mieHtml, /16\.000/);
 });
 
 test("B2B page keeps the offering language", async () => {

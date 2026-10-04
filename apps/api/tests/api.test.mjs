@@ -130,14 +130,14 @@ test("whatsapp redirect unavailable without configured intent", async () => {
   assert.equal(response.status, 503);
 });
 
-test("catalog exposes public products without enabling coming-soon checkout", async () => {
+test("catalog exposes the four approved commercial product families", async () => {
   const response = await handleRequest(new Request("https://api.yubiefood.id/v1/catalog"));
   const payload = await response.json();
   assert.equal(payload.meta.count, 4);
-  assert.equal(payload.data.find((product) => product.id === "shake").status, "coming-soon");
+  assert.equal(payload.data.find((product) => product.id === "shake").status, "available");
   const mie = payload.data.find((product) => product.id === "mie");
-  assert.equal(mie.status, "coming-soon");
-  assert.deepEqual(mie.sizes, []);
+  assert.equal(mie.status, "available");
+  assert.deepEqual(mie.sizes.map((size) => size.price), [16000, 45000]);
 });
 
 test("invalid newsletter submissions are rejected", async () => {

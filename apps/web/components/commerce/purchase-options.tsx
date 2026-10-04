@@ -43,14 +43,14 @@ export function PurchaseOptions({ productSlug, productId, rootId, placement = "p
   }
 
   if (error || options.length === 0) {
-    return <div className="purchase-options empty" role="status"><strong>Belum tersedia di marketplace</strong><p>Tim Yubie sedang memverifikasi tautan beli resmi. Coba lagi nanti atau hubungi kami untuk pertanyaan produk.</p></div>;
+    return <div className="purchase-options empty" role="status"><strong>Alternatif pembelian belum tersedia</strong><p>Anda tetap dapat menambahkan produk ke keranjang dan melanjutkan ke checkout. Tautan marketplace dan WhatsApp hanya ditampilkan setelah diverifikasi oleh tim Yubie.</p></div>;
   }
 
   const apiOrigin = getApiOrigin();
 
   return <div className={`purchase-options${compact ? " compact" : ""}`}>
-    <span className="eyebrow">BELI RESMI</span>
-    <p>Harga dan stok mengikuti marketplace partner. Yubie tidak memproses pembayaran di situs ini.</p>
+    <span className="eyebrow">ALTERNATIF BELANJA</span>
+    <p>Checkout langsung tersedia melalui keranjang. Anda juga dapat memilih kanal resmi berikut; harga dan stok di kanal partner dapat berbeda.</p>
     <div className="purchase-option-list">
       {options.map((option) => {
         const href = `${apiOrigin}${option.redirectPath}?source=product_detail&placement=${placement}${rootId ? `&rootId=${rootId}` : ""}&productId=${productId}`;

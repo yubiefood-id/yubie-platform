@@ -99,8 +99,8 @@ async function renderNode(
     };
   }
 
-  if (nodeId === "buy.shake" || nodeId === "buy.ppang") {
-    templateCtx.productName = nodeId.includes("shake") ? "Yubie Shake" : "Yubie Ppang";
+  if (nodeId === "buy.shake" || nodeId === "buy.ppang" || nodeId === "buy.mie") {
+    templateCtx.productName = nodeId.includes("shake") ? "Yubie Shake" : nodeId.includes("ppang") ? "Yubie Ppang" : "Yubie Mie";
   }
 
   if (nodeId === "product.description") {

@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useEffect } from "react";
+import { quotePromotion } from "@yubie/domain";
 import { PurchaseOptions } from "@/components/commerce/purchase-options";
 import { useCart, useCartDisplayLines } from "@/features/cart/cart-context";
 import { trackEvent } from "@/lib/analytics";
 import { formatRupiah } from "@/lib/format";
 
 export function CartView() {
-  const { hydrated, setQuantity, removeItem, clear, count } = useCart();
+  const { hydrated, setQuantity, removeItem, clear, count, promoCode, applyPromo, clearPromo } = useCart();
   const lines = useCartDisplayLines();
 
   useEffect(() => { if (hydrated && count > 0) trackEvent("view_cart", { item_count: count }); }, [hydrated, count]);
@@ -25,7 +26,8 @@ export function CartView() {
   }
 
   const subtotal = lines.reduce((total, item) => total + item.lineTotal, 0);
-  const hasFlour = lines.some(({ line }) => line.productId === "flour");
+  const promotion = quotePromotion(promoCode, subtotal);
+  const total = subtotal - (promotion?.discountAmount ?? 0);
 
   return <div className="cart-page">
     <header><span className="eyebrow">YUBIE CART</span><h1>Keranjang</h1></header>
@@ -46,8 +48,14 @@ export function CartView() {
       <aside aria-label="Ringkasan belanja">
         <span className="eyebrow">RINGKASAN</span>
         <div><span>Subtotal</span><strong>{formatRupiah(subtotal)}</strong></div>
-        <p>Ongkir, pajak, dan total final ditentukan saat pembelian di marketplace partner. Checkout langsung di yubie.id akan hadir setelah persiapan pembayaran selesai.</p>
-        {hasFlour && <PurchaseOptions productSlug="yubie-flour" productId="flour" placement="cart" compact />}
+        <form className="promo-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); applyPromo(String(data.get("promo") ?? "")); }}>
+          <label htmlFor="cart-promo">Kode promo</label>
+          <div><input id="cart-promo" name="promo" defaultValue={promoCode ?? ""} placeholder="YUBIE15" autoCapitalize="characters" /><button type="submit">Terapkan</button></div>
+        </form>
+        {promotion && <div className="discount-row"><span>Diskon {promotion.percentage}% <button type="button" onClick={clearPromo}>Hapus</button></span><strong>−{formatRupiah(promotion.discountAmount)}</strong></div>}
+        <div className="cart-grand-total"><span>Total</span><strong>{formatRupiah(total)}</strong></div>
+        <p>Harga, promo, ketersediaan, dan total final dihitung ulang oleh server sebelum pembayaran.</p>
+        <PurchaseOptions productSlug="yubie-flour" productId="flour" placement="cart" compact />
         <Link className="button primary full" href="/checkout">Lanjut ke Checkout <span>→</span></Link>
       </aside>
     </div>

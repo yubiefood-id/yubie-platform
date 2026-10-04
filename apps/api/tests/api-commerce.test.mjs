@@ -126,7 +126,7 @@ test("live checkout returns an opaque token and the provider redirect", async ()
   const checkout = await createCheckout();
   assert.equal(checkout.mode, "live");
   assert.equal(checkout.redirectUrl, "https://xen.to/api-test");
-  assert.equal(checkout.totalAmount, 30000);
+  assert.equal(checkout.totalAmount, 70000);
   assert.match(checkout.checkoutToken, /^[0-9a-f]{32}$/);
 });
 
@@ -223,10 +223,10 @@ test("checkout as a logged-in user attaches the order to the account", async () 
   }, { cookie: `yubie_session=${token}`, "idempotency-key": `api-logged-in-${Date.now()}` });
   assert.equal(response.status, 201);
   const checkout = (await response.json()).data;
-  assert.equal(checkout.totalAmount, 15000);
+  assert.equal(checkout.totalAmount, 35000);
 
   const orders = await (await get("/v1/account/orders", { cookie: `yubie_session=${token}` })).json();
-  const mine = orders.data.find((order) => order.orderStatus === "pending_payment" && order.totalAmount === 15000);
+  const mine = orders.data.find((order) => order.orderStatus === "pending_payment" && order.totalAmount === 35000);
   assert.ok(mine, "the logged-in checkout appears in the account list");
 
   const detail = await (await get(`/v1/account/orders/${mine.checkoutId}`, { cookie: `yubie_session=${token}` })).json();

@@ -15,8 +15,9 @@ const templates: Record<string, (ctx?: Record<string, unknown>) => string> = {
     `Pilih produk:\n\n` +
     `0 — Customer Service\n` +
     `1 — Yubie Flour\n` +
-    `2 — Yubie Shake (coming soon)\n` +
-    `3 — Yubie Ppang (coming soon)\n` +
+    `2 — Yubie Shake\n` +
+    `3 — Yubie Ppang\n` +
+    `4 — Yubie Mie\n` +
     `9 — Kembali`,
   "buy.flour.v1": () =>
     `Yubie Flour — pilih marketplace:\n\n` +
@@ -33,6 +34,11 @@ const templates: Record<string, (ctx?: Record<string, unknown>) => string> = {
     `${String(ctx?.productName ?? "Produk")} masih coming soon untuk pembelian publik.\n\n` +
     `0 — Customer Service\n` +
     `1 — Info B2B / sample\n` +
+    `9 — Kembali`,
+  "buy.online.v1": (ctx) =>
+    `${String(ctx?.productName ?? "Produk Yubie")} tersedia dalam varian terpilih. Tambahkan ke keranjang dan lanjutkan ke checkout di halaman Produk Yubie.\n\n` +
+    `0 — Customer Service\n` +
+    `1 — Lihat produk lain\n` +
     `9 — Kembali`,
   "product.v1": () =>
     `Info produk Yubie:\n\n` +

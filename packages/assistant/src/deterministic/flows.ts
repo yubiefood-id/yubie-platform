@@ -36,6 +36,7 @@ export const V1_FLOW: FlowDefinition = {
       { key: "1", label: "Yubie Flour", target: "buy.flour" },
       { key: "2", label: "Yubie Shake", target: "buy.shake" },
       { key: "3", label: "Yubie Ppang", target: "buy.ppang" },
+      { key: "4", label: "Yubie Mie", target: "buy.mie" },
       { key: "9", label: "Kembali", target: "home" },
     ], "home"),
     "buy.flour": menu("buy.flour", "buy.flour.v1", [
@@ -46,14 +47,19 @@ export const V1_FLOW: FlowDefinition = {
     ], "buy"),
     "buy.flour.shopee": { id: "buy.flour.shopee", parentId: "buy.flour", action: "reply", templateId: "buy.flour.marketplace.v1", intent: "WHERE_TO_BUY", risk: "GREEN" },
     "buy.flour.tokopedia": { id: "buy.flour.tokopedia", parentId: "buy.flour", action: "reply", templateId: "buy.flour.marketplace.v1", intent: "WHERE_TO_BUY", risk: "GREEN" },
-    "buy.shake": menu("buy.shake", "buy.coming_soon.v1", [
+    "buy.shake": menu("buy.shake", "buy.online.v1", [
       { key: "0", label: "Customer Service", target: "handoff.cs" },
-      { key: "1", label: "B2B", target: "business.sample.company" },
+      { key: "1", label: "Belanja online", target: "buy" },
       { key: "9", label: "Kembali", target: "buy" },
     ], "buy"),
-    "buy.ppang": menu("buy.ppang", "buy.coming_soon.v1", [
+    "buy.ppang": menu("buy.ppang", "buy.online.v1", [
       { key: "0", label: "Customer Service", target: "handoff.cs" },
-      { key: "1", label: "B2B", target: "business.sample.company" },
+      { key: "1", label: "Belanja online", target: "buy" },
+      { key: "9", label: "Kembali", target: "buy" },
+    ], "buy"),
+    "buy.mie": menu("buy.mie", "buy.online.v1", [
+      { key: "0", label: "Customer Service", target: "handoff.cs" },
+      { key: "1", label: "Belanja online", target: "buy" },
       { key: "9", label: "Kembali", target: "buy" },
     ], "buy"),
     product: menu("product", "product.v1", [

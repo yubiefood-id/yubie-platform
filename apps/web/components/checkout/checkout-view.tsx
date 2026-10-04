@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { quotePromotion } from "@yubie/domain";
 import { PurchaseOptions } from "@/components/commerce/purchase-options";
 import { useCart, useCartDisplayLines } from "@/features/cart/cart-context";
 import { trackEvent } from "@/lib/analytics";
@@ -27,7 +28,7 @@ const EMPTY_FORM: CheckoutFormState = { email: "", name: "", phone: "", address:
  * successful payment is never faked.
  */
 export function CheckoutView() {
-  const { hydrated, count } = useCart();
+  const { hydrated, count, promoCode, applyPromo, clearPromo } = useCart();
   const lines = useCartDisplayLines();
   const [phase, setPhase] = useState<CheckoutPhase>("form");
   const [form, setForm] = useState<CheckoutFormState>(EMPTY_FORM);
@@ -48,6 +49,8 @@ export function CheckoutView() {
   }
 
   const subtotal = lines.reduce((total, item) => total + item.lineTotal, 0);
+  const promotion = quotePromotion(promoCode, subtotal);
+  const total = subtotal - (promotion?.discountAmount ?? 0);
   const hasFlour = lines.some(({ line }) => line.productId === "flour");
   const formValid = form.email.includes("@") && form.phone.trim().length >= 8 && form.address.trim().length >= 8 && form.city.trim().length >= 2;
 
@@ -59,7 +62,7 @@ export function CheckoutView() {
     try {
       const response = await fetch("/api/checkout", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
         body: JSON.stringify({
           lines: lines.map(({ line }) => ({ productId: line.productId, sizeId: line.sizeId, quantity: line.quantity })),
           customerEmail: form.email.trim(),
@@ -71,6 +74,7 @@ export function CheckoutView() {
             city: form.city.trim(),
             ...(form.postalCode.trim() ? { postalCode: form.postalCode.trim() } : {}),
           },
+          ...(promoCode ? { promoCode } : {}),
         }),
       });
       const payload = await response.json().catch(() => null);
@@ -105,9 +109,9 @@ export function CheckoutView() {
     <header><span className="eyebrow">CHECKOUT</span><h1>Checkout</h1></header>
     <div className="checkout-grid">
       <section aria-label="Detail checkout">
-        {(mode === "preview" || mode === "unknown") && <div className="checkout-status" role="status">
-          <strong>Checkout online di yubie.id belum aktif.</strong>
-          <p>Kami sedang menyiapkan pembayaran langsung. Saat ini pembelian resmi tetap diselesaikan melalui marketplace partner—harga dan stok mengikuti toko.</p>
+        {mode === "preview" && <div className="checkout-status" role="status">
+          <strong>Mode pembayaran demo sedang aktif.</strong>
+          <p>Pesanan telah divalidasi, tetapi halaman pembayaran belum dibuat karena konfigurasi pembayaran produksi belum aktif.</p>
           {hasFlour && <PurchaseOptions productSlug="yubie-flour" productId="flour" placement="checkout" />}
         </div>}
         {mode !== "live" && <form className="checkout-form" onSubmit={submit} noValidate>
@@ -130,7 +134,7 @@ export function CheckoutView() {
           </fieldset>
           {errorMessage && <p className="checkout-error" role="alert">{errorMessage}</p>}
           <button className="button primary full" type="submit" disabled={!formValid || busy}>
-            {busy ? "Menyiapkan pembayaran…" : `Bayar ${formatRupiah(subtotal)} →`}
+            {busy ? "Menyiapkan pembayaran…" : `Bayar ${formatRupiah(total)} →`}
           </button>
         </form>}
         {mode === "live" && <div className="checkout-status" role="status"><strong>Mengalihkan ke halaman pembayaran…</strong><p>Jika tidak terbuka otomatis, kembali ke halaman ini dan coba lagi.</p></div>}
@@ -138,8 +142,14 @@ export function CheckoutView() {
       <aside aria-label="Ringkasan pesanan">
         <span className="eyebrow">RINGKASAN PESANAN</span>
         {lines.map(({ line, product, size, lineTotal }) => <div key={`${line.productId}-${line.sizeId}`}><span>{product.name} · {size.label} × {line.quantity}</span><span>{formatRupiah(lineTotal)}</span></div>)}
-        <div className="total"><span>Subtotal</span><span>{formatRupiah(subtotal)}</span></div>
-        <p>Ongkir dihitung dan ditampilkan pada langkah pembayaran final.</p>
+        <div><span>Subtotal</span><span>{formatRupiah(subtotal)}</span></div>
+        <form className="promo-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); applyPromo(String(data.get("promo") ?? "")); }}>
+          <label htmlFor="checkout-promo">Kode promo</label>
+          <div><input id="checkout-promo" name="promo" defaultValue={promoCode ?? ""} placeholder="YUBIE15" autoCapitalize="characters" /><button type="submit">Terapkan</button></div>
+        </form>
+        {promotion && <div className="discount-row"><span>Promo {promotion.code} <button type="button" onClick={clearPromo}>Hapus</button></span><span>−{formatRupiah(promotion.discountAmount)}</span></div>}
+        <div className="total"><span>Total</span><span>{formatRupiah(total)}</span></div>
+        <p>Ongkir dan total final diverifikasi oleh server sebelum halaman pembayaran Xendit dibuat.</p>
         <Link className="button warm full" href="/cart">Kembali ke keranjang</Link>
       </aside>
     </div>

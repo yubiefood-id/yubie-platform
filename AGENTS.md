@@ -16,7 +16,7 @@ Do not publish or infer:
 
 The R&D proposal is evidence of development intent and testing plans. It is not itself a commercial label approval.
 
-Yubie Flour is the currently available catalog line. Yubie Shake and Yubie Ppang remain coming-soon until commercial truth is verified.
+The October 2026 commercial brief makes four families available: Yubie Flour, Shake, Ppang, and Mie, only in the exact variants and prices recorded in `packages/domain/src/product-discovery.ts`. This availability does not approve any nutrition, health, certification, allergen, or medical claim.
 
 ## 2. Current commerce model
 

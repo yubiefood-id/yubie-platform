@@ -71,13 +71,13 @@ test("checkout re-prices from the catalog, applies the shipping policy, and igno
     lines: [{ productId: "flour", sizeId: "250g", quantity: 2, unitPrice: 1, totalAmount: 1 }],
   });
   assert.equal(checkout.mode, "live");
-  assert.equal(checkout.subtotalAmount, 30000);
+  assert.equal(checkout.subtotalAmount, 70000);
   assert.equal(checkout.shippingAmount, 0);
-  assert.equal(checkout.totalAmount, 30000);
+  assert.equal(checkout.totalAmount, 70000);
   assert.match(checkout.checkoutToken, /^[0-9a-f]{32}$/, "opaque 128-bit public token");
   assert.equal(deps.provider.created.length, 1);
   assert.equal(deps.provider.created[0].referenceId, checkout.checkoutRef);
-  assert.equal(deps.provider.created[0].amount, 30000);
+  assert.equal(deps.provider.created[0].amount, 70000);
   // The success URL carries the opaque token.
   assert.equal(deps.provider.created[0].successReturnUrl, `https://yubie.id/checkout/success?checkout=${checkout.checkoutToken}`);
 });
@@ -88,7 +88,7 @@ test("checkout saga persists draft+intent, then pending_payment with the attache
 
   const order = await deps.orders.findById(checkoutTokenToId(deps, checkout));
   assert.equal(order.value.status, "pending_payment");
-  assert.equal(order.value.totals.grandTotalAmount, 30000);
+  assert.equal(order.value.totals.grandTotalAmount, 70000);
   assert.equal(order.value.shipping.policy, "free_promotional");
   const payment = (await deps.payments.findByOrderId(order.value.id)).value[0];
   assert.equal(payment.providerSessionId, "ps_test_1");
@@ -143,12 +143,13 @@ test("checkout clamps quantity and rejects unavailable lines", async () => {
   const deps = makeDeps();
   const clamped = await createFirstPartyCheckout({ ...BASE_INPUT, lines: [{ productId: "flour", sizeId: "250g", quantity: 99 }] }, deps);
   assert.equal(clamped.ok, true);
-  assert.equal(clamped.value.totalAmount, 20 * 15000);
+  assert.equal(clamped.value.totalAmount, 20 * 35000);
 
   const unavailable = await createFirstPartyCheckout({ ...BASE_INPUT, lines: [{ productId: "shake", sizeId: "any", quantity: 1 }] }, deps);
   assert.equal(unavailable.ok, false);
-  const mie = await createFirstPartyCheckout({ ...BASE_INPUT, lines: [{ productId: "mie", sizeId: "any", quantity: 1 }] }, deps);
-  assert.equal(mie.ok, false);
+  const mie = await createFirstPartyCheckout({ ...BASE_INPUT, lines: [{ productId: "mie", sizeId: "single", quantity: 1 }] }, deps);
+  assert.equal(mie.ok, true);
+  assert.equal(mie.value.totalAmount, 16000);
 });
 
 /** Official payment-session webhook shape (docs.xendit.co, verified 2026-10). */
@@ -203,7 +204,7 @@ test("public status view never contains PII; the account view does (ownership-ch
   assert.ok(!view.includes("customer"), "no customer fields in the public view");
   assert.ok(!view.includes("delivery"));
   assert.ok(!view.includes("@"), "no email addresses in the public view");
-  assert.equal(status.value.totalAmount, 30000);
+  assert.equal(status.value.totalAmount, 70000);
 
   const account = await getAccountOrder(order.id, deps);
   assert.equal(account.value.customerEmail, "customer@example.com");

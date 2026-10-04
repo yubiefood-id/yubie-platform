@@ -4,7 +4,7 @@ export const siteConfig = {
   descriptor: "Modern Indonesian sweet-potato food brand",
   location: "Bogor, Indonesia",
   email: "hello@yubie.id",
-  announcement: "Launch offer coming soon — join the Yubie community.",
+  announcement: "Promo peluncuran: gunakan YUBIE15 untuk diskon 15% di checkout.",
   social: {
     instagram: "https://instagram.com/yubie.id",
     tiktok: "https://tiktok.com/@yubie.id",

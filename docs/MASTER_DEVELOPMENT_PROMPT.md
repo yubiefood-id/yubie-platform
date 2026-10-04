@@ -43,7 +43,7 @@ yubie-platform/
 1. A green software build does not authorize a food product to be sold.
 2. Never invent or infer nutrition values, ingredients, allergens, net content, shelf-life, storage instructions, BPOM status, halal status, certifications, origin, or health claims.
 3. Every public product fact must link to evidence, approval, specification version, effective date, and accountable owner.
-4. Treat Yubie Flour as sellable only when its production release gate is satisfied. Shake and Ppang remain coming soon until equivalent evidence exists.
+4. Treat Flour, Shake, Ppang, and Mie as sellable only in the exact variants approved in the October 2026 commercial brief and encoded in the domain catalog. Keep nutrition, certification, allergen, and health claims private until their independent release gates pass.
 5. Inventory is lot-aware. Quarantined, expired, recalled, unreleased, or mismatched lots are never sellable.
 6. Order, payment, inventory, fulfilment, consent, and product-evidence history must be auditable.
 7. A customer complaint involving possible illness, allergen, foreign object, contamination, packaging integrity, or mislabeling is a potential food-safety incident—not a normal support ticket.

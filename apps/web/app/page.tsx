@@ -2,7 +2,8 @@ import Image from "next/image";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { VideoHero } from "@/components/home/video-hero";
-import { ProductCard } from "@/components/commerce/product-card";
+import { ProductCatalog } from "@/components/commerce/product-catalog";
+import { ProductComparison } from "@/components/commerce/product-comparison";
 import { RootExplorer } from "@/components/discovery/root-explorer";
 import { NewsletterForm } from "@/components/forms/newsletter-form";
 import { products } from "@/config/products";
@@ -30,9 +31,11 @@ export default function Home() {
     />
 
     <section className="product-section section" id="products" data-home-section="products">
-      <header className="section-head"><div><span className="eyebrow">THE YUBIE FAMILY</span><h2>One root family.<br /><em>Four formats.</em></h2></div><p>Tepung serbaguna untuk hari ini, konsep premium convenience dan frozen one-bite, serta format mie yang sedang diverifikasi.</p></header>
-      <div className="product-grid">{products.map((product, index) => <ProductCard product={product} index={index} key={product.id} />)}</div>
+      <header className="section-head"><div><span className="eyebrow">SHOP THE YUBIE FAMILY</span><h2>One root family.<br /><em>Four ways to enjoy.</em></h2></div><p>Pilih ukuran, tambahkan beberapa produk ke keranjang, lalu lanjutkan ke checkout aman dalam satu alur.</p></header>
+      <ProductCatalog products={products} />
     </section>
+
+    <ProductComparison />
 
     <section className="story-section" data-home-section="our-roots-story">
       <div className="story-image"><Image src="/photography/context/root-harvest.webp" alt="Panen ubi ungu dari bedengan tanah dengan keranjang bambu di lahan Indonesia" fill sizes="(max-width: 800px) 100vw, 50vw" unoptimized /></div>

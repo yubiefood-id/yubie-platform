@@ -191,6 +191,7 @@ export async function handleRequest(request: Request): Promise<Response> {
         idempotencyKey: request.headers.get("idempotency-key"),
         idempotencyPrincipal: sessionUser.value?.id ?? "guest",
         rawRequestBody: rawBody,
+        ...(parsed.data.promoCode ? { promoCode: parsed.data.promoCode } : {}),
       }, { tx: ctx.tx, provider: ctx.paymentProvider, clock: ctx.clock, ids: ctx.ids });
       if (!result.ok) {
         logEvent("api.checkout_failed", { requestId, errorCode: result.error.code });

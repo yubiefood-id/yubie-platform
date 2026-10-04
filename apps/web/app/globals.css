@@ -605,3 +605,111 @@ h1, h2, h3, p { margin-top: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* Commerce storefront — compact, scan-friendly merchandising inspired by
+   Indonesian DTC grocery storefronts while retaining Yubie's visual system. */
+.commerce-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(1rem, 2vw, 1.5rem);
+}
+.commerce-grid .product-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  background: #fffdf7;
+  border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+  border-radius: 1.4rem;
+  overflow: hidden;
+  box-shadow: 0 .8rem 2.5rem rgba(61, 42, 28, .07);
+}
+.commerce-grid .product-card-1 { grid-row: auto; }
+.commerce-grid .product-card .product-image {
+  aspect-ratio: 1 / 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  background: #efe7d7;
+}
+.commerce-grid .product-card img { width: 100%; height: 100%; object-fit: cover; transition: transform .45s ease; }
+.commerce-grid .product-card:hover img { transform: scale(1.035); }
+.commerce-grid .product-card > div:last-child { display: flex; flex: 1; flex-direction: column; padding: 1.1rem; }
+.commerce-grid .product-card h3 { font-size: clamp(1.35rem, 2vw, 1.8rem); line-height: 1.05; margin: .4rem 0 .55rem; }
+.commerce-grid .product-card p { color: var(--muted); font-size: .92rem; line-height: 1.55; }
+.commerce-grid .product-card .price { color: var(--ink); font-weight: 700; margin-top: auto; padding-top: .85rem; }
+.catalog-filter { display: flex; flex-wrap: wrap; gap: .55rem; margin: 0 0 1.5rem; }
+.catalog-filter button { border: 1px solid rgba(47,38,31,.22); border-radius: 999px; background: transparent; color: var(--ink); cursor: pointer; padding: .7rem 1.05rem; }
+.catalog-filter button[aria-pressed="true"] { background: var(--ink); color: #fffdf7; }
+.product-quick-buy { display: grid; gap: .6rem; margin-top: .9rem; }
+.product-quick-buy select, .promo-form input {
+  min-height: 2.75rem;
+  width: 100%;
+  border: 1px solid rgba(47,38,31,.25);
+  border-radius: .65rem;
+  background: #fff;
+  color: var(--ink);
+  padding: 0 .8rem;
+}
+.product-quick-buy .quick-add { min-height: 2.8rem; border: 0; border-radius: .65rem; background: var(--orange); color: #fff; cursor: pointer; font-weight: 700; }
+.product-quick-buy .quick-add:hover { filter: brightness(.94); }
+.product-action { margin-top: .75rem; }
+.product-action a { display: inline-flex; color: var(--ink); font-size: .85rem; font-weight: 650; text-decoration: underline; text-underline-offset: .25rem; }
+.product-pricing { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem; margin-top: auto; padding-top: .85rem; }
+.price-tag { font-size: .95rem; }
+
+.comparison-section { padding: clamp(4.5rem, 8vw, 8rem) clamp(1.1rem, 5vw, 5rem); background: #f0e8d8; }
+.comparison-section > header { max-width: 55rem; margin-bottom: 2rem; }
+.comparison-section h2 { font-size: clamp(2.6rem, 5vw, 5rem); line-height: .95; margin: .6rem 0 1rem; }
+.comparison-scroll { overflow-x: auto; border-radius: 1.2rem; box-shadow: 0 1rem 3rem rgba(60,43,28,.08); }
+.comparison-table { width: 100%; min-width: 900px; border-collapse: collapse; background: #fffdf7; }
+.comparison-table th, .comparison-table td { padding: 1rem 1.1rem; border: 1px solid rgba(47,38,31,.12); text-align: left; vertical-align: top; }
+.comparison-table thead th { background: var(--ink); color: #fffdf7; }
+.comparison-table thead th:nth-child(2), .comparison-table tbody td:nth-child(2) { background: #fff4d9; }
+.comparison-table tbody th { width: 13rem; }
+.comparison-note { max-width: 70rem; color: var(--muted); font-size: .85rem; line-height: 1.6; margin-top: 1rem; }
+.comparison-note a { color: var(--ink); font-weight: 650; }
+
+.promo-form { display: grid; gap: .45rem; margin: 1rem 0; }
+.promo-form label { font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.promo-form > div { display: grid; grid-template-columns: 1fr auto; gap: .45rem; }
+.promo-form button { border: 0; border-radius: .65rem; background: var(--ink); color: #fff; cursor: pointer; padding: 0 1rem; }
+.discount-row { color: #377245; }
+.discount-row button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: .75rem; text-decoration: underline; }
+
+.promo-layer { position: fixed; inset: 0; z-index: 110; display: grid; place-items: center; padding: 1rem; background: rgba(24,19,15,.62); backdrop-filter: blur(4px); }
+.promo-modal { position: relative; display: grid; grid-template-columns: .85fr 1.15fr; width: min(48rem, 100%); border-radius: 1.6rem; background: #fff7e8; overflow: hidden; box-shadow: 0 2rem 6rem rgba(0,0,0,.28); }
+.promo-visual { position: relative; min-height: 28rem; }
+.promo-visual img { object-fit: cover; }
+.promo-copy { align-self: center; padding: clamp(1.6rem, 4vw, 3rem); text-align: left; }
+.promo-modal h2 { font-size: clamp(2.5rem, 5vw, 4.6rem); line-height: .9; margin: .65rem 0 1rem; color: var(--orange); }
+.promo-modal p { line-height: 1.6; }
+.promo-modal > .icon-button { position: absolute; z-index: 2; top: .8rem; right: .8rem; width: 2.5rem; height: 2.5rem; border: 0; border-radius: 50%; background: rgba(255,253,247,.9); cursor: pointer; font-size: 1.2rem; }
+.promo-later { display: block; margin: .85rem auto 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; text-decoration: underline; }
+
+.whatsapp-widget { position: fixed; right: clamp(1rem, 3vw, 2rem); bottom: clamp(1rem, 3vw, 2rem); z-index: 90; }
+.whatsapp-trigger { display: flex; align-items: center; gap: .55rem; min-height: 3.4rem; border: 0; border-radius: 999px; background: #196b48; color: #fff; cursor: pointer; padding: 0 1.15rem; box-shadow: 0 .8rem 2rem rgba(23,74,53,.28); font-weight: 700; }
+.whatsapp-panel { position: absolute; right: 0; bottom: 4.2rem; width: min(21rem, calc(100vw - 2rem)); border-radius: 1rem; background: #fffdf7; padding: 1.1rem; box-shadow: 0 1.2rem 3.5rem rgba(23,20,17,.22); }
+.whatsapp-panel header { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .7rem; border-bottom: 1px solid rgba(47,38,31,.12); padding-bottom: .8rem; }
+.whatsapp-avatar { display: grid; place-items: center; width: 2.6rem; height: 2.6rem; border-radius: 50%; background: #196b48; color: #fff; font-weight: 800; }
+.whatsapp-panel header strong { display: block; font-size: 1rem; }
+.whatsapp-panel header span { color: var(--muted); font-size: .72rem; }
+.whatsapp-panel header button { border: 0; background: transparent; cursor: pointer; font-size: 1.2rem; }
+.whatsapp-body { padding-top: .9rem; }
+.whatsapp-panel p { color: var(--muted); font-size: .88rem; line-height: 1.5; margin-bottom: .8rem; }
+.whatsapp-body > button { width: 100%; border: 0; background: transparent; color: var(--ink); cursor: pointer; padding: .55rem; text-decoration: underline; }
+.whatsapp-panel a { display: flex; justify-content: center; border-radius: .7rem; background: #196b48; color: #fff; padding: .8rem; font-weight: 700; }
+.whatsapp-body small { display: block; color: var(--muted); line-height: 1.5; }
+
+@media (max-width: 1050px) {
+  .commerce-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 620px) {
+  .commerce-grid { grid-template-columns: 1fr; }
+  .commerce-grid .product-card { border-radius: 1rem; }
+  .promo-modal { grid-template-columns: 1fr; }
+  .promo-visual { min-height: 12rem; }
+  .promo-copy { padding: 1.3rem; }
+  .promo-modal h2 { font-size: 2.6rem; }
+  .whatsapp-trigger b { display: none; }
+  .whatsapp-trigger { width: 3.4rem; justify-content: center; padding: 0; font-size: 1.25rem; }
+}

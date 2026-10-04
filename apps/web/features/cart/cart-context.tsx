@@ -14,11 +14,13 @@ import {
 import { trackEvent } from "@/lib/analytics";
 
 const STORAGE_KEY = "yubie.cart.v1";
+const PROMO_STORAGE_KEY = "yubie.promo.v1";
 
 interface CartState {
   lines: CartLine[];
   hydrated: boolean;
   open: boolean;
+  promoCode: string | null;
 }
 
 type CartAction =
@@ -28,7 +30,9 @@ type CartAction =
   | { type: "remove"; productId: string; sizeId: string }
   | { type: "clear" }
   | { type: "open" }
-  | { type: "close" };
+  | { type: "close" }
+  | { type: "applyPromo"; code: string }
+  | { type: "clearPromo" };
 
 function cartReducer(state: CartState, action: CartAction): CartState {
   switch (action.type) {
@@ -46,6 +50,10 @@ function cartReducer(state: CartState, action: CartAction): CartState {
       return { ...state, open: true };
     case "close":
       return { ...state, open: false };
+    case "applyPromo":
+      return { ...state, promoCode: action.code.trim().toUpperCase() };
+    case "clearPromo":
+      return { ...state, promoCode: null };
   }
 }
 
@@ -67,6 +75,9 @@ interface CartContextValue {
   clear: () => void;
   openCart: () => void;
   closeCart: () => void;
+  promoCode: string | null;
+  applyPromo: (code: string) => void;
+  clearPromo: () => void;
 }
 
 const CartContext = createContext<CartContextValue | null>(null);
@@ -78,7 +89,7 @@ function isStoredLine(value: unknown): value is CartLine {
 }
 
 export function CartProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(cartReducer, { lines: [], hydrated: false, open: false });
+  const [state, dispatch] = useReducer(cartReducer, { lines: [], hydrated: false, open: false, promoCode: null });
 
   useEffect(() => {
     let lines: CartLine[] = [];
@@ -90,6 +101,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
       lines = [];
     }
     dispatch({ type: "hydrate", lines });
+    try {
+      const promoCode = window.localStorage.getItem(PROMO_STORAGE_KEY);
+      if (promoCode) dispatch({ type: "applyPromo", code: promoCode });
+    } catch {
+      // Storage unavailable: promotion remains session-only.
+    }
   }, []);
 
   useEffect(() => {
@@ -100,6 +117,16 @@ export function CartProvider({ children }: { children: ReactNode }) {
       // Storage unavailable (private mode): cart stays in-memory only.
     }
   }, [state.lines, state.hydrated]);
+
+  useEffect(() => {
+    if (!state.hydrated) return;
+    try {
+      if (state.promoCode) window.localStorage.setItem(PROMO_STORAGE_KEY, state.promoCode);
+      else window.localStorage.removeItem(PROMO_STORAGE_KEY);
+    } catch {
+      // Storage unavailable: promotion remains session-only.
+    }
+  }, [state.promoCode, state.hydrated]);
 
   useEffect(() => {
     document.body.style.overflow = state.open ? "hidden" : "";
@@ -129,6 +156,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
     clear: () => dispatch({ type: "clear" }),
     openCart: () => dispatch({ type: "open" }),
     closeCart: () => dispatch({ type: "close" }),
+    promoCode: state.promoCode,
+    applyPromo: (code) => dispatch({ type: "applyPromo", code }),
+    clearPromo: () => dispatch({ type: "clearPromo" }),
   }), [state, addItem]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

@@ -12,7 +12,7 @@ export function Header() {
   const [menu, setMenu] = useState(false);
   const [search, setSearch] = useState(false);
   const [query, setQuery] = useState("");
-  const { count } = useCart();
+  const { count, openCart } = useCart();
   const results = query.trim() ? products.filter((p) => `${p.name} ${p.descriptor}`.toLowerCase().includes(query.toLowerCase())) : products;
 
   useEffect(() => {
@@ -35,7 +35,7 @@ export function Header() {
       <div className="nav-actions">
         <button className="text-button search-trigger" onClick={() => setSearch(true)}>Cari <kbd>⌘K</kbd></button>
         <Link className="text-button account-link" href="/account" aria-label="Akun Yubie — masuk atau lihat pesanan">Akun</Link>
-        <Link className="text-button cart-link" href="/cart" aria-label={`Keranjang belanja, ${count} item`}>Keranjang{count > 0 && <span className="cart-count" aria-hidden="true">{count}</span>}</Link>
+        <button className="text-button cart-link" type="button" onClick={openCart} aria-label={`Buka keranjang belanja, ${count} item`}>Keranjang{count > 0 && <span className="cart-count" aria-hidden="true">{count}</span>}</button>
         <button className="menu-button" onClick={() => setMenu(true)} aria-label="Buka menu"><span /><span /></button>
       </div>
     </header>

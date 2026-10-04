@@ -3,12 +3,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef } from "react";
+import { quotePromotion } from "@yubie/domain";
 import { useCart, useCartDisplayLines } from "@/features/cart/cart-context";
 import { useFocusTrap } from "@/lib/a11y";
 import { formatRupiah } from "@/lib/format";
 
 export function CartDrawer() {
-  const { isOpen, closeCart, setQuantity, removeItem, count } = useCart();
+  const { isOpen, closeCart, setQuantity, removeItem, count, promoCode, clearPromo } = useCart();
   const lines = useCartDisplayLines();
   const layerRef = useRef<HTMLDivElement>(null);
   useFocusTrap(layerRef, isOpen);
@@ -22,6 +23,8 @@ export function CartDrawer() {
 
   if (!isOpen) return null;
   const subtotal = lines.reduce((total, item) => total + item.lineTotal, 0);
+  const promotion = quotePromotion(promoCode, subtotal);
+  const total = subtotal - (promotion?.discountAmount ?? 0);
 
   return <div className="drawer-layer" ref={layerRef} role="dialog" aria-modal="true" aria-label="Keranjang belanja">
     <section className="cart-drawer" aria-label="Isi keranjang">
@@ -45,11 +48,13 @@ export function CartDrawer() {
             </div>
             <strong>{formatRupiah(lineTotal)}</strong>
           </article>)}
-          <p className="drawer-note">Harga tampil dari katalog terverifikasi. Checkout resmi saat ini diselesaikan melalui marketplace partner.</p>
+          <p className="drawer-note">Harga dihitung ulang oleh server saat checkout. Pembayaran online menggunakan halaman aman Xendit ketika mode pembayaran telah diaktifkan.</p>
         </div>
         <footer className="drawer-footer">
           <div><span>Subtotal</span><strong>{formatRupiah(subtotal)}</strong></div>
-          <p>Ongkir dan total final ditentukan saat pembelian di marketplace partner.</p>
+          {promotion && <div className="discount-row"><span>Promo {promotion.code} <button type="button" onClick={clearPromo}>Hapus</button></span><strong>−{formatRupiah(promotion.discountAmount)}</strong></div>}
+          <div className="drawer-total"><span>Total</span><strong>{formatRupiah(total)}</strong></div>
+          <p>Ongkir, ketersediaan, dan total final diverifikasi kembali oleh server sebelum pembayaran.</p>
           <div className="drawer-actions">
             <Link className="button warm" href="/cart" onClick={closeCart}>Lihat Keranjang</Link>
             <Link className="button primary" href="/checkout" onClick={closeCart}>Checkout <span>→</span></Link>

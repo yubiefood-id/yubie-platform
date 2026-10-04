@@ -46,6 +46,7 @@ export const checkoutRequestSchema = z.object({
   customerEmail: z.email(),
   customerName: z.string().trim().max(80).optional(),
   delivery: checkoutDeliverySchema.optional(),
+  promoCode: z.string().trim().max(32).optional(),
 });
 
 export const googleLoginSchema = z.object({

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-test("shake purchase shows coming soon not buy link", async () => {
+test("shake purchase points to the approved online catalog", async () => {
   const { DeterministicConversationEngine } = await import("../../dist/deterministic/engine.js");
   const engine = new DeterministicConversationEngine({
     knowledge: { async getEffectivePublicKnowledge() { return null; } },
@@ -12,7 +12,8 @@ test("shake purchase shows coming soon not buy link", async () => {
     conversationState: "BOT_ACTIVE",
     persisted: { nodeId: "buy", flowVersion: "deterministic-v1", context: {}, fallbackCount: 0 },
   });
-  assert.match(toShake.action.text, /coming soon/i);
+  assert.match(toShake.action.text, /tersedia/i);
+  assert.match(toShake.action.text, /checkout/i);
 });
 
 test("flour shopee uses marketplace registry path", async () => {
