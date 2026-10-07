@@ -28,6 +28,7 @@ test("renders catalog, product, and supporting routes", async () => {
     ["/products", /Mulai/],
     ["/products/yubie-flour", /BELI RESMI|Memuat opsi beli/],
     ["/products/yubie-mie", /Add to Cart/i],
+    ["/our-story", /Yang tumbuh dekat[\s\S]*Ubi ≠ Ube[\s\S]*Nadhya Shafa/],
     ["/our-roots", /FIVE ROOTS[\s\S]*Purple Pancakes/],
     ["/b2b", /BUILD YOUR NEXT PRODUCT/],
     ["/impact", /Responsible evidence/],
@@ -75,6 +76,18 @@ test("does not publish unverified certification claims as product facts", async 
   const response = await worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), env, ctx);
   const html = await response.text();
   assert.doesNotMatch(html, /halal certified|BPOM registered|low glycemic index/i);
+});
+
+test("our story separates education, evidence status, and team facts", async () => {
+  const { default: worker } = await makeWorker();
+  const response = await worker.fetch(new Request("http://localhost/our-story", { headers: { accept: "text/html" } }), env, ctx);
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /Ipomoea batatas/);
+  assert.match(html, /Dioscorea alata/);
+  assert.match(html, /IN VALIDATION[\s\S]*NEVER INFER/);
+  assert.match(html, /Nadhya Shafa[\s\S]*Nadira Mumtaz Fauzia[\s\S]*Renata Azrarefa[\s\S]*Eny Palupi/);
+  assert.doesNotMatch(html, /menyembuhkan|mencegah diabetes|menurunkan berat badan/i);
 });
 
 test("homepage preserves hero and follows required semantic section order", async () => {

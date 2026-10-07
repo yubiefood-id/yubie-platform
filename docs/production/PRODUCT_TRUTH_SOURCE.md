@@ -13,7 +13,7 @@ SKU sellable or a claim publishable.
 | Source | Status in repo | Role |
 |---|---|---|
 | `Eny Palupi_Action Plan dan RAB.xlsx - Informasi dalam kemasan.pdf` | Reviewed from the stakeholder-supplied project source on 2026-10-04; sanitized facts encoded in the domain catalog | Canonical source for four families, pack sizes, prices, ingredients, preparation, producer, and stated Flour shelf life |
-| `20 story Yubie.docx` | **ABSENT — not committed** | Canonical brand story for the Our Roots long-form chapters |
+| `20 story Yubie.docx` | Reviewed from the stakeholder-supplied source on 2026-10-07; sanitized narrative and education copy encoded in `/our-story` | Canonical brand story and education source; health statistics and product claims remain subject to independent verification and approval |
 | `packages/domain/src/product-discovery.ts` | Present | Current code-side catalog (was 3 families before this revision) |
 
 **Rule applied:** where the Eny Palupi file and code conflict, the Eny Palupi
@@ -48,7 +48,7 @@ conflicting value is silently promoted to customer-facing copy.
 
 - ~~B1~~ **RESOLVED (ADR-012):** Xendit selected; first-party checkout implemented behind `COMMERCE_PROVIDER=xendit`. TEST keys + webhook callback URL (`https://api.yubie.id/v1/webhooks/xendit/payment-session`) still needed before live wiring; live mode prohibited until the ADR-012 sandbox matrix passes.
 - ~~B4~~ **RESOLVED (ADR-012):** Google Identity Services implemented (`/login`, `/account*`); needs a real `GOOGLE_CLIENT_ID` with the production origin allow-listed. Until then the login page renders an honest "sedang disiapkan" state.
-- **B2** The commercial information file was reviewed and its approved customer-facing facts were encoded on 2026-10-04. The separate 20-story source is still absent and remains a gate for new Our Roots narrative claims.
+- ~~B2~~ **RESOLVED FOR BRAND NARRATIVE:** the 20-story source was reviewed on 2026-10-07 and used to build `/our-story`. The source authorizes the origin, local-food education, and Ubi-versus-Ube narrative only. It does not approve product-specific nutrition, medical, certification, allergen, shelf-life, or impact claims.
 - **B3** **PARTIALLY RESOLVED:** `transparent_yubie.png` was supplied and ingested. Its alpha channel was a noisy semi-transparent black matte; the alpha was rebuilt (hard threshold of the original alpha, cropped to content) and verified clean at render scale. A cleaner vector master from the designer remains desirable but is no longer blocking. Note: the supplied file renders best on light surfaces; the dark footer uses it at reduced prominence.
 - **B5** **PARTIALLY RESOLVED:** hero video supplied and transcoded (720p 1.9 MB / 540p 0.4 MB H.264 + poster WebP, poster-first LCP, reduced-motion + data-saver safe). Root-varietal, application, preparation, harvest, B2B, Ppang, and Mie visual studies have been added. Still missing: approved documentary farm photography, final Ppang/Mie packaging photography, and a complete per-page OG image set.
 
