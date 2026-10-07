@@ -94,16 +94,6 @@ export function StoryExperience() {
     const sections = Array.from(document.querySelectorAll<HTMLElement>("[data-story-chapter]"));
     const revealItems = Array.from(document.querySelectorAll<HTMLElement>("[data-story-reveal]"));
 
-    const chapterObserver = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-        if (visible?.target.id) setActiveChapter(visible.target.id as (typeof chapters)[number]["id"]);
-      },
-      { rootMargin: "-24% 0px -58%", threshold: [0.1, 0.3, 0.6] },
-    );
-
     const revealObserver = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -116,7 +106,6 @@ export function StoryExperience() {
       { rootMargin: "0px 0px -10%", threshold: 0.12 },
     );
 
-    sections.forEach((section) => chapterObserver.observe(section));
     revealItems.forEach((item) => revealObserver.observe(item));
 
     let frame = 0;
@@ -126,6 +115,13 @@ export function StoryExperience() {
         const available = document.documentElement.scrollHeight - window.innerHeight;
         const progress = available > 0 ? Math.min(1, Math.max(0, window.scrollY / available)) : 0;
         if (progressRef.current) progressRef.current.style.transform = `scaleX(${progress})`;
+
+        const marker = window.innerHeight * 0.32;
+        const current = sections.find((section) => {
+          const bounds = section.getBoundingClientRect();
+          return bounds.top <= marker && bounds.bottom > marker;
+        });
+        if (current?.id) setActiveChapter(current.id as (typeof chapters)[number]["id"]);
       });
     };
     updateProgress();
@@ -134,7 +130,6 @@ export function StoryExperience() {
 
     return () => {
       document.documentElement.classList.remove("story-enhanced");
-      chapterObserver.disconnect();
       revealObserver.disconnect();
       window.cancelAnimationFrame(frame);
       window.removeEventListener("scroll", updateProgress);
