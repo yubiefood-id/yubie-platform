@@ -203,11 +203,9 @@ export function StoryExperience() {
     const headerHeight = document.querySelector<HTMLElement>(".site-header")?.offsetHeight ?? 0;
     const chapterNavHeight = chapterNavRef.current?.offsetHeight ?? 0;
     const top = Math.max(0, window.scrollY + target.getBoundingClientRect().top - headerHeight - chapterNavHeight - 16);
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
     setActiveChapter(chapterId);
     window.history.pushState(null, "", `#${chapterId}`);
-    window.scrollTo({ top, behavior: reduceMotion ? "auto" : "smooth" });
+    window.scrollTo({ top, behavior: "auto" });
   };
 
   return (
