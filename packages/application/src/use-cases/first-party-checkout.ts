@@ -71,6 +71,15 @@ export interface CreateFirstPartyCheckoutResult {
   currency: "IDR";
 }
 
+/**
+ * Typed idempotent outcome stored on the claim. A replay MUST return the same
+ * semantic result as the first attempt — including failures — so a stored
+ * failure can never be deserialized into a fake success.
+ */
+export type StoredCheckoutOutcome =
+  | { kind: "success"; result: CreateFirstPartyCheckoutResult }
+  | { kind: "failure"; error: { code: string; message: string; retryable: boolean } };
+
 /** Minimal, PII-free view for the unauthenticated success-page poll. */
 export interface PublicCheckoutStatusView {
   checkoutToken: string;
@@ -122,16 +131,26 @@ function requestHashOf(body: string): string {
  * read — then
  *
  *   TX1: idempotency claim + draft order + totals + payment intent
- *        (provider_session_id NULL) + audit + outbox  → COMMIT
+ *        (provider_session_id NULL) + lot reservation + audit + outbox
+ *        → COMMIT (the claim rolls back with the draft on failure, so a key
+ *        is never poisoned by an attempt that created no order)
  *   provider.createPaymentSession (OUTSIDE any transaction)
+ *     - definitive provider rejection (validation): cancel draft, release
+ *       reservations, attach the typed failure outcome — nobody was charged
+ *     - ambiguous outcome (timeout/unreachable/5xx): the session MIGHT exist;
+ *       flag the intent "ambiguous_create" for reconciliation, attach nothing,
+ *       never blind-retry
  *   TX2: attach session, order → pending_payment, audit + outbox,
- *        idempotency response → COMMIT
+ *        typed idempotent outcome → COMMIT
+ *     - TX2 failure: best-effort persist the session id onto the intent
+ *       (reconciliation_state "attach_failed"), then best-effort
+ *       provider.cancelPaymentSession OUTSIDE any transaction. The session id
+ *       is never lost, and a webhook for it matches the payment row.
  *
- * Every failure boundary is recoverable: provider errors cancel the draft;
- * DB failure after the provider call leaves a draft whose link was never
- * delivered (nobody can be charged), flagged for reconciliation cleanup. The
- * same checkoutRef is never sent to the provider twice — a retry after failure
- * must use a fresh Idempotency-Key, which creates a fresh order.
+ * The same checkoutRef is never sent to the provider twice: retries after a
+ * DEFINITIVE failure rotate to a new Idempotency-Key (new order); ambiguous
+ * attempts are resolved by reconciliation or a late webhook, which can attach
+ * an unknown session id by reference.
  */
 export async function createFirstPartyCheckout(
   input: CreateFirstPartyCheckoutInput,
@@ -142,7 +161,7 @@ export async function createFirstPartyCheckout(
     const product = productFamilies.find((item) => item.id === line.productId && item.status === "available");
     const size = product?.sizes.find((item) => item.id === line.sizeId && item.available && typeof item.price === "number");
     if (!product || !size || typeof size.price !== "number") {
-      return err({ code: "conflict", message: `Line unavailable: ${line.productId}/${line.sizeId}`, retryable: false, requestId: "checkout" });
+      return err({ code: "out_of_stock", message: `Line unavailable: ${line.productId}/${line.sizeId}`, retryable: false, requestId: "checkout" });
     }
     const quantity = Math.min(Math.max(Math.trunc(line.quantity) || 0, 1), MAX_CART_LINE_QUANTITY);
     priced.push({
@@ -169,32 +188,33 @@ export async function createFirstPartyCheckout(
   const promotion = quotePromotion(input.promoCode, subtotalAmount);
   const totals = buildOrderTotals(subtotalAmount, shipping.amount, 0, promotion?.discountAmount ?? 0);
 
-  // Idempotent replay: same key + same request returns the stored first
-  // response verbatim; a different request under the same key is a conflict.
-  if (input.idempotencyKey) {
-    const claim = { scope: IDEMPOTENCY_SCOPE, principalKey: input.idempotencyPrincipal, operation: IDEMPOTENCY_OPERATION, idempotencyKey: input.idempotencyKey };
-    const claimed = await deps.tx.run("checkout.idempotency.claim", async (repos) =>
-      repos.idempotency.claim({ ...claim, requestHash: requestHashOf(input.rawRequestBody), createdAt: deps.clock.now() }),
-    );
-    if (!claimed.ok) return claimed;
-    if (claimed.value.status === "duplicate") {
-      const stored = claimed.value.responseJson;
-      if (stored) {
-        try {
-          return ok(JSON.parse(stored) as CreateFirstPartyCheckoutResult);
-        } catch {
-          return err({ code: "conflict", message: "Stored idempotent response unreadable; use a new Idempotency-Key.", retryable: false, requestId: "checkout" });
-        }
-      }
-      return err({ code: "conflict", message: "Idempotency key already used; use a new key to retry.", retryable: false, requestId: "checkout" });
-    }
-  }
   const idempotencyKey = input.idempotencyKey ?? null;
-  const attachResponse = (repos: TransactionalRepositories, responseJson: string) =>
-    repos.idempotency.attachResponse(
-      { scope: IDEMPOTENCY_SCOPE, principalKey: input.idempotencyPrincipal, operation: IDEMPOTENCY_OPERATION, idempotencyKey: idempotencyKey ?? "" },
-      responseJson,
-    );
+  const claimInput = {
+    scope: IDEMPOTENCY_SCOPE,
+    principalKey: input.idempotencyPrincipal,
+    operation: IDEMPOTENCY_OPERATION,
+    idempotencyKey: idempotencyKey ?? "",
+  };
+  const attachOutcome = (repos: TransactionalRepositories, outcome: StoredCheckoutOutcome) =>
+    repos.idempotency.attachResponse(claimInput, JSON.stringify(outcome));
+
+  /** Replay semantics for a duplicate claim encountered inside TX1. */
+  const replayStored = (stored: string | null) => {
+    if (!stored) {
+      return err({ code: "conflict", message: "This checkout attempt is still being resolved; retry with the same key shortly or start a new checkout.", retryable: false, requestId: "checkout" });
+    }
+    try {
+      const parsed = JSON.parse(stored) as StoredCheckoutOutcome;
+      if (parsed && parsed.kind === "success") return ok(parsed.result);
+      if (parsed && parsed.kind === "failure") {
+        const code = parsed.error.code === "validation" ? "validation" : "unavailable";
+        return err({ code, message: parsed.error.message, retryable: parsed.error.retryable, requestId: "checkout" });
+      }
+    } catch {
+      // fall through to the unreadable-response conflict
+    }
+    return err({ code: "conflict", message: "Stored idempotent response unreadable; use a new Idempotency-Key.", retryable: false, requestId: "checkout" });
+  };
 
   const now = deps.clock.now();
   const orderId = `ord_${deps.ids.nextId()}`;
@@ -219,27 +239,35 @@ export async function createFirstPartyCheckout(
     createdAt: now,
     updatedAt: now,
   };
-  const paymentIntentId = `pay_${deps.ids.nextId()}`;
+  const paymentIntent: PaymentRecord = {
+    id: `pay_${deps.ids.nextId()}`,
+    orderId,
+    provider: "xendit",
+    providerSessionId: null,
+    redirectUrl: null,
+    currency: "IDR",
+    amount: totals.grandTotalAmount,
+    status: "pending",
+    expiresAt: orderExpiresAt,
+    createdAt: now,
+    updatedAt: now,
+  };
 
-  // TX1: durable draft + intent + lot reservation. COMMIT before any
-  // external call. An inventory shortfall aborts the whole transaction —
-  // no order survives a failed reservation.
+  // TX1: idempotency claim + durable draft + intent + lot reservation, all in
+  // ONE transaction. COMMIT before any external call. A failure (inventory
+  // shortfall, DB error) rolls the claim back with the draft — the key is
+  // never poisoned by an attempt that created no order.
+  let claimed = false;
   try {
-    await deps.tx.run("checkout.draft", async (repos) => {
+    const tx1 = await deps.tx.run("checkout.draft", async (repos) => {
+      if (idempotencyKey) {
+        const claim = await repos.idempotency.claim({ ...claimInput, requestHash: requestHashOf(input.rawRequestBody), createdAt: now });
+        if (!claim.ok) return claim;
+        if (claim.value.status === "duplicate") return replayStored(claim.value.responseJson);
+        claimed = true;
+      }
       await repos.orders.save(draftOrder);
-      await repos.payments.save({
-        id: paymentIntentId,
-        orderId,
-        provider: "xendit",
-        providerSessionId: null,
-        redirectUrl: null,
-        currency: "IDR",
-        amount: totals.grandTotalAmount,
-        status: "pending",
-        expiresAt: orderExpiresAt,
-        createdAt: now,
-        updatedAt: now,
-      });
+      await repos.payments.save(paymentIntent);
       if ((input.inventoryMode ?? "none") === "lots") {
         await repos.inventory.reserveForOrder({
           orderId,
@@ -257,13 +285,18 @@ export async function createFirstPartyCheckout(
         payloadJson: JSON.stringify({ orderId, checkoutRef, totalAmount: totals.grandTotalAmount }),
         availableAt: now,
       });
+      return null;
     });
+    if (tx1 !== null) return tx1; // duplicate replay outcome
   } catch (error) {
     if (error instanceof InsufficientInventoryError) {
-      const failure = { code: "conflict", message: `Insufficient sellable inventory for ${error.productId}/${error.sizeId}.`, retryable: false, requestId: "checkout" } satisfies AppError;
-      // The transaction rolled back (PostgreSQL) or wrote nothing (validated
-      // before any write): no order survives a failed reservation.
-      return err(failure);
+      // PostgreSQL rolled the whole transaction back (claim included). The
+      // in-memory manager cannot roll back, so release the claim explicitly
+      // for parity: a retry after restock with the SAME key must succeed.
+      if (claimed && idempotencyKey) {
+        await deps.tx.run("checkout.idempotency.release", async (repos) => repos.idempotency.releaseClaim(claimInput)).catch(() => undefined);
+      }
+      return err({ code: "out_of_stock", message: `Insufficient sellable inventory for ${error.productId}/${error.sizeId}.`, retryable: false, requestId: "checkout" });
     }
     throw error;
   }
@@ -284,34 +317,44 @@ export async function createFirstPartyCheckout(
   });
 
   if (!session.ok) {
-    // The payment link was never delivered, so nobody can be charged; cancel
-    // the draft deterministically and record the failure as the idempotent
-    // response for this key.
-    await deps.tx.run("checkout.provider_failed", async (repos) => {
-      await repos.orders.save({ ...draftOrder, status: "cancelled", updatedAt: deps.clock.now() });
-      await repos.payments.save({
-        id: paymentIntentId,
-        orderId,
-        provider: "xendit",
-        providerSessionId: null,
-        redirectUrl: null,
-        currency: "IDR",
-        amount: totals.grandTotalAmount,
-        status: "failed",
-        expiresAt: orderExpiresAt,
-        reconciliationState: "provider_create_failed",
-        createdAt: now,
-        updatedAt: deps.clock.now(),
+    const definitive = session.error.code === "validation";
+    if (definitive) {
+      // The provider refused the create — no payment link exists, so nobody
+      // can be charged. Cancel the draft, RELEASE the reservations in the
+      // same transaction, and attach the typed failure outcome so replays
+      // return the same failure instead of a fake success.
+      const failure: StoredCheckoutOutcome = {
+        kind: "failure",
+        error: { code: "validation", message: "Payment provider rejected the checkout request.", retryable: false },
+      };
+      await deps.tx.run("checkout.provider_failed", async (repos) => {
+        await repos.orders.save({ ...draftOrder, status: "cancelled", updatedAt: deps.clock.now() });
+        await repos.payments.save({ ...paymentIntent, status: "failed", reconciliationState: "provider_create_failed", updatedAt: deps.clock.now() });
+        await repos.inventory.releaseForOrder(orderId, "provider_create_failed", deps.clock.now());
+        await repos.audit.append({ action: "order.provider_create_failed", resourceType: "order", resourceId: orderId, actor: "checkout", occurredAt: deps.clock.now() });
+        if (idempotencyKey) await attachOutcome(repos, failure);
       });
-      await repos.audit.append({ action: "order.provider_create_failed", resourceType: "order", resourceId: orderId, actor: "checkout", occurredAt: deps.clock.now() });
-      if (idempotencyKey) {
-        await attachResponse(repos, JSON.stringify({ ok: false, error: { code: "unavailable", message: "Payment provider unavailable.", retryable: true, requestId: "checkout" } }));
-      }
+      return err({ code: "validation", message: "Payment provider rejected the checkout request; nothing was charged. Retry with a new Idempotency-Key.", retryable: false, requestId: "checkout" });
+    }
+
+    // AMBIGUOUS create (timeout / unreachable / 5xx): a session may exist at
+    // the provider under this checkoutRef, but no link was delivered to the
+    // browser. Never blind-retry the create; flag the intent for
+    // reconciliation and answer retryable-unavailable. A late webhook for the
+    // orphan session can still land: it attaches by reference.
+    await deps.tx.run("checkout.provider_ambiguous", async (repos) => {
+      await repos.payments.save({ ...paymentIntent, reconciliationState: "ambiguous_create", updatedAt: deps.clock.now() });
+      await repos.audit.append({ action: "order.provider_create_ambiguous", resourceType: "order", resourceId: orderId, actor: "checkout", occurredAt: deps.clock.now() });
     });
-    return err({ code: "unavailable", message: "Payment provider unavailable; the draft order was cancelled. Retry with a new Idempotency-Key.", retryable: true, requestId: "checkout" });
+    return err({
+      code: session.error.code === "timeout" ? "timeout" : "unavailable",
+      message: "Payment provider outcome unknown; the attempt is flagged for reconciliation. Retry with a new Idempotency-Key to start a new checkout.",
+      retryable: true,
+      requestId: "checkout",
+    });
   }
 
-  // TX2: attach session, order → pending_payment, store idempotent response.
+  // TX2: attach session, order → pending_payment, typed idempotent outcome.
   const result: CreateFirstPartyCheckoutResult = {
     mode: "live",
     checkoutToken: token,
@@ -324,33 +367,60 @@ export async function createFirstPartyCheckout(
     currency: "IDR",
   };
 
-  await deps.tx.run("checkout.attach_session", async (repos) => {
-    await repos.payments.save({
-      id: paymentIntentId,
-      orderId,
-      provider: "xendit",
-      providerSessionId: session.value.providerSessionId,
-      redirectUrl: session.value.redirectUrl,
-      currency: "IDR",
-      amount: totals.grandTotalAmount,
-      status: "pending",
-      expiresAt: session.value.expiresAt ?? orderExpiresAt,
-      ...(session.value.providerBusinessId !== undefined ? { providerBusinessId: session.value.providerBusinessId } : {}),
-      createdAt: now,
-      updatedAt: deps.clock.now(),
+  try {
+    await deps.tx.run("checkout.attach_session", async (repos) => {
+      await repos.payments.save({
+        ...paymentIntent,
+        providerSessionId: session.value.providerSessionId,
+        redirectUrl: session.value.redirectUrl,
+        expiresAt: session.value.expiresAt ?? orderExpiresAt,
+        ...(session.value.providerBusinessId !== undefined ? { providerBusinessId: session.value.providerBusinessId } : {}),
+        updatedAt: deps.clock.now(),
+      });
+      await repos.orders.save({ ...draftOrder, status: "pending_payment", updatedAt: deps.clock.now() });
+      await repos.audit.append({ action: "order.pending_payment", resourceType: "order", resourceId: orderId, actor: "checkout", occurredAt: deps.clock.now() });
+      await repos.outbox.enqueue({
+        eventType: "order.pending_payment",
+        aggregateType: "order",
+        aggregateId: orderId,
+        dedupeKey: `order:pending_payment:${orderId}`,
+        payloadJson: JSON.stringify({ orderId, checkoutRef, providerSessionId: session.value.providerSessionId }),
+        availableAt: deps.clock.now(),
+      });
+      if (idempotencyKey) await attachOutcome(repos, { kind: "success", result });
     });
-    await repos.orders.save({ ...draftOrder, status: "pending_payment", updatedAt: deps.clock.now() });
-    await repos.audit.append({ action: "order.pending_payment", resourceType: "order", resourceId: orderId, actor: "checkout", occurredAt: deps.clock.now() });
-    await repos.outbox.enqueue({
-      eventType: "order.pending_payment",
-      aggregateType: "order",
-      aggregateId: orderId,
-      dedupeKey: `order:pending_payment:${orderId}`,
-      payloadJson: JSON.stringify({ orderId, checkoutRef, providerSessionId: session.value.providerSessionId }),
-      availableAt: deps.clock.now(),
+  } catch (tx2Error) {
+    // The provider session EXISTS but could not be attached. Compensation,
+    // in order of importance: (1) never lose the session id — persist it onto
+    // the intent as "attach_failed" so a webhook can match by session; then
+    // (2) best-effort cancel the session OUTSIDE any transaction so it can
+    // never be paid. The order stays a recoverable draft.
+    let cancelAccepted: boolean | null = null;
+    try {
+      await deps.tx.run("checkout.attach_failed", async (repos) => {
+        await repos.payments.save({
+          ...paymentIntent,
+          providerSessionId: session.value.providerSessionId,
+          redirectUrl: session.value.redirectUrl,
+          reconciliationState: "attach_failed",
+          updatedAt: deps.clock.now(),
+        });
+        await repos.audit.append({ action: "order.attach_failed", resourceType: "order", resourceId: orderId, actor: "checkout", occurredAt: deps.clock.now() });
+      });
+      // Cancel OUTSIDE any transaction; a network failure here leaves the
+      // session live — reconciliation still has the persisted session id.
+      const cancelled = await deps.provider.cancelPaymentSession(session.value.providerSessionId);
+      cancelAccepted = cancelled.ok ? cancelled.value.accepted : null;
+    } catch {
+      cancelAccepted = null;
+    }
+    return err({
+      code: "unavailable",
+      message: `Checkout session attach failed (session ${session.value.providerSessionId}, cancelAccepted: ${String(cancelAccepted)}); the draft is flagged for reconciliation.`,
+      retryable: true,
+      requestId: "checkout",
     });
-    if (idempotencyKey) await attachResponse(repos, JSON.stringify(result));
-  });
+  }
 
   return ok(result);
 }
@@ -390,11 +460,13 @@ export async function getCheckoutStatus(
       const reconciled = paymentStatusFromProviderSession(session.value.rawStatus);
       if (reconciled) {
         await deps.tx.run("checkout.poll_reconcile", async (repos) => {
-          const freshOrder = await repos.orders.findById(order.id);
-          const freshPayments = await repos.payments.findByOrderId(order.id);
-          const freshPayment = freshPayments.ok ? freshPayments.value[0] ?? null : null;
-          if (freshOrder.ok && freshOrder.value && freshPayment && freshPayment.status === "pending") {
-            await applyPaymentStatus({ ...repos, clock: deps.clock, ids: deps.ids }, freshPayment, freshOrder.value, reconciled);
+          // Lock the payment row: the webhook may be transitioning concurrently.
+          const locked = await repos.payments.lockById(payment.id);
+          if (locked.ok && locked.value && locked.value.status === "pending") {
+            const freshOrder = await repos.orders.findById(order.id);
+            if (freshOrder.ok && freshOrder.value) {
+              await applyPaymentStatus({ ...repos, clock: deps.clock, ids: deps.ids }, locked.value, freshOrder.value, reconciled);
+            }
           }
         });
         return ok(view({ ...order, status: orderStatusForPayment(reconciled) ?? order.status }, { ...payment, status: reconciled }));

@@ -16,6 +16,8 @@ import {
   webhookError,
 } from "@yubie/application";
 import { b2bLeadSchema, checkoutRequestSchema, googleLoginSchema, newsletterSubmissionSchema, productWaitlistSchema } from "@yubie/validation";
+import { parseYubieEnvName } from "@yubie/config";
+import { tokensMatch } from "@yubie/application";
 import { catalog } from "./catalog.js";
 import { createAppContext, type AppContext } from "./composition/create-app.js";
 import { createRequestId } from "./middleware/request-id.js";
@@ -38,10 +40,106 @@ const json = (body: unknown, init?: ResponseInit) => new Response(JSON.stringify
   headers: { "content-type": "application/json; charset=utf-8", ...init?.headers },
 });
 
+/**
+ * Route trust classes (ADR-012 §1/§7):
+ *   PUBLIC                  /healthz /readyz /go/*        (redirect links from anywhere)
+ *   PROVIDER-AUTHENTICATED  /v1/webhooks/*                (x-callback-token + business_id)
+ *   WEB-PROXY-AUTHENTICATED every other /v1/*             (web worker server hop)
+ *   SESSION-AUTHENTICATED   /v1/account/*                 (session, after the proxy gate)
+ *   OPS                     /ops/*                        (OPS_API_TOKEN bearer)
+ * When API_PROXY_TOKEN is set, the web-proxy class requires a constant-time
+ * match; when it is unset the class fails closed outside local environments.
+ */
+function isWebProxyRoute(pathname: string): boolean {
+  return pathname.startsWith("/v1/") && !pathname.startsWith("/v1/webhooks/");
+}
+
+function proxyTrustGate(request: Request, pathname: string): Response | null {
+  if (!isWebProxyRoute(pathname)) return null;
+  const expected = process.env.API_PROXY_TOKEN ?? "";
+  if (expected) {
+    const presented = request.headers.get("x-api-proxy-token");
+    if (!presented || !tokensMatch(presented, expected)) {
+      return json({ ok: false, code: "PROXY_UNAUTHORIZED" }, { status: 401 });
+    }
+    return null;
+  }
+  const env = parseYubieEnvName(process.env.YUBIE_ENV);
+  if (env === "development" || env === "test") return null;
+  return json({ ok: false, code: "PROXY_NOT_CONFIGURED" }, { status: 503 });
+}
+
+/** Bounded body readers: no route buffers an unbounded request into memory. */
+const MAX_JSON_BYTES = 64 * 1024;
+const MAX_WEBHOOK_BYTES = 256 * 1024;
+
+async function readBoundedText(request: Request, maxBytes: number): Promise<string | null> {
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > maxBytes) return null;
+  const reader = request.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+}
+
+async function readJsonBody(request: Request, maxBytes = MAX_JSON_BYTES): Promise<{ ok: true; value: unknown } | { ok: false }> {
+  const text = await readBoundedText(request, maxBytes);
+  if (text === null) return { ok: false };
+  try {
+    return { ok: true, value: JSON.parse(text) };
+  } catch {
+    return { ok: true, value: null };
+  }
+}
+
+const tooLarge = () => json({ ok: false, code: "PAYLOAD_TOO_LARGE" }, { status: 413 });
+
+/**
+ * Checkout failure semantics the storefront can act on. A sold-out line and a
+ * reused idempotency key are both 409s with DIFFERENT meanings; a provider
+ * outage/ambiguity is retryable 503, never "line unavailable".
+ */
+function checkoutError(code: string): { status: number; code: string } {
+  switch (code) {
+    case "validation":
+      return { status: 400, code: "INVALID_REQUEST" };
+    case "out_of_stock":
+      return { status: 409, code: "INSUFFICIENT_INVENTORY" };
+    case "conflict":
+      return { status: 409, code: "IDEMPOTENCY_KEY_REUSED" };
+    case "timeout":
+    case "unavailable":
+      return { status: 503, code: "PROVIDER_UNAVAILABLE" };
+    default:
+      return { status: 502, code: "CHECKOUT_FAILED" };
+  }
+}
+
 export async function handleRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const ctx = getContext();
-  const requestId = request.headers.get("x-request-id") ?? createRequestId();
+  const incomingId = request.headers.get("x-request-id");
+  const requestId = incomingId && /^[A-Za-z0-9_-]{1,64}$/.test(incomingId) ? incomingId : createRequestId();
+
+  const gate = proxyTrustGate(request, url.pathname);
+  if (gate) return gate;
 
   if (request.method === "GET" && url.pathname === "/healthz") {
     return json({ ok: true, service: "yubie-api", version: "v1", releaseSha: ctx.releaseSha });
@@ -117,7 +215,9 @@ export async function handleRequest(request: Request): Promise<Response> {
   }
 
   if (request.method === "POST" && url.pathname === "/v1/newsletter") {
-    const parsed = newsletterSubmissionSchema.safeParse(await request.json().catch(() => null));
+    const body = await readJsonBody(request, 32 * 1024);
+    if (!body.ok) return tooLarge();
+    const parsed = newsletterSubmissionSchema.safeParse(body.value);
     if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
     const result = await subscribeNewsletter(
       { email: parsed.data.email, ...(parsed.data.name ? { name: parsed.data.name } : {}), source: "web" },
@@ -128,7 +228,9 @@ export async function handleRequest(request: Request): Promise<Response> {
   }
 
   if (request.method === "POST" && url.pathname === "/v1/waitlist") {
-    const parsed = productWaitlistSchema.safeParse(await request.json().catch(() => null));
+    const body = await readJsonBody(request, 32 * 1024);
+    if (!body.ok) return tooLarge();
+    const parsed = productWaitlistSchema.safeParse(body.value);
     if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
     const result = await joinProductWaitlist(
       { email: parsed.data.email, productId: parsed.data.productId, source: "web" },
@@ -139,7 +241,9 @@ export async function handleRequest(request: Request): Promise<Response> {
   }
 
   if (request.method === "POST" && url.pathname === "/v1/b2b-leads") {
-    const parsed = b2bLeadSchema.safeParse(await request.json().catch(() => null));
+    const body = await readJsonBody(request, 32 * 1024);
+    if (!body.ok) return tooLarge();
+    const parsed = b2bLeadSchema.safeParse(body.value);
     if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
     const result = await submitB2bLead(
       {
@@ -162,7 +266,8 @@ export async function handleRequest(request: Request): Promise<Response> {
   }
 
   if (request.method === "POST" && url.pathname === "/v1/checkouts" && process.env.COMMERCE_PROVIDER !== "disabled") {
-    const rawBody = await request.text();
+    const rawBody = await readBoundedText(request, MAX_JSON_BYTES);
+    if (rawBody === null) return tooLarge();
     let parsedJson: unknown = null;
     try {
       parsedJson = JSON.parse(rawBody);
@@ -195,8 +300,8 @@ export async function handleRequest(request: Request): Promise<Response> {
       }, { tx: ctx.tx, provider: ctx.paymentProvider, clock: ctx.clock, ids: ctx.ids });
       if (!result.ok) {
         logEvent("api.checkout_failed", { requestId, errorCode: result.error.code });
-        const status = result.error.code === "validation" ? 400 : result.error.code === "conflict" ? 409 : 502;
-        return json({ ok: false, code: result.error.code === "validation" ? "INVALID_REQUEST" : result.error.code === "conflict" ? "IDEMPOTENCY_KEY_REUSED" : "UNAVAILABLE_LINE" }, { status });
+        const mapping = checkoutError(result.error.code);
+        return json({ ok: false, code: mapping.code }, { status: mapping.status });
       }
       logEvent("api.checkout_created", { requestId, checkoutRef: result.value.checkoutRef, totalAmount: result.value.totalAmount, currency: result.value.currency, mode: result.value.mode });
       return json({ ok: true, data: result.value }, { status: 201 });
@@ -232,7 +337,9 @@ export async function handleRequest(request: Request): Promise<Response> {
 
   if (request.method === "POST" && url.pathname === "/v1/webhooks/xendit/payment-session") {
     if (!ctx.webhookToken || !ctx.xenditBusinessId) return json({ ok: false, code: "WEBHOOK_NOT_CONFIGURED" }, { status: 503 });
-    const payload = await request.json().catch(() => null);
+    const body = await readJsonBody(request, MAX_WEBHOOK_BYTES);
+    if (!body.ok) return tooLarge();
+    const payload = body.value;
     const outcome = await processPaymentWebhook({
       callbackToken: request.headers.get("x-callback-token"),
       expectedToken: ctx.webhookToken,
@@ -246,12 +353,19 @@ export async function handleRequest(request: Request): Promise<Response> {
     if (outcome.result === "ignored") {
       return json({ ok: true, data: { result: "ignored" } }, { status: 202 });
     }
+    if (outcome.result === "stale") {
+      // Authenticated new delivery whose terminal state was already decided:
+      // recorded, acknowledged, nothing changed.
+      return json({ ok: true, data: { result: "stale", paymentStatus: outcome.paymentStatus } }, { status: 202 });
+    }
     return json({ ok: true, data: { result: outcome.result } });
   }
 
   if (request.method === "POST" && url.pathname === "/v1/auth/google") {
     if (!ctx.verifier) return json({ ok: false, code: "AUTH_NOT_CONFIGURED" }, { status: 503 });
-    const parsed = googleLoginSchema.safeParse(await request.json().catch(() => null));
+    const body = await readJsonBody(request, MAX_JSON_BYTES);
+    if (!body.ok) return tooLarge();
+    const parsed = googleLoginSchema.safeParse(body.value);
     if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
     const csrfCookie = request.headers.get("cookie")?.match(/(?:^|;\s*)g_csrf_token=([^;]+)/)?.[1] ?? null;
     const result = await googleLogin({

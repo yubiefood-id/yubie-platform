@@ -118,7 +118,7 @@ export class GoogleIdTokenVerifier implements GoogleCredentialVerifier {
   private async loadJwk(kid: string): Promise<Jwk | null> {
     if (!this.jwksCache || this.now() - this.jwksCache.fetchedAt > JWKS_CACHE_MS) {
       try {
-        const response = await this.fetchFn(this.jwksUrl);
+        const response = await this.fetchFn(this.jwksUrl, { signal: AbortSignal.timeout(10_000) });
         const json = (await response.json()) as { keys?: Jwk[] };
         this.jwksCache = { keys: Array.isArray(json.keys) ? json.keys : [], fetchedAt: this.now() };
       } catch {

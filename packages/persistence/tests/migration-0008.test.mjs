@@ -204,12 +204,14 @@ test("checkout saga and webhook are atomic and exactly-once on real PostgreSQL",
 
     const paid = await database.client`SELECT status FROM orders WHERE checkout_public_token = ${first.value.checkoutToken}`;
     assert.equal(paid[0].status, "paid");
-    const inboxRows = await database.client`SELECT status FROM webhook_inbox WHERE provider = 'xendit_payment_session' AND delivery_id = ${`ps_${first.value.checkoutRef}:payment_session.completed:pay_pg_1`}`;
+    const inboxRows = await database.client`SELECT status FROM webhook_inbox WHERE provider = 'xendit_payment_session' AND delivery_id = ${`ps_${first.value.checkoutRef}:payment_session.completed`}`;
     assert.equal(inboxRows.length, 1);
     assert.equal(inboxRows[0].status, "processed");
 
-    // Provider failure path: draft cancelled atomically, no session anywhere.
-    provider.createPaymentSession = async () => ({ ok: false, error: { code: "unavailable", message: "down", retryable: true, requestId: "x" } });
+    // DEFINITIVE provider rejection path: draft cancelled atomically, no
+    // session anywhere. (code "validation" == definitive refusal; timeout/
+    // unavailable would leave an ambiguous_create draft instead.)
+    provider.createPaymentSession = async () => ({ ok: false, error: { code: "validation", message: "rejected", retryable: false, requestId: "x" } });
     const failed = await createFirstPartyCheckout({ ...input, idempotencyKey: "pg-idem-2", customerEmail: "fail@example.com" }, deps);
     assert.equal(failed.ok, false);
     const failedPayments = await database.client`SELECT p.status, p.provider_session_id, p.reconciliation_state FROM order_payments p JOIN orders o ON o.id = p.order_id WHERE o.customer_email = 'fail@example.com'`;

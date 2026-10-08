@@ -103,20 +103,139 @@ function checkoutTokenToId(deps, checkout) {
   return [...deps.orders.items.values()].find((order) => order.checkoutPublicToken === checkout.checkoutToken).id;
 }
 
-test("provider failure cancels the draft deterministically — nobody can be charged", async () => {
+test("DEFINITIVE provider rejection cancels the draft, releases stock, and replays as the same failure", async () => {
   const deps = makeDeps();
-  deps.provider.createPaymentSession = async () => ({ ok: false, error: { code: "unavailable", message: "down", retryable: true, requestId: "x" } });
+  deps.inventory.seedLot({ id: "lot_pf", productId: "flour", sizeId: "250g", lotCode: "PF", quantityOnHand: 10, expiryDate: "2027-06-30", status: "released", releasedAt: "2026-01-01T00:00:00.000Z", releaseReason: "coa", createdAt: "2026-01-01T00:00:00.000Z" });
+  deps.provider.createPaymentSession = async () => ({ ok: false, error: { code: "validation", message: "rejected", retryable: false, requestId: "x" } });
 
-  const result = await createFirstPartyCheckout(BASE_INPUT, deps);
+  const input = { ...BASE_INPUT, inventoryMode: "lots", idempotencyKey: "pf-1", rawRequestBody: "{}" };
+  const result = await createFirstPartyCheckout(input, deps);
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "unavailable");
+  assert.equal(result.error.code, "validation");
 
   const order = [...deps.orders.items.values()][0];
   assert.equal(order.status, "cancelled");
   const payment = (await deps.payments.findByOrderId(order.id)).value[0];
   assert.equal(payment.status, "failed");
   assert.equal(payment.providerSessionId, null, "payment intent never attached a session");
+  assert.equal(payment.reconciliationState, "provider_create_failed");
   assert.ok(deps.audit.events.some((event) => event.action === "order.provider_create_failed"));
+  assert.equal(deps.inventory.lots.get("lot_pf").quantityOnHand, 10, "reservations released back to the lot immediately");
+  assert.equal([...deps.inventory.reservations.values()].filter((r) => r.status === "active").length, 0);
+
+  // Replay with the same key returns the SAME failure — never a fake success
+  // and never a second provider call.
+  const before = deps.provider.created.length;
+  const replay = await createFirstPartyCheckout(input, deps);
+  assert.equal(replay.ok, false);
+  assert.equal(replay.error.code, "validation");
+  assert.equal(deps.provider.created.length, before);
+});
+
+test("AMBIGUOUS provider create keeps the draft + reservations and never blind-retries", async () => {
+  const deps = makeDeps();
+  deps.inventory.seedLot({ id: "lot_am", productId: "flour", sizeId: "250g", lotCode: "AM", quantityOnHand: 10, expiryDate: "2027-06-30", status: "released", releasedAt: "2026-01-01T00:00:00.000Z", releaseReason: "coa", createdAt: "2026-01-01T00:00:00.000Z" });
+  deps.provider.createPaymentSession = async () => ({ ok: false, error: { code: "timeout", message: "socket", retryable: true, requestId: "x" } });
+
+  const input = { ...BASE_INPUT, inventoryMode: "lots", idempotencyKey: "am-1", rawRequestBody: "{}" };
+  const result = await createFirstPartyCheckout(input, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "timeout");
+  assert.equal(result.error.retryable, true);
+
+  const order = [...deps.orders.items.values()][0];
+  assert.equal(order.status, "draft", "ambiguous outcome never cancels definitively");
+  const payment = (await deps.payments.findByOrderId(order.id)).value[0];
+  assert.equal(payment.reconciliationState, "ambiguous_create");
+  assert.equal(payment.providerSessionId, null);
+  assert.equal(deps.inventory.lots.get("lot_am").quantityOnHand, 8, "stock stays reserved while the outcome is unknown");
+  assert.equal([...deps.inventory.reservations.values()].filter((r) => r.status === "active").length, 1);
+  assert.ok(deps.audit.events.some((event) => event.action === "order.provider_create_ambiguous"));
+
+  // Replay with the same key while unresolved: conflict, no second create.
+  const before = deps.provider.created.length;
+  const replay = await createFirstPartyCheckout(input, deps);
+  assert.equal(replay.ok, false);
+  assert.equal(replay.error.code, "conflict");
+  assert.equal(deps.provider.created.length, before);
+});
+
+test("a late webhook attaches an orphan session by reference and resolves an ambiguous create", async () => {
+  const deps = makeDeps();
+  let createdSession = null;
+  deps.provider.createPaymentSession = async (input) => {
+    createdSession = `ps_orphan_${input.referenceId}`;
+    return { ok: true, value: { provider: "xendit", providerSessionId: createdSession, redirectUrl: "https://xen.to/o", rawStatus: "ACTIVE", expiresAt: null } };
+  };
+  const checkout = await createOrder(deps, { ...BASE_INPUT, inventoryMode: "none" });
+
+  // Simulate the ambiguous state: intent exists, session never attached.
+  const order = [...deps.orders.items.values()].find((item) => item.checkoutPublicToken === checkout.checkoutToken);
+  const payment = (await deps.payments.findByOrderId(order.id)).value[0];
+  await deps.payments.save({ ...payment, providerSessionId: null, reconciliationState: "ambiguous_create" });
+
+  const applied = await processPaymentWebhook(
+    WEBHOOK_INPUT({
+      ...webhookPayload({ reference_id: checkout.checkoutRef, amount: checkout.totalAmount }),
+      data: { ...webhookPayload().data, payment_session_id: createdSession, reference_id: checkout.checkoutRef, status: "COMPLETED", currency: "IDR", amount: checkout.totalAmount },
+    }),
+    deps,
+  );
+  assert.equal(applied.result, "applied");
+  const updated = (await deps.payments.findByOrderId(order.id)).value[0];
+  assert.equal(updated.providerSessionId, createdSession, "orphan session attached by reference");
+  assert.equal(updated.status, "succeeded");
+  assert.equal(deps.orders.items.get(order.id).status, "paid");
+});
+
+test("TX2 failure persists the session id, compensates by cancelling at the provider, and stays webhook-matchable", async () => {
+  const deps = makeDeps();
+  const cancels = [];
+  deps.provider.cancelPaymentSession = async (sessionId) => {
+    cancels.push(sessionId);
+    return { ok: true, value: { accepted: true } };
+  };
+  const failingTx = {
+    run: async (operation, work) => {
+      if (operation === "checkout.attach_session") throw new Error("simulated TX2 crash");
+      return deps.tx.run(operation, work);
+    },
+  };
+
+  const result = await createFirstPartyCheckout(BASE_INPUT, { ...deps, tx: failingTx });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "unavailable");
+  assert.match(result.error.message, /ps_test_1/, "session id preserved in diagnostics");
+  assert.match(result.error.message, /cancelAccepted: true/);
+
+  const order = [...deps.orders.items.values()][0];
+  assert.equal(order.status, "draft", "draft stays recoverable");
+  const payment = (await deps.payments.findByOrderId(order.id)).value[0];
+  assert.equal(payment.providerSessionId, "ps_test_1", "session id persisted despite TX2 failure");
+  assert.equal(payment.reconciliationState, "attach_failed");
+  assert.deepEqual(cancels, ["ps_test_1"], "provider session cancelled exactly once, outside any transaction");
+  assert.ok(deps.audit.events.some((event) => event.action === "order.attach_failed"));
+
+  // The webhook for that session now MATCHES the payment row.
+  const applied = await processPaymentWebhook(WEBHOOK_INPUT(webhookPayload({ reference_id: order.checkoutRef, amount: order.totalAmount })), deps);
+  assert.equal(applied.result, "applied");
+});
+
+test("a stock-out key is not poisoned: after restock the SAME key succeeds", async () => {
+  const deps = makeDeps();
+  for (const lot of deps.inventory.lots.values()) lot.quantityOnHand = 0; // only lot_pk is sellable
+  deps.inventory.seedLot({ id: "lot_pk", productId: "flour", sizeId: "250g", lotCode: "PK", quantityOnHand: 1, expiryDate: "2027-06-30", status: "released", releasedAt: "2026-01-01T00:00:00.000Z", releaseReason: "coa", createdAt: "2026-01-01T00:00:00.000Z" });
+  const input = { ...BASE_INPUT, inventoryMode: "lots", idempotencyKey: "pk-1", rawRequestBody: "{}" };
+
+  const soldOut = await createFirstPartyCheckout(input, deps);
+  assert.equal(soldOut.ok, false);
+  assert.equal(soldOut.error.code, "out_of_stock");
+
+  // Restock, then retry the SAME logical attempt.
+  deps.inventory.lots.get("lot_pk").quantityOnHand = 50;
+  const retry = await createFirstPartyCheckout(input, deps);
+  assert.equal(retry.ok, true, "claim released with the failed attempt — key reusable after restock");
+  assert.equal(deps.provider.created.length, 1);
 });
 
 test("idempotent replay returns the stored first response; a different request under the key conflicts", async () => {
@@ -182,15 +301,16 @@ test("payment_session.completed transitions the order to paid exactly once", asy
   const duplicate = await processPaymentWebhook(WEBHOOK_INPUT(webhookPayload({ reference_id: checkout.checkoutRef, amount: checkout.totalAmount })), deps);
   assert.equal(duplicate.result, "duplicate");
 
-  // A genuinely distinct Xendit delivery (different captured payment id) is a
-  // NEW event row — but the state effect stays idempotent (order already paid).
+  // Redelivery identity is (session, event): a re-send with a different
+  // delivery timestamp or payment id is the SAME delivery and dedupes — the
+  // unstable per-send timestamp must never let a redelivery masquerade as new.
   const redelivery = await processPaymentWebhook(WEBHOOK_INPUT(webhookPayload({ reference_id: checkout.checkoutRef, amount: checkout.totalAmount, payment_id: "pay_test_1_redelivery" })), deps);
-  assert.equal(redelivery.result, "applied");
+  assert.equal(redelivery.result, "duplicate");
 
   const status = await getCheckoutStatus(checkout.checkoutToken, deps);
   assert.equal(status.value.orderStatus, "paid");
   assert.equal(status.value.paymentStatus, "succeeded");
-  assert.equal(deps.paymentEvents.events.length, 2);
+  assert.equal(deps.paymentEvents.events.length, 1);
   assert.ok(deps.audit.events.some((event) => event.action === "order.paid" && event.resourceId === order.id));
 });
 

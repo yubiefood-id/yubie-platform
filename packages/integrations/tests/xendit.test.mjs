@@ -83,12 +83,44 @@ test("create session passes expires_at only when provided", async () => {
   assert.equal(JSON.parse(bare.calls[0].init.body).expires_at, undefined);
 });
 
-test("provider failures surface as unavailable errors, never fake sessions", async () => {
-  const { provider } = makeProvider([{ ok: false, status: 400, json: { error_code: "API_VALIDATION_ERROR" } }]);
-  const result = await provider.createPaymentSession(SESSION_INPUT);
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "unavailable");
+test("create failure classification: 4xx is definitive validation, 5xx ambiguous unavailable, timeout ambiguous", async () => {
+  // 4xx (except 408/429): the provider refused — no session exists.
+  const refused = makeProvider([{ ok: false, status: 400, json: { error_code: "API_VALIDATION_ERROR" } }]);
+  const rejected = await refused.provider.createPaymentSession(SESSION_INPUT);
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error.code, "validation");
+  assert.equal(rejected.error.retryable, false);
 
+  // 5xx: outcome ambiguous — a session may exist; retryable.
+  const serverError = makeProvider([{ ok: false, status: 503, json: {} }]);
+  const unavailable = await serverError.provider.createPaymentSession(SESSION_INPUT);
+  assert.equal(unavailable.ok, false);
+  assert.equal(unavailable.error.code, "unavailable");
+  assert.equal(unavailable.error.retryable, true);
+
+  // Transport timeout: ambiguous, classified as timeout. The stub's own
+  // ref'd timer keeps the event loop alive (AbortSignal timers are unref'd)
+  // and backstops the abort path.
+  const timedOut = new XenditPaymentProvider({
+    secretKey: "test-secret",
+    apiBaseUrl: "https://xendit.test",
+    timeoutMs: 20,
+    fetchFn: (input, init) =>
+      new Promise((_resolve, reject) => {
+        const fail = () => reject(Object.assign(new Error("timed out"), { name: "TimeoutError" }));
+        const backstop = setTimeout(fail, 1000);
+        init?.signal?.addEventListener("abort", () => {
+          clearTimeout(backstop);
+          fail();
+        });
+      }),
+  });
+  const abortResult = await timedOut.createPaymentSession(SESSION_INPUT);
+  assert.equal(abortResult.ok, false);
+  assert.equal(abortResult.error.code, "timeout");
+  assert.equal(abortResult.error.retryable, true);
+
+  // 2xx missing required fields: never a fake session.
   const missing = makeProvider([{ json: {} }]);
   const bad = await missing.provider.createPaymentSession(SESSION_INPUT);
   assert.equal(bad.ok, false);
