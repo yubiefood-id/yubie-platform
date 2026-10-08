@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { ok } from "@yubie/domain";
 import type { Database } from "../client.js";
@@ -21,7 +22,6 @@ const DEFAULT_CONFIG: RuntimeConfigSnapshot = {
   knowledgeVersion: "seed-v1",
 };
 
-let auditCounter = 0;
 
 export class PostgresRuntimeConfigRepository {
   constructor(private readonly database: Database) {}
@@ -56,9 +56,9 @@ export class PostgresRuntimeConfigRepository {
       .where(eq(assistantRuntimeConfig.key, key))
       .limit(1);
 
-    auditCounter += 1;
+    const auditId = `cfg_audit_${randomUUID()}`;
     await this.database.db.insert(assistantRuntimeConfigAudit).values({
-      id: `cfg-audit-${auditCounter}`,
+      id: auditId,
       key,
       oldValueJson: existing[0]?.valueJson ?? null,
       newValueJson: valueJson,

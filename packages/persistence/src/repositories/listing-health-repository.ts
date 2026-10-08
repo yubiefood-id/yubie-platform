@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { desc, eq } from "drizzle-orm";
 import { ok, type ListingHealthCheck } from "@yubie/domain";
 import type { ListingHealthRepository } from "@yubie/application";
@@ -6,15 +7,13 @@ import type { Database } from "../client.js";
 // Stored in integration_health for M1 simplicity
 import { integrationHealth } from "../schema/index.js";
 
-let healthCounter = 0;
 
 export class PostgresListingHealthRepository implements ListingHealthRepository {
   constructor(private readonly database: Database) {}
 
   async record(check: ListingHealthCheck) {
-    healthCounter += 1;
     await this.database.db.insert(integrationHealth).values({
-      id: `health-${healthCounter}`,
+      id: `health_${randomUUID()}`,
       integration: `listing:${check.listingKey}`,
       status: check.result,
       lastCheckedAt: check.checkedAt,

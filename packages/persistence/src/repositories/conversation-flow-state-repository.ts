@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { ok } from "@yubie/domain";
 import type { Database } from "../client.js";
@@ -16,7 +17,6 @@ export interface FlowStateRecord {
   updatedAt: string;
 }
 
-let flowStateCounter = 0;
 
 export class PostgresConversationFlowStateRepository {
   constructor(private readonly database: Database) {}
@@ -64,8 +64,7 @@ export class PostgresConversationFlowStateRepository {
       return ok(existing.value.id);
     }
 
-    flowStateCounter += 1;
-    const id = `flow-${state.provider}-${state.providerThreadId}-${flowStateCounter}`;
+    const id = `flow_${state.provider}_${randomUUID()}`;
     await this.database.db.insert(conversationFlowState).values({
       id,
       provider: state.provider,
@@ -91,7 +90,7 @@ export class PostgresConversationFlowStateRepository {
     metricLabels?: Record<string, unknown>;
     createdAt: string;
   }) {
-    const id = `flow-ev-${event.provider}-${event.providerThreadId}-${Date.now()}`;
+    const id = `flow_ev_${randomUUID()}`;
     await this.database.db.insert(conversationFlowEvents).values({
       id,
       provider: event.provider,

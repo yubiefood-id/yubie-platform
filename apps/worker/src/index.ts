@@ -1,5 +1,5 @@
 import PgBoss from "pg-boss";
-import { inspectRuntimeConfig } from "@yubie/config";
+import { inspectServiceRuntimeConfig } from "@yubie/config";
 import { checkListingHealth, SystemClock } from "@yubie/application";
 import { createSupportProvider, HttpLinkHealthChecker } from "@yubie/integrations";
 import { closeDatabase, createWorkerRepositories } from "@yubie/persistence";
@@ -13,7 +13,9 @@ import { runPaymentReconcile } from "./payment-reconcile-handler.js";
 // configuration (unknown provider, missing Zammad values in
 // staging/production, typo'd BOT_ENGINE) must stop the worker, not surface as
 // a fake provider silently handling production traffic.
-const startupConfig = inspectRuntimeConfig(process.env);
+// Worker scope: full support contract (replies/reconciliation) + commerce
+// contract (payment.reconcile) — but never API_PROXY_TOKEN or web secrets.
+const startupConfig = inspectServiceRuntimeConfig(process.env, "worker");
 if (!startupConfig.ok) {
   console.error(
     JSON.stringify({ level: "error", event: "worker.config_error", errors: startupConfig.errors }),

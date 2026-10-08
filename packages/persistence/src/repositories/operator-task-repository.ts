@@ -1,17 +1,16 @@
+import { randomUUID } from "node:crypto";
 import { ok } from "@yubie/domain";
 import type { OperatorTaskRepository } from "@yubie/application";
 import type { Database } from "../client.js";
 import { operatorTasks } from "../schema/index.js";
 
-let taskCounter = 0;
 
 export class PostgresOperatorTaskRepository implements OperatorTaskRepository {
   constructor(private readonly database: Database) {}
 
   async create(task: { type: string; status: string; priority: number; listingKey?: string; details?: string; createdAt: string }) {
-    taskCounter += 1;
     await this.database.db.insert(operatorTasks).values({
-      id: `task-${taskCounter}`,
+      id: `task_${randomUUID()}`,
       type: task.type,
       status: task.status as "open",
       priority: task.priority,

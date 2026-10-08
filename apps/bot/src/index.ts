@@ -1,5 +1,5 @@
 import PgBoss from "pg-boss";
-import { inspectRuntimeConfig } from "@yubie/config";
+import { inspectServiceRuntimeConfig } from "@yubie/config";
 import {
   buildZammadDedupeKey,
   hashPayload,
@@ -105,7 +105,7 @@ export async function handleRequest(request: Request): Promise<Response> {
     // staging/production runtime (for example SUPPORT_PROVIDER=zammad without
     // ZAMMAD_API_TOKEN) must not become ready for provider traffic. Errors
     // name configuration variables only — never secret values.
-    const config = inspectRuntimeConfig(process.env);
+    const config = inspectServiceRuntimeConfig(process.env, "bot");
     if (!config.ok) {
       return Response.json({ ready: false, reason: "config_error", errors: config.errors }, { status: 503 });
     }

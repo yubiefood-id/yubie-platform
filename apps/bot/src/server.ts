@@ -1,9 +1,11 @@
-import { inspectRuntimeConfig } from "@yubie/config";
+import { inspectServiceRuntimeConfig } from "@yubie/config";
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
 import { handleRequest } from "./index.js";
 
-const startupConfig = inspectRuntimeConfig(process.env);
+// Bot scope: inbound webhook verification only — the bot must NOT need the
+// Zammad API token or routing IDs (least-privilege secrets).
+const startupConfig = inspectServiceRuntimeConfig(process.env, "bot");
 if (!startupConfig.ok) {
   console.error(
     JSON.stringify({ level: "error", event: "bot.config_error", errors: startupConfig.errors }),

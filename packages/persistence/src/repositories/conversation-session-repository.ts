@@ -1,10 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { ok } from "@yubie/domain";
 import type { ConversationState } from "@yubie/domain";
 import type { Database } from "../client.js";
 import { conversationSessions } from "../schema/index.js";
 
-let sessionCounter = 0;
 
 export class PostgresConversationSessionRepository {
   constructor(private readonly database: Database) {}
@@ -81,8 +81,7 @@ export class PostgresConversationSessionRepository {
         .where(eq(conversationSessions.id, existing.value.id));
       return ok(existing.value.id);
     }
-    sessionCounter += 1;
-    const id = `session-${sessionCounter}`;
+    const id = `session_${randomUUID()}`;
     await this.database.db.insert(conversationSessions).values({
       id,
       provider: session.provider,

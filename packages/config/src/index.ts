@@ -504,3 +504,100 @@ export function inspectCommerceRuntimeConfig(env: RuntimeEnvSource = process.env
     return { ok: false, errors: [String(error)] };
   }
 }
+
+// --- Service-scoped runtime configuration (least-privilege secrets) ---
+
+export type ServiceName = "api" | "worker" | "bot";
+
+export interface ServiceRuntimeConfig {
+  service: ServiceName;
+  env: YubieEnvName;
+  supportProvider: SupportProviderName;
+  /** Present only for the api service. */
+  commerce?: CommerceRuntimeConfig;
+}
+
+export type ServiceRuntimeConfigInspection =
+  | { ok: true; config: ServiceRuntimeConfig }
+  | { ok: false; errors: string[] };
+
+/**
+ * Validate ONLY the configuration each process actually needs, so the bot
+ * never has to receive the Zammad API token it must not use, and the api
+ * never sees support-provider secrets:
+ *
+ *  - api:    environment + commerce contract (+ API_PROXY_TOKEN required in
+ *            staging/production — the web→api hop trust boundary).
+ *  - worker: environment + full support-provider contract (it drives replies
+ *            and reconciliation) + commerce contract (payment.reconcile).
+ *  - bot:    environment + the webhook-verification secret for the SELECTED
+ *            inbound provider. No Zammad API/base/routing values required.
+ */
+export function parseServiceRuntimeConfig(env: RuntimeEnvSource = process.env, service: ServiceName): ServiceRuntimeConfig {
+  const errors: string[] = [];
+  const yubieEnv = parseYubieEnvName(env.YUBIE_ENV);
+  const deployment = yubieEnv === "staging" || yubieEnv === "production";
+
+  let supportProvider: SupportProviderName = "fake";
+  try {
+    supportProvider = parseSupportProviderName(env).name;
+  } catch (error) {
+    errors.push(configMessage(error));
+  }
+
+  let commerce: CommerceRuntimeConfig | undefined;
+  if (service === "api" || service === "worker") {
+    try {
+      commerce = parseCommerceRuntimeConfig(env);
+    } catch (error) {
+      errors.push(configMessage(error));
+    }
+  }
+
+  if (service === "api" && deployment && !env.API_PROXY_TOKEN) {
+    errors.push(`api service in ${yubieEnv} requires API_PROXY_TOKEN (web→api hop trust boundary)`);
+  }
+
+  if (service === "bot") {
+    const webhookSecret = env.ZAMMAD_WEBHOOK_SECRET ?? "";
+    const webhookBearer = env.ZAMMAD_WEBHOOK_BEARER ?? "";
+    const agentbotSecret = env.CHATWOOT_AGENTBOT_SECRET ?? "";
+    if (supportProvider === "zammad" && !webhookSecret && !webhookBearer) {
+      errors.push("bot service with SUPPORT_PROVIDER=zammad requires ZAMMAD_WEBHOOK_SECRET and/or ZAMMAD_WEBHOOK_BEARER (inbound webhook verification)");
+    }
+    if (supportProvider === "chatwoot" && !agentbotSecret) {
+      errors.push("bot service with SUPPORT_PROVIDER=chatwoot requires CHATWOOT_AGENTBOT_SECRET (inbound webhook verification)");
+    }
+    if (deployment && supportProvider === "fake") {
+      errors.push("bot service in staging/production cannot run SUPPORT_PROVIDER=fake (no real inbound webhook to verify)");
+    }
+  }
+
+  if (service === "worker") {
+    // The worker drives Zammad replies/reconciliation: keep the full
+    // fail-closed support contract from parseRuntimeConfig.
+    try {
+      parseRuntimeConfig(env);
+    } catch (error) {
+      errors.push(configMessage(error));
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new RuntimeConfigError(errors.join("; "));
+  }
+
+  return { service, env: yubieEnv, supportProvider, ...(commerce ? { commerce } : {}) };
+}
+
+/** Non-throwing variant for readiness endpoints and operator tooling. */
+export function inspectServiceRuntimeConfig(env: RuntimeEnvSource = process.env, service: ServiceName): ServiceRuntimeConfigInspection {
+  try {
+    return { ok: true, config: parseServiceRuntimeConfig(env, service) };
+  } catch (error) {
+    if (error instanceof RuntimeConfigError) {
+      return { ok: false, errors: [error.message] };
+    }
+    return { ok: false, errors: [String(error)] };
+  }
+}

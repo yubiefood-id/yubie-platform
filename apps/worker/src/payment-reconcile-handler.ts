@@ -32,7 +32,7 @@ export async function runPaymentReconcile(database: Database): Promise<void> {
     ids: new CryptoIdGenerator(),
   });
   if (result.ok) {
-    const { polled, transitioned, staleDraftsCancelled, flaggedAmbiguous, reservationsReleased } = result.value;
-    logEvent("worker.payment_reconcile", { polled, transitioned, staleDraftsCancelled, flaggedAmbiguous, reservationsReleased });
+    const { polled, transitioned, staleDraftsCancelled, flaggedAmbiguous } = result.value;
+    logEvent("worker.payment_reconcile", { polled, transitioned, staleDraftsCancelled, flaggedAmbiguous });
   }
 }
