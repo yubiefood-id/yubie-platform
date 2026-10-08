@@ -1,3 +1,13 @@
+> SUPERSESSION NOTE (2026-10): this document predates ADR-009 (Zammad as
+> production support authority — Chatwoot is rollback-only) and ADR-012
+> (first-party Xendit checkout). Where Chatwoot appears as the support
+> topology, read Zammad (dedicated VPS, support.yubie.id). The Core VPS
+> additionally runs the Yubie bot (Zammad webhook ingress) and an explicit
+> migration job; commerce env (XENDIT_*, INVENTORY_MODE, APP_ORIGIN,
+> API_PROXY_TOKEN) is defined in infrastructure/staging.env.example. The
+> deployable contract is infrastructure/docker-compose.prod.yml + the
+> release-candidate GHCR workflow.
+
 # 33 — VPS Deployment Architecture
 
 ## 1. Objective

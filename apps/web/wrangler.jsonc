@@ -1,0 +1,27 @@
+// Cloudflare Workers deployment contract for the Yubie web runtime (staging).
+//
+// The production artifact is the SAME verified Vinext worker bundle produced
+// by `npm run build` in apps/web (scripts/build-verified.sh): a Cloudflare-
+// compatible ESM worker with default.fetch(request, env, ctx). This file
+// describes how that worker is deployed to Cloudflare for staging.
+//
+//   npm run build                       # in apps/web — produces dist/
+//   npx wrangler deploy                 # uses this config
+//   npx wrangler secret put API_PROXY_TOKEN   # SERVER-ONLY secret (never a var!)
+//
+// Env binding rules (verified by scripts/validate-artifact.sh):
+//   - YUBIE_API_ORIGIN is a non-secret var (safe to appear in config);
+//   - API_PROXY_TOKEN is a wrangler SECRET — it must never be a var here and
+//     must never appear in dist/client.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yubie-web-staging",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "YUBIE_API_ORIGIN": "https://api-staging.yubie.id"
+  }
+  // Secrets (set via `wrangler secret put`, never committed):
+  //   API_PROXY_TOKEN — authenticates the web→api server hop.
+}

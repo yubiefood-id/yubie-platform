@@ -9,7 +9,7 @@ Stateful production workloads follow:
 - `docs/development/33_VPS_DEPLOYMENT_ARCHITECTURE.md`
 - `docs/production/vps/README.md`
 
-Current business model is marketplace-first / WhatsApp-first. Do not introduce production payment-provider secrets while ADR-004 remains active.
+Current business model: first-party checkout (ADR-012, Xendit TEST-first — marketplace links are the rollback/secondary channel) plus WhatsApp for assisted B2C/B2B. Xendit TEST-mode secrets belong in the api service env (staging.env contract); Xendit LIVE is prohibited until the ADR-012 sandbox matrix passes.
 
 ## 2. Environments
 
@@ -24,10 +24,12 @@ Each environment uses separate database and provider credentials.
 ## 3. Target Core VPS
 
 ~~~text
-Caddy
+Caddy (only public TLS terminator)
 Yubie API
 Yubie Worker
+Yubie Bot (Zammad webhook ingress)
 PostgreSQL
+migration job (runs before rollout)
 backup agent
 optional telemetry collector
 ~~~
@@ -36,7 +38,7 @@ Only the reverse proxy publishes external application ports.
 
 ## 4. Sidecars
 
-Chatwoot and CRM have separate runtime/database ownership. ERPNext is future/problem-triggered.
+Zammad (dedicated VPS per ADR-009) and CRM have separate runtime/database ownership; Chatwoot exists only as the rollback topology. ERPNext is future/problem-triggered.
 
 Do not share application databases across Yubie, Chatwoot, CRM or ERP.
 

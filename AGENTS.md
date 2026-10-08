@@ -30,9 +30,9 @@ Production D2C is marketplace-first.
 
 ## 3. Conversation architecture
 
-- Chatwoot owns conversation/inbox operations.
+- Self-hosted Zammad owns conversation/inbox operations (ADR-009; production authority). Chatwoot remains available only as the migration-window rollback path.
 - Yubie owns bot policy, product knowledge approval, tool allowlist, handoff logic, B2B qualification and integration audit.
-- Routine B2C remains in Chatwoot.
+- Routine B2C remains in Zammad.
 - Qualified B2B/partnership opportunities may be projected to CRM.
 - The LLM is never the source of truth for product facts, health claims, marketplace price/stock, certification or order state.
 - Complaint, food-safety, uncertain-health, explicit-human and sensitive negotiation intents support immediate human handoff.

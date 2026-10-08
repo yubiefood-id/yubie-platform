@@ -1,3 +1,10 @@
+> SUPERSESSION NOTE (2026-10): the deployable service contract is now
+> infrastructure/docker-compose.prod.yml (postgres + migrate + api + worker +
+> bot, per-service least-privilege env, SHA-tagged GHCR images, healthchecks,
+> restart policies). yubie-bot is a required service; the migrate job runs to
+> success before any application container starts. The env file contract is
+> infrastructure/staging.env.example.
+
 # 03 — Container and Service Layout
 
 ## 1. Why Docker Compose

@@ -13,9 +13,9 @@ Use this as an evidence record. A checked item requires current evidence; N/A re
 
 ## B. Website/channel
 
-- [ ] website IA reflects marketplace-first + WhatsApp-first operating model;
-- [ ] direct cart/payment is not presented as production purchase path;
-- [ ] marketplace purchase options resolve from server-owned verified records;
+- [ ] first-party checkout (ADR-012) presents the direct cart/payment path with server-side re-pricing, idempotency keys, and lot-gated inventory;
+- [ ] Xendit remains in TEST mode until the ADR-012 sandbox matrix passes (LIVE prohibited);
+- [ ] marketplace purchase options resolve from server-owned verified records and remain the rollback channel;
 - [ ] WhatsApp CTA works;
 - [ ] no open redirect;
 - [ ] outbound attribution is minimized/non-PII;
@@ -32,14 +32,15 @@ Use this as an evidence record. A checked item requires current evidence; N/A re
 - [ ] restore drill passed;
 - [ ] backup/disk alerts active.
 
-## D. Chatwoot/WhatsApp
+## D. Zammad/WhatsApp (ADR-009; Chatwoot = rollback only)
 
-- [ ] official WhatsApp Cloud API path configured;
+- [ ] official WhatsApp Cloud API path configured into Zammad;
 - [ ] business/WABA/number ownership verified;
-- [ ] inbox/team/assignment/business hours tested;
-- [ ] human handoff works;
-- [ ] Chatwoot integration can fail without disabling manual support;
-- [ ] self-hosted backup/upgrade procedure verified when applicable.
+- [ ] Zammad groups/routing IDs discovered and set (bot queue, customer support, sales/partnership, food safety, high priority);
+- [ ] WhatsApp article type discovered from the real instance;
+- [ ] human handoff works (deterministic engine → Zammad groups);
+- [ ] Zammad can fail without disabling manual support;
+- [ ] self-hosted Zammad backup/upgrade procedure verified.
 
 ## E. Assistant
 
@@ -86,7 +87,7 @@ Use this as an evidence record. A checked item requires current evidence; N/A re
 - [ ] release rollback documented/tested;
 - [ ] incident owners/on-call route;
 - [ ] DB restore drill;
-- [ ] Chatwoot outage drill;
+- [ ] Zammad outage drill (Chatwoot rollback drill during migration window only);
 - [ ] unsafe-assistant drill;
 - [ ] marketplace-link failure drill.
 

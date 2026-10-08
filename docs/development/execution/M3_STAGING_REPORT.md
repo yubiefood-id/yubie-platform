@@ -1,3 +1,9 @@
+> ARCHIVED / SUPERSEDED (2026-10): written during the Chatwoot era
+> (pre-ADR-009) and before any GHCR publication existed. The images named
+> below were never published; Zammad has replaced Chatwoot as the support
+> authority. The current pre-staging state is recorded in
+> PRE_STAGING_ENGINEERING_ACCEPTANCE.md.
+
 # M3 Staging Report
 
 **Date:** 2026-09-20  

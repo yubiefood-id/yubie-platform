@@ -1,3 +1,10 @@
+> SUPERSESSION NOTE (2026-10): the GHCR image-by-SHA step is now real —
+> the manual `release-candidate` workflow publishes
+> ghcr.io/yubiefood-id/{yubie-api,yubie-worker,yubie-bot}:<full-sha> only
+> after CI is green on that SHA, with digests in the job summary. The
+> deploy sequence below uses `--env-file` (infrastructure/staging.env.example
+> is the contract).
+
 # 06 — CI/CD and Deployment
 
 ## 1. Build model
