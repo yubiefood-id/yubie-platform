@@ -1,3 +1,28 @@
+# Core VPS runtime stack (staging AND production — the environment is chosen
+# entirely by the env file, never by this file).
+#
+# Deterministic deploy sequence (docs/production/vps/06_CICD_DEPLOYMENT.md):
+#   docker compose --env-file /etc/yubie/staging.env \
+#     -f infrastructure/docker-compose.prod.yml pull
+#   docker compose --env-file /etc/yubie/staging.env \
+#     -f infrastructure/docker-compose.prod.yml run --rm migrate
+#   docker compose --env-file /etc/yubie/staging.env \
+#     -f infrastructure/docker-compose.prod.yml up -d --remove-orphans
+#
+# Contract:
+#   - Only the reverse proxy (outside this file) terminates public TLS; NO
+#     service publishes a host port. PostgreSQL is internal-only.
+#   - Every service consumes ONLY the variables listed in its `environment`
+#     block — the shared env file may hold everything, least-privilege is
+#     enforced here at the container boundary (bot never sees Xendit or the
+#     Zammad API token; api never sees support secrets; worker never sees
+#     API_PROXY_TOKEN).
+#   - postgres must be healthy and the migrate job must SUCCEED before any
+#     application container starts.
+#   - YUBIE_ENV is explicit: the fail-closed config layer (fake providers,
+#     INVENTORY_MODE=lots, API_PROXY_TOKEN) is silently disabled without it.
+#   - Images are immutable full-SHA GHCR tags (release-candidate workflow).
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -8,14 +33,23 @@ services:
     volumes:
       - yubie_pgdata:/var/lib/postgresql/data
     networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
 
   migrate:
     image: ghcr.io/yubiefood-id/yubie-api:${RELEASE_SHA}
     command: ["node", "packages/persistence/dist/scripts/migrate.js"]
     environment:
       DATABASE_URL: ${DATABASE_URL}
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks: [internal]
+    restart: "no"
 
   api:
     image: ghcr.io/yubiefood-id/yubie-api:${RELEASE_SHA}
@@ -23,17 +57,75 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       PORT: 8787
       RELEASE_SHA: ${RELEASE_SHA}
-      PURCHASE_OPTIONS_SOURCE: database
-    depends_on: [postgres, migrate]
+      YUBIE_ENV: ${YUBIE_ENV}
+      COMMERCE_PROVIDER: ${COMMERCE_PROVIDER:-preview}
+      INVENTORY_MODE: ${INVENTORY_MODE:-lots}
+      PURCHASE_OPTIONS_SOURCE: ${PURCHASE_OPTIONS_SOURCE:-database}
+      SHIPPING_POLICY: ${SHIPPING_POLICY:-free_promotional}
+      XENDIT_SECRET_KEY: ${XENDIT_SECRET_KEY:-}
+      XENDIT_WEBHOOK_TOKEN: ${XENDIT_WEBHOOK_TOKEN:-}
+      XENDIT_BUSINESS_ID: ${XENDIT_BUSINESS_ID:-}
+      XENDIT_API_BASE_URL: ${XENDIT_API_BASE_URL:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      APP_ORIGIN: ${APP_ORIGIN:-}
+      API_PROXY_TOKEN: ${API_PROXY_TOKEN:-}
+      OPS_API_TOKEN: ${OPS_API_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks: [internal, edge]
+    restart: unless-stopped
 
   worker:
     image: ghcr.io/yubiefood-id/yubie-worker:${RELEASE_SHA}
     environment:
       DATABASE_URL: ${DATABASE_URL}
       RELEASE_SHA: ${RELEASE_SHA}
-    depends_on: [postgres, migrate]
+      YUBIE_ENV: ${YUBIE_ENV}
+      WORKER_METRICS_ENABLED: ${WORKER_METRICS_ENABLED:-true}
+      COMMERCE_PROVIDER: ${COMMERCE_PROVIDER:-preview}
+      XENDIT_SECRET_KEY: ${XENDIT_SECRET_KEY:-}
+      XENDIT_API_BASE_URL: ${XENDIT_API_BASE_URL:-}
+      SUPPORT_PROVIDER: ${SUPPORT_PROVIDER}
+      BOT_ENGINE: ${BOT_ENGINE:-deterministic}
+      ZAMMAD_BASE_URL: ${ZAMMAD_BASE_URL:-}
+      ZAMMAD_API_TOKEN: ${ZAMMAD_API_TOKEN:-}
+      ZAMMAD_WEBHOOK_SECRET: ${ZAMMAD_WEBHOOK_SECRET:-}
+      ZAMMAD_WEBHOOK_BEARER: ${ZAMMAD_WEBHOOK_BEARER:-}
+      ZAMMAD_WHATSAPP_ARTICLE_TYPE: ${ZAMMAD_WHATSAPP_ARTICLE_TYPE:-}
+      ZAMMAD_GROUP_BOT_QUEUE: ${ZAMMAD_GROUP_BOT_QUEUE:-}
+      ZAMMAD_GROUP_CUSTOMER_SUPPORT: ${ZAMMAD_GROUP_CUSTOMER_SUPPORT:-}
+      ZAMMAD_GROUP_SALES_PARTNERSHIP: ${ZAMMAD_GROUP_SALES_PARTNERSHIP:-}
+      ZAMMAD_GROUP_FOOD_SAFETY: ${ZAMMAD_GROUP_FOOD_SAFETY:-}
+      ZAMMAD_PRIORITY_HIGH: ${ZAMMAD_PRIORITY_HIGH:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks: [internal]
+    restart: unless-stopped
+
+  bot:
+    image: ghcr.io/yubiefood-id/yubie-bot:${RELEASE_SHA}
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      RELEASE_SHA: ${RELEASE_SHA}
+      YUBIE_ENV: ${YUBIE_ENV}
+      PORT: 8788
+      SUPPORT_PROVIDER: ${SUPPORT_PROVIDER}
+      ZAMMAD_WEBHOOK_SECRET: ${ZAMMAD_WEBHOOK_SECRET:-}
+      ZAMMAD_WEBHOOK_BEARER: ${ZAMMAD_WEBHOOK_BEARER:-}
+      CHATWOOT_AGENTBOT_SECRET: ${CHATWOOT_AGENTBOT_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [internal, edge]
+    restart: unless-stopped
 
 networks:
   internal:

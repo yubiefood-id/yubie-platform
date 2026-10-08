@@ -1,3 +1,7 @@
+# DEPRECATED (2026-10): Chatwoot-era single-host profile kept ONLY as the
+# documented ADR-009 rollback topology. Do not use for staging/production
+# bring-up — use docker-compose.prod.yml. The bot webhook port is no longer
+# published to the host; the reverse proxy reaches it on the edge network.
 include:
   - path: docker-compose.yml
   - path: docker-compose.prod.yml
@@ -51,8 +55,6 @@ services:
       ASSISTANT_AUTO_REPLY: ${ASSISTANT_AUTO_REPLY:-false}
     depends_on: [postgres, migrate]
     networks: [internal, edge]
-    ports:
-      - "8788:8788"
 
 networks:
   internal:
