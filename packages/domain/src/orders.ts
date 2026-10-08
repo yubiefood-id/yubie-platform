@@ -118,6 +118,26 @@ export function canTransitionOrder(from: FirstPartyOrderStatus, to: FirstPartyOr
   return ORDER_TRANSITIONS[from].includes(to);
 }
 
+/**
+ * Legal payment-status transitions. Terminal states are sticky: an
+ * authoritative succeeded payment can never be overwritten by a late
+ * expired/cancelled delivery, and a terminal failure never flips back. This
+ * is what keeps payment and order state from contradicting each other when
+ * provider events arrive out of order.
+ */
+const PAYMENT_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
+  pending: ["succeeded", "failed", "expired", "cancelled"],
+  succeeded: ["refunded"],
+  refunded: [],
+  failed: [],
+  expired: [],
+  cancelled: [],
+};
+
+export function canTransitionPayment(from: PaymentStatus, to: PaymentStatus): boolean {
+  return PAYMENT_TRANSITIONS[from].includes(to);
+}
+
 /** Maps a provider payment status onto the order status it authorizes. */
 export function orderStatusForPayment(payment: PaymentStatus): FirstPartyOrderStatus | null {
   switch (payment) {

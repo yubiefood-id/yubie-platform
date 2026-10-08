@@ -19,6 +19,7 @@ export type ErrorCode =
   | "forbidden"
   | "not_found"
   | "conflict"
+  | "out_of_stock"
   | "rate_limited"
   | "timeout"
   | "unavailable"

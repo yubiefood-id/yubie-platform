@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { err, ok, type UseCaseResult } from "@yubie/domain";
 import type { IdempotencyClaim, IdempotencyClaimOutcome, IdempotencyRepository } from "@yubie/application";
 import type { Database } from "../client.js";
@@ -76,6 +76,16 @@ export class PostgresIdempotencyRepository implements IdempotencyRepository {
       .update(idempotencyKeys)
       .set({ responseJson, status: "completed" })
       .where(claimFilter(record));
+    return ok(undefined);
+  }
+
+  async releaseClaim(record: Omit<IdempotencyClaim, "createdAt" | "requestHash">): Promise<UseCaseResult<void>> {
+    // PostgreSQL callers normally rely on transaction rollback; this exists
+    // for rollback-parity with the in-memory manager and as an explicit
+    // operator escape hatch. Only unclaimed/unresolved rows are removable.
+    await this.database.db
+      .delete(idempotencyKeys)
+      .where(and(claimFilter(record), isNull(idempotencyKeys.responseJson)));
     return ok(undefined);
   }
 }

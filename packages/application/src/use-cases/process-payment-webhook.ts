@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
   canTransitionOrder,
+  canTransitionPayment,
   err,
   ok,
   orderStatusForPayment,
@@ -19,43 +20,58 @@ export function tokensMatch(a: string, b: string): boolean {
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
+/** What a verified-but-out-of-order event did to durable state. */
+export type PaymentTransitionEffect = "applied" | "already_applied" | "stale";
+
 /**
- * Applies a verified payment status to the payment + order records. Safe to
- * call twice: repeat transitions are ignored (idempotent writes). Callers must
- * invoke this inside a transaction so state, audit, outbox and any inventory
- * release commit together.
+ * Applies a verified payment status to the payment + order records under an
+ * explicit payment state machine: terminal states are sticky, so a late
+ * expired/cancelled delivery can never overwrite an authoritative success
+ * (and vice versa). On success the order's reservations are CONSUMED (never
+ * re-deducted); on cancellation they are RELEASED back to sellable stock.
+ * Callers must invoke this inside a transaction with the payment row locked
+ * so state, audit, outbox and inventory effects commit together.
  */
 export async function applyPaymentStatus(
   deps: { orders: OrderRepository; payments: PaymentRepository; paymentEvents: PaymentEventRepository; audit?: AuditRepository; outbox?: OutboxRepository; inventory?: InventoryRepository; clock: Clock; ids: IdGenerator },
   payment: PaymentRecord,
   order: OrderRecord,
   status: PaymentStatus,
-): Promise<void> {
+): Promise<PaymentTransitionEffect> {
   const now = deps.clock.now();
+  if (payment.status === status) return "already_applied";
+  if (!canTransitionPayment(payment.status, status)) return "stale";
+
   await deps.payments.save({ ...payment, status, updatedAt: now });
+
   const targetOrderStatus = orderStatusForPayment(status);
-  if (targetOrderStatus === null) return;
-  if (order.status === targetOrderStatus) return;
-  if (!canTransitionOrder(order.status, targetOrderStatus)) return;
-  await deps.orders.save({ ...order, status: targetOrderStatus, updatedAt: now });
-  if (deps.audit) {
-    await deps.audit.append({ action: `order.${targetOrderStatus}`, resourceType: "order", resourceId: order.id, actor: "payment-webhook", occurredAt: now });
+  if (targetOrderStatus !== null && order.status !== targetOrderStatus && canTransitionOrder(order.status, targetOrderStatus)) {
+    await deps.orders.save({ ...order, status: targetOrderStatus, updatedAt: now });
+    if (deps.audit) {
+      await deps.audit.append({ action: `order.${targetOrderStatus}`, resourceType: "order", resourceId: order.id, actor: "payment-webhook", occurredAt: now });
+    }
+    if (deps.outbox) {
+      await deps.outbox.enqueue({
+        eventType: `order.${targetOrderStatus}`,
+        aggregateType: "order",
+        aggregateId: order.id,
+        dedupeKey: `order:${targetOrderStatus}:${order.id}`,
+        payloadJson: JSON.stringify({ orderId: order.id, paymentId: payment.id, paymentStatus: status }),
+        availableAt: now,
+      });
+    }
   }
-  if (deps.outbox) {
-    await deps.outbox.enqueue({
-      eventType: `order.${targetOrderStatus}`,
-      aggregateType: "order",
-      aggregateId: order.id,
-      dedupeKey: `order:${targetOrderStatus}:${order.id}`,
-      payloadJson: JSON.stringify({ orderId: order.id, paymentId: payment.id, paymentStatus: status }),
-      availableAt: now,
-    });
+
+  if (deps.inventory) {
+    if (status === "succeeded" || status === "refunded") {
+      // Confirmed payment consumes the reservation lifecycle; quantity was
+      // already deducted at reserve time and is never touched again.
+      await deps.inventory.consumeForOrder(order.id, now);
+    } else if (targetOrderStatus === "cancelled") {
+      await deps.inventory.releaseForOrder(order.id, `payment_${status}`, now);
+    }
   }
-  // A cancelled order releases its lot reservations back to sellable stock in
-  // the same commit.
-  if (targetOrderStatus === "cancelled" && deps.inventory) {
-    await deps.inventory.releaseForOrder(order.id, `payment_${status}`, now);
-  }
+  return "applied";
 }
 
 export interface XenditWebhookData {
@@ -80,6 +96,7 @@ export interface XenditWebhookPayload {
 export type WebhookOutcome =
   | { result: "applied"; paymentStatus: PaymentStatus }
   | { result: "duplicate" }
+  | { result: "stale"; paymentStatus: PaymentStatus }
   | { result: "ignored"; reason: "unknown_event" }
   | { result: "rejected"; code: WebhookRejectCode; status: 400 | 401 | 403 | 404 | 409 };
 
@@ -127,12 +144,13 @@ export interface ProcessPaymentWebhookDeps {
 /**
  * Xendit payment-session webhook processing (AGENTS.md §5 inbound pattern):
  * token -> shape -> event -> business_id are verified OUTSIDE the
- * transaction; then ONE transaction does inbox insert + locks via lookups +
- * amount check + idempotent event insert + state transition + audit + outbox
- * and commits. A crash before COMMIT leaves no trace, so the provider's
- * redelivery reprocesses cleanly; a redelivery after COMMIT is a duplicate
- * with zero re-effects. A payment is NEVER marked paid from a browser
- * redirect — only this path (or the explicit provider poll) may transition it.
+ * transaction; then ONE transaction does inbox insert + row-locked loads +
+ * amount check + idempotent event insert + guarded state transition +
+ * inventory consume/release + audit + outbox and commits. A crash before
+ * COMMIT leaves no trace, so the provider's redelivery reprocesses cleanly;
+ * a redelivery after COMMIT is a duplicate with zero re-effects. A payment is
+ * NEVER marked paid from a browser redirect — only this path (or the explicit
+ * provider poll) may transition it.
  */
 export async function processPaymentWebhook(
   input: { callbackToken: string | null; expectedToken: string; expectedBusinessId: string | null; payload: unknown },
@@ -168,7 +186,11 @@ export async function processPaymentWebhook(
     return { result: "rejected", code: "invalid_payload", status: 400 };
   }
 
-  const deliveryId = `${providerSessionId}:${event}:${deliveryIdentity(payload)}`;
+  // Redelivery identity: the session + event. Official payment-session
+  // webhooks carry no top-level delivery id, and a per-send timestamp is NOT
+  // stable across redeliveries — using it would let a redelivery masquerade
+  // as a first delivery.
+  const deliveryId = `${providerSessionId}:${event}`;
   const payloadHash = createHash("sha256").update(JSON.stringify(input.payload ?? {})).digest("hex");
 
   try {
@@ -177,20 +199,41 @@ export async function processPaymentWebhook(
       if (!orderResult.ok || !orderResult.value) throw new WebhookRejection({ result: "rejected", code: "unknown_reference", status: 404 });
       const order = orderResult.value;
 
-      const paymentResult = await repos.payments.findByProviderSession(PROVIDER, providerSessionId);
-      if (!paymentResult.ok || !paymentResult.value || paymentResult.value.orderId !== order.id) {
+      let payment: PaymentRecord | null = null;
+      const bySession = await repos.payments.findByProviderSession(PROVIDER, providerSessionId);
+      if (bySession.ok && bySession.value && bySession.value.orderId === order.id) {
+        payment = bySession.value;
+      } else {
+        // Orphan-session landing: the provider created a session under this
+        // checkoutRef but the local attach never happened (ambiguous create /
+        // attach failure). Attach by reference — this delivery is already
+        // authenticated (callback token + business id) and amount-checked
+        // below, so a paid or expired orphan resolves to a real transition
+        // instead of a 404.
+        const intents = await repos.payments.findByOrderId(order.id);
+        const intent = intents.ok ? intents.value.find((candidate) => candidate.providerSessionId === null) ?? null : null;
+        if (!intent) throw new WebhookRejection({ result: "rejected", code: "unknown_payment_session", status: 404 });
+        payment = { ...intent, providerSessionId, reconciliationState: "reconciled_by_webhook" };
+        await repos.payments.save(payment);
+      }
+
+      // Serialize concurrent webhook/poll transitions on the payment row.
+      const locked = await repos.payments.lockById(payment.id);
+      if (!locked.ok || !locked.value) {
         throw new WebhookRejection({ result: "rejected", code: "unknown_payment_session", status: 404 });
       }
-      const payment = paymentResult.value;
+      const lockedPayment = locked.value;
 
-      const amount = typeof data.amount === "string" ? Number(data.amount) : data.amount;
-      if (data.currency !== "IDR" || typeof amount !== "number" || !Number.isFinite(amount) || Math.round(amount) !== order.totalAmount) {
-        throw new WebhookRejection({ result: "rejected", code: "amount_mismatch", status: 409 });
+      // Only a COMPLETED event asserts captured money. Expiry deliveries
+      // describe an unpaid session and may omit amount/currency, so the
+      // amount check applies to completions only.
+      if (event === "payment_session.completed") {
+        const amount = typeof data.amount === "string" ? Number(data.amount) : data.amount;
+        if (data.currency !== "IDR" || typeof amount !== "number" || !Number.isFinite(amount) || Math.round(amount) !== order.totalAmount) {
+          throw new WebhookRejection({ result: "rejected", code: "amount_mismatch", status: 409 });
+        }
       }
 
-      // Durable inbox + effect dedupe, written only once every check has
-      // passed so a rejected delivery leaves no row (the transaction would
-      // roll it back anyway; this keeps the in-memory manager consistent).
       const inboxAppend = await repos.inbox.recordProcessed({
         provider: INBOX_PROVIDER,
         deliveryId,
@@ -202,33 +245,26 @@ export async function processPaymentWebhook(
 
       const appended = await repos.paymentEvents.recordOnce({
         id: `pev_${deps.ids.nextId()}`,
-        paymentId: payment.id,
-        dedupeKey: `${PROVIDER}:${providerSessionId}:${event}:${deliveryIdentity(payload)}`,
+        paymentId: lockedPayment.id,
+        dedupeKey: `${PROVIDER}:${deliveryId}`,
         event,
         outcome: "applied",
         receivedAt: deps.clock.now(),
       } satisfies PaymentEventRecord);
       if (!appended.ok || appended.value === "duplicate") return { result: "duplicate" } as WebhookOutcome;
 
-      await applyPaymentStatus({ ...repos, clock: deps.clock, ids: deps.ids }, payment, order, paymentStatus);
+      const effect = await applyPaymentStatus({ ...repos, clock: deps.clock, ids: deps.ids }, lockedPayment, order, paymentStatus);
+      if (effect === "stale") {
+        // Genuinely new delivery, but the payment already holds an
+        // authoritative terminal state: record the event, change nothing.
+        return { result: "stale", paymentStatus: lockedPayment.status } as WebhookOutcome;
+      }
       return { result: "applied", paymentStatus } as WebhookOutcome;
     });
   } catch (error) {
     if (error instanceof WebhookRejection) return error.outcome;
     throw error;
   }
-}
-
-/**
- * Official payment-session webhooks carry no top-level delivery id. Redelivery
- * identity is the captured payment id when present, else the delivery-attempt
- * timestamp Xendit stamps on each send.
- */
-function deliveryIdentity(payload: XenditWebhookPayload): string {
-  const paymentId = payload.data?.payment_id;
-  if (typeof paymentId === "string" && paymentId !== "") return paymentId;
-  if (typeof payload.created === "string") return payload.created;
-  return "";
 }
 
 export function webhookError(error: WebhookRejectCode): AppError {

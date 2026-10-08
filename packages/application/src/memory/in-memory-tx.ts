@@ -64,6 +64,12 @@ export class InMemoryIdempotencyRepository implements IdempotencyRepository {
     if (existing) this.claims.set(composite, { ...existing, responseJson });
     return ok(undefined);
   }
+
+  async releaseClaim(record: Omit<IdempotencyClaim, "createdAt" | "requestHash">) {
+    const composite = `${record.scope}:${record.principalKey}:${record.operation}:${record.idempotencyKey}`;
+    this.claims.delete(composite);
+    return ok(undefined);
+  }
 }
 
 /** Test/local webhook inbox (mirrors the Postgres webhook_inbox semantics). */

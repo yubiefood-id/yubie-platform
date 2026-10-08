@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, gt, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { ok, type UseCaseResult } from "@yubie/domain";
 import type { InventoryLot, InventoryMovement } from "@yubie/domain";
 import { InsufficientInventoryError, type InventoryRepository, type InventoryReserveInput, type InventoryReserveOutcome } from "@yubie/application";
@@ -12,6 +12,11 @@ import { inventoryLots, inventoryMovements, inventoryReservations } from "../sch
  * transaction: sellable lots are selected FOR UPDATE in FEFO order so two
  * concurrent checkouts cannot both take the same stock, and any failure
  * (insufficient sellable quantity) aborts the whole checkout transaction.
+ *
+ * release/consume flip reservations with a status-guarded UPDATE and use the
+ * affected row count, so a webhook release racing the reconciliation path can
+ * never restore the same lot quantity twice (and consume never touches
+ * quantity at all — it was deducted at reserve time).
  */
 export class PostgresInventoryRepository implements InventoryRepository {
   constructor(private readonly database: Database) {}
@@ -41,9 +46,8 @@ export class PostgresInventoryRepository implements InventoryRepository {
           .set({ quantityOnHand: lot.quantityOnHand - take, ...(depleted ? { status: "depleted" as const } : {}), updatedAt: input.now })
           .where(eq(inventoryLots.id, lot.id));
 
-        const reservationId = `res_${randomUUID()}`;
         await this.database.db.insert(inventoryReservations).values({
-          id: reservationId,
+          id: `res_${randomUUID()}`,
           orderId: input.orderId,
           lotId: lot.id,
           productId: line.productId,
@@ -55,53 +59,48 @@ export class PostgresInventoryRepository implements InventoryRepository {
           createdAt: input.now,
           updatedAt: input.now,
         });
-        await this.recordMovement(lot, line.productId, line.sizeId, "reserve", -take, input.orderId, null, input.now);
+        await this.recordMovement(lot.id, line.productId, line.sizeId, "reserve", -take, input.orderId, null, input.now);
       }
     }
     return ok<InventoryReserveOutcome>({ reserved: true });
   }
 
   async releaseForOrder(orderId: string, reason: string, now: string): Promise<UseCaseResult<{ released: number }>> {
-    const rows = await this.database.db
-      .select()
-      .from(inventoryReservations)
-      .where(and(eq(inventoryReservations.orderId, orderId), eq(inventoryReservations.status, "active")));
+    // Status-guarded flip: exactly one concurrent caller wins each row.
+    const flipped = await this.database.db
+      .update(inventoryReservations)
+      .set({ status: "released", reason, updatedAt: now })
+      .where(and(eq(inventoryReservations.orderId, orderId), eq(inventoryReservations.status, "active")))
+      .returning({ id: inventoryReservations.id, lotId: inventoryReservations.lotId, productId: inventoryReservations.productId, sizeId: inventoryReservations.sizeId, quantity: inventoryReservations.quantity });
 
-    for (const row of rows) {
-      await this.database.db
-        .update(inventoryReservations)
-        .set({ status: "released", reason, updatedAt: now })
-        .where(eq(inventoryReservations.id, row.id));
-
+    for (const row of flipped) {
       const lotRows = await this.database.db
         .update(inventoryLots)
         .set({ quantityOnHand: sql`${inventoryLots.quantityOnHand} + ${row.quantity}`, updatedAt: now })
         .where(eq(inventoryLots.id, row.lotId))
-        .returning({ status: inventoryLots.status, quantityOnHand: inventoryLots.quantityOnHand, productId: inventoryLots.productId, sizeId: inventoryLots.sizeId });
+        .returning({ status: inventoryLots.status, quantityOnHand: inventoryLots.quantityOnHand });
       const lot = lotRows[0];
       if (lot && lot.status === "depleted" && lot.quantityOnHand > 0) {
         await this.database.db.update(inventoryLots).set({ status: "released", updatedAt: now }).where(eq(inventoryLots.id, row.lotId));
       }
-      if (lot) {
-        await this.recordMovementById(row.lotId, lot.productId, lot.sizeId, "release_reservation", row.quantity, orderId, reason, now);
-      }
+      await this.recordMovement(row.lotId, row.productId, row.sizeId, "release_reservation", row.quantity, orderId, reason, now);
     }
-    return ok({ released: rows.length });
+    return ok({ released: flipped.length });
   }
 
-  async releaseExpired(now: string, limit: number): Promise<UseCaseResult<{ released: number }>> {
-    const rows = await this.database.db
-      .select({ orderId: inventoryReservations.orderId })
-      .from(inventoryReservations)
-      .where(and(eq(inventoryReservations.status, "active"), lt(inventoryReservations.expiresAt, now)))
-      .limit(limit);
+  async consumeForOrder(orderId: string, now: string): Promise<UseCaseResult<{ consumed: number }>> {
+    const flipped = await this.database.db
+      .update(inventoryReservations)
+      .set({ status: "consumed", updatedAt: now })
+      .where(and(eq(inventoryReservations.orderId, orderId), eq(inventoryReservations.status, "active")))
+      .returning({ lotId: inventoryReservations.lotId, productId: inventoryReservations.productId, sizeId: inventoryReservations.sizeId });
 
-    let released = 0;
-    for (const row of rows) {
-      const result = await this.releaseForOrder(row.orderId, "reservation_expired", now);
-      if (result.ok) released += result.value.released;
+    for (const row of flipped) {
+      // Quantity was already deducted at reserve time; consume is a pure
+      // lifecycle close with a zero-delta movement for lot traceability.
+      await this.recordMovement(row.lotId, row.productId, row.sizeId, "consume", 0, orderId, "payment_confirmed", now);
     }
-    return ok({ released });
+    return ok({ consumed: flipped.length });
   }
 
   async listSellable(productId: string, sizeId: string, onDate: string) {
@@ -116,7 +115,7 @@ export class PostgresInventoryRepository implements InventoryRepository {
           gt(inventoryLots.expiryDate, onDate.slice(0, 10)),
         ),
       )
-      .orderBy(asc(inventoryLots.expiryDate));
+      .orderBy(asc(inventoryLots.expiryDate), asc(inventoryLots.lotCode));
     const lots = rows.map(mapLotRow).filter((lot) => lotIsSellable(lot, onDate));
     return ok(lots);
   }
@@ -133,41 +132,20 @@ export class PostgresInventoryRepository implements InventoryRepository {
           gt(inventoryLots.expiryDate, onDate),
         ),
       )
-      .orderBy(asc(inventoryLots.expiryDate))
-      .limit(50)
+      // FEFO with the domain's lot-code tie-break; bounded well above any
+      // realistic per-SKU lot count so far lots are never invisible.
+      .orderBy(asc(inventoryLots.expiryDate), asc(inventoryLots.lotCode))
+      .limit(200)
       .for("update");
     return rows.map(mapLotRow).filter((lot) => lotIsSellable(lot, `${onDate}T00:00:00.000Z`));
   }
 
   private recordMovement(
-    lot: InventoryLot,
-    productId: string,
-    sizeId: string,
-    type: InventoryMovement["movementType"],
-    delta: number,
-    orderId: string | null,
-    reason: string | null,
-    occurredAt: string,
-  ) {
-    return this.database.db.insert(inventoryMovements).values({
-      id: `mov_${randomUUID()}`,
-      lotId: lot.id,
-      productId,
-      sizeId,
-      movementType: type,
-      quantityDelta: delta,
-      orderId,
-      reason,
-      occurredAt,
-    });
-  }
-
-  private recordMovementById(
     lotId: string,
     productId: string,
     sizeId: string,
-    type: InventoryMovement["movementType"],
-    delta: number,
+    movementType: InventoryMovement["movementType"],
+    quantityDelta: number,
     orderId: string | null,
     reason: string | null,
     occurredAt: string,
@@ -177,8 +155,8 @@ export class PostgresInventoryRepository implements InventoryRepository {
       lotId,
       productId,
       sizeId,
-      movementType: type,
-      quantityDelta: delta,
+      movementType,
+      quantityDelta,
       orderId,
       reason,
       occurredAt,

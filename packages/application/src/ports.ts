@@ -88,6 +88,12 @@ export interface OrderRepository {
 
 export interface PaymentRepository {
   findById(id: string): Promise<UseCaseResult<PaymentRecord | null>>;
+  /**
+   * Loads a payment WITH a row lock inside the caller's transaction (Postgres
+   * SELECT ... FOR UPDATE) so concurrent webhook/poll transitions serialize
+   * on the row instead of racing last-writer-wins.
+   */
+  lockById(id: string): Promise<UseCaseResult<PaymentRecord | null>>;
   findByProviderSession(provider: PaymentProviderKind, providerSessionId: string): Promise<UseCaseResult<PaymentRecord | null>>;
   findByOrderId(orderId: string): Promise<UseCaseResult<PaymentRecord[]>>;
   /** Still-pending payments past expiry — reconciliation poll candidates. */
@@ -124,7 +130,16 @@ export interface CreatePaymentSessionInput {
   items: Array<{ referenceId: string; name: string; quantity: number; netUnitAmount: number }>;
 }
 
-/** Provider-neutral payment boundary. Xendit specifics never cross it. */
+/**
+ * Provider-neutral payment boundary. Xendit specifics never cross it.
+ *
+ * Error contract for createPaymentSession — callers depend on it:
+ *  - err code "validation": the provider DEFINITIVELY refused the create
+ *    (4xx). No payment session exists; nobody can be charged.
+ *  - err code "timeout" / "unavailable": transport failure, timeout, or a
+ *    provider 5xx. The outcome is AMBIGUOUS — a session may exist at the
+ *    provider. Callers must never blind-retry the create.
+ */
 export interface PaymentProviderPort {
   createPaymentSession(input: CreatePaymentSessionInput): Promise<UseCaseResult<PaymentSessionHandle>>;
   getPaymentSession(providerSessionId: string): Promise<UseCaseResult<PaymentSessionHandle | null>>;
@@ -186,6 +201,12 @@ export interface IdempotencyRepository {
   claim(record: IdempotencyClaim): Promise<UseCaseResult<IdempotencyClaimOutcome>>;
   /** Stores the first response so replays can return it verbatim. */
   attachResponse(record: Omit<IdempotencyClaim, "createdAt" | "requestHash">, responseJson: string): Promise<UseCaseResult<void>>;
+  /**
+   * Removes a claim whose attempt created no durable order (rollback parity
+   * for transaction managers without real rollback). Idempotent no-op when
+   * the claim is absent.
+   */
+  releaseClaim(record: Omit<IdempotencyClaim, "createdAt" | "requestHash">): Promise<UseCaseResult<void>>;
 }
 
 export type WebhookInboxAppendOutcome = "inserted" | "duplicate";
@@ -251,10 +272,15 @@ export class InsufficientInventoryError extends Error {
  */
 export interface InventoryRepository {
   reserveForOrder(input: InventoryReserveInput): Promise<UseCaseResult<InventoryReserveOutcome>>;
-  /** Releases the order's active reservations and restores lot quantities. */
+  /** Releases the order's active reservations and restores lot quantities exactly once. */
   releaseForOrder(orderId: string, reason: string, now: string): Promise<UseCaseResult<{ released: number }>>;
-  /** Releases active reservations past expiry (abandoned checkouts). */
-  releaseExpired(now: string, limit: number): Promise<UseCaseResult<{ released: number }>>;
+  /**
+   * Marks the order's active reservations consumed on confirmed payment. The
+   * quantity was already deducted from the lot at reservation time — consume
+   * NEVER touches stock again; it closes the lifecycle and writes the
+   * "consume" movement for lot traceability.
+   */
+  consumeForOrder(orderId: string, now: string): Promise<UseCaseResult<{ consumed: number }>>;
   /** Sellable (released, unexpired, in-stock) lots for a SKU, FEFO order. */
   listSellable(productId: string, sizeId: string, onDate: string): Promise<UseCaseResult<import("@yubie/domain").InventoryLot[]>>;
 }

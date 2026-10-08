@@ -86,6 +86,12 @@ export class PostgresPaymentRepository implements PaymentRepository {
     return ok(rows[0] ? mapPaymentRow(rows[0]) : null);
   }
 
+  /** Row-locked read inside the caller's transaction (SELECT ... FOR UPDATE). */
+  async lockById(id: string) {
+    const rows = await this.database.db.select().from(orderPayments).where(eq(orderPayments.id, id)).limit(1).for("update");
+    return ok(rows[0] ? mapPaymentRow(rows[0]) : null);
+  }
+
   async findByProviderSession(provider: string, providerSessionId: string) {
     const rows = await this.database.db.select().from(orderPayments)
       .where(and(eq(orderPayments.provider, provider), eq(orderPayments.providerSessionId, providerSessionId)))

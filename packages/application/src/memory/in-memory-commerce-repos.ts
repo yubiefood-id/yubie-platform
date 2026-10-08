@@ -50,6 +50,11 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     return ok(this.items.get(id) ?? null);
   }
 
+  /** No real locking in memory; parity with the Postgres port shape. */
+  async lockById(id: string) {
+    return ok(this.items.get(id) ?? null);
+  }
+
   async findByProviderSession(provider: string, providerSessionId: string) {
     return ok(
       [...this.items.values()].find((item) => item.provider === provider && item.providerSessionId === providerSessionId) ?? null,

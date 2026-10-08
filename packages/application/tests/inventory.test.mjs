@@ -91,10 +91,128 @@ test("insufficient sellable stock fails checkout and never calls the provider", 
   // Total sellable = 15; ask for 20 (cart clamp is per line, aggregate exceeds stock).
   const result = await createFirstPartyCheckout({ ...LOTS_INPUT, lines: [{ productId: "flour", sizeId: "250g", quantity: 20 }] }, deps);
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "conflict");
+  assert.equal(result.error.code, "out_of_stock");
   assert.match(result.error.message, /Insufficient sellable inventory/);
   assert.equal(deps.provider.created.length, 0);
   assert.equal([...deps.inventory.reservations.values()].length, 0, "no partial reservations survive a failure");
+});
+
+test("confirmed payment CONSUMES reservations exactly once and never re-deducts stock", async () => {
+  const deps = makeDeps();
+  const checkout = await createFirstPartyCheckout(LOTS_INPUT, deps);
+  assert.equal(checkout.ok, true);
+  // Post-reserve stock: near lot 0 (depleted), far lot 8.
+  const nearBefore = 0;
+  const farBefore = deps.inventory.lots.get("lot_far").quantityOnHand;
+
+  const applied = await processPaymentWebhook({
+    callbackToken: "token",
+    expectedToken: "token",
+    expectedBusinessId: "biz-1",
+    payload: {
+      event: "payment_session.completed",
+      business_id: "biz-1",
+      created: "2026-10-02T01:00:00Z",
+      data: { payment_session_id: `ps_${checkout.value.checkoutRef}`, reference_id: checkout.value.checkoutRef, status: "COMPLETED", currency: "IDR", amount: checkout.value.totalAmount, payment_id: "pay_c_1" },
+    },
+  }, deps);
+  assert.deepEqual(applied, { result: "applied", paymentStatus: "succeeded" });
+
+  const reservations = [...deps.inventory.reservations.values()];
+  assert.equal(reservations.filter((r) => r.status === "consumed").length, reservations.length, "every reservation consumed");
+  assert.equal(reservations.filter((r) => r.status === "active").length, 0);
+  assert.equal(deps.inventory.lots.get("lot_near").quantityOnHand, nearBefore, "consume never touches quantity");
+  assert.equal(deps.inventory.lots.get("lot_far").quantityOnHand, farBefore, "consume never touches quantity");
+  assert.ok(deps.inventory.movements.some((m) => m.movementType === "consume" && m.quantityDelta === 0), "consume lifecycle recorded with zero delta");
+
+  // A redelivery consumes nothing more (duplicate delivery).
+  const again = await processPaymentWebhook({
+    callbackToken: "token",
+    expectedToken: "token",
+    expectedBusinessId: "biz-1",
+    payload: {
+      event: "payment_session.completed",
+      business_id: "biz-1",
+      created: "2026-10-02T02:00:00Z",
+      data: { payment_session_id: `ps_${checkout.value.checkoutRef}`, reference_id: checkout.value.checkoutRef, status: "COMPLETED", currency: "IDR", amount: checkout.value.totalAmount, payment_id: "pay_c_1" },
+    },
+  }, deps);
+  assert.equal(again.result, "duplicate");
+  assert.equal(deps.inventory.movements.filter((m) => m.movementType === "consume").length, 2, "one consume movement per reservation, still");
+});
+
+test("succeeded then late expired: STALE — no regression, no release of paid stock", async () => {
+  const deps = makeDeps();
+  const checkout = await createFirstPartyCheckout(LOTS_INPUT, deps);
+  const order = [...deps.orders.items.values()].find((item) => item.checkoutPublicToken === checkout.value.checkoutToken);
+
+  const completed = await processPaymentWebhook({
+    callbackToken: "token", expectedToken: "token", expectedBusinessId: "biz-1",
+    payload: { event: "payment_session.completed", business_id: "biz-1", data: { payment_session_id: `ps_${checkout.value.checkoutRef}`, reference_id: checkout.value.checkoutRef, status: "COMPLETED", currency: "IDR", amount: checkout.value.totalAmount } },
+  }, deps);
+  assert.equal(completed.result, "applied");
+
+  const lateExpired = await processPaymentWebhook({
+    callbackToken: "token", expectedToken: "token", expectedBusinessId: "biz-1",
+    payload: { event: "payment_session.expired", business_id: "biz-1", data: { payment_session_id: `ps_${checkout.value.checkoutRef}`, reference_id: checkout.value.checkoutRef, status: "EXPIRED" } },
+  }, deps);
+  assert.equal(lateExpired.result, "stale");
+  assert.equal(lateExpired.paymentStatus, "succeeded");
+
+  // Payment/order/inventory stay consistent: paid, consumed, never released.
+  const payment = (await deps.payments.findByOrderId(order.id)).value[0];
+  assert.equal(payment.status, "succeeded");
+  assert.equal(deps.orders.items.get(order.id).status, "paid");
+  assert.equal([...deps.inventory.reservations.values()].every((r) => r.status === "consumed"), true);
+  assert.equal(deps.inventory.lots.get("lot_far").quantityOnHand, 8, "paid stock is never returned to sellable");
+});
+
+test("expired then late completed: STALE — terminal failure never flips to paid", async () => {
+  const deps = makeDeps();
+  const checkout = await createFirstPartyCheckout(LOTS_INPUT, deps);
+  const order = [...deps.orders.items.values()].find((item) => item.checkoutPublicToken === checkout.value.checkoutToken);
+
+  const expired = await processPaymentWebhook({
+    callbackToken: "token", expectedToken: "token", expectedBusinessId: "biz-1",
+    payload: { event: "payment_session.expired", business_id: "biz-1", data: { payment_session_id: `ps_${checkout.value.checkoutRef}`, reference_id: checkout.value.checkoutRef, status: "EXPIRED" } },
+  }, deps);
+  assert.deepEqual(expired, { result: "applied", paymentStatus: "expired" });
+
+  const lateCompleted = await processPaymentWebhook({
+    callbackToken: "token", expectedToken: "token", expectedBusinessId: "biz-1",
+    payload: { event: "payment_session.completed", business_id: "biz-1", data: { payment_session_id: `ps_${checkout.value.checkoutRef}`, reference_id: checkout.value.checkoutRef, status: "COMPLETED", currency: "IDR", amount: checkout.value.totalAmount } },
+  }, deps);
+  assert.equal(lateCompleted.result, "stale");
+  assert.equal(lateCompleted.paymentStatus, "expired");
+
+  const payment = (await deps.payments.findByOrderId(order.id)).value[0];
+  assert.equal(payment.status, "expired");
+  assert.equal(deps.orders.items.get(order.id).status, "cancelled");
+  // Money may still have been captured (provider race): the state stays
+  // consistent and visible — a terminal expired payment with a late completed
+  // delivery is operator-refundable, never silently re-sold.
+  assert.equal(deps.inventory.lots.get("lot_near").quantityOnHand, 5, "released stock stays sellable");
+});
+
+test("expiry releases each reservation exactly once", async () => {
+  const deps = makeDeps();
+  const checkout = await createFirstPartyCheckout(LOTS_INPUT, deps);
+
+  const first = await processPaymentWebhook({
+    callbackToken: "token", expectedToken: "token", expectedBusinessId: "biz-1",
+    payload: { event: "payment_session.expired", business_id: "biz-1", created: "2026-10-02T01:00:00Z", data: { payment_session_id: `ps_${checkout.value.checkoutRef}`, reference_id: checkout.value.checkoutRef, status: "EXPIRED" } },
+  }, deps);
+  assert.equal(first.result, "applied");
+  assert.equal(deps.inventory.lots.get("lot_near").quantityOnHand, 5, "restored once");
+  assert.equal(deps.inventory.lots.get("lot_far").quantityOnHand, 10);
+
+  const redelivery = await processPaymentWebhook({
+    callbackToken: "token", expectedToken: "token", expectedBusinessId: "biz-1",
+    payload: { event: "payment_session.expired", business_id: "biz-1", created: "2026-10-02T09:00:00Z", data: { payment_session_id: `ps_${checkout.value.checkoutRef}`, reference_id: checkout.value.checkoutRef, status: "EXPIRED" } },
+  }, deps);
+  assert.equal(redelivery.result, "duplicate", "re-delivery with a new timestamp dedupes");
+  assert.equal(deps.inventory.lots.get("lot_near").quantityOnHand, 5, "never restored twice");
+  assert.equal(deps.inventory.lots.get("lot_far").quantityOnHand, 10);
 });
 
 test("only quarantined/expired stock is exactly the insufficient case", async () => {

@@ -81,16 +81,18 @@ export class InMemoryInventoryRepository implements InventoryRepository {
     return ok({ released });
   }
 
-  async releaseExpired(now: string, limit: number) {
-    let released = 0;
+  async consumeForOrder(orderId: string, now: string) {
+    let consumed = 0;
     for (const reservation of this.reservations.values()) {
-      if (released >= limit) break;
-      if (reservation.status === "active" && reservation.expiresAt < now) {
-        const result = await this.releaseForOrder(reservation.orderId, "reservation_expired", now);
-        if (result.ok) released += result.value.released;
-      }
+      if (reservation.orderId !== orderId || reservation.status !== "active") continue;
+      reservation.status = "consumed";
+      reservation.updatedAt = now;
+      consumed += 1;
+      // Quantity was already deducted at reserve time; consume is a pure
+      // lifecycle close with a zero-delta movement for lot traceability.
+      this.movements.push({ id: `mov_${randomUUID()}`, lotId: reservation.lotId, productId: reservation.productId, sizeId: reservation.sizeId, movementType: "consume", quantityDelta: 0, orderId, reason: "payment_confirmed", occurredAt: now });
     }
-    return ok({ released });
+    return ok({ consumed });
   }
 
   async listSellable(productId: string, sizeId: string, onDate: string) {
