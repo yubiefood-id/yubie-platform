@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { quotePromotion } from "@yubie/domain";
 import { PurchaseOptions } from "@/components/commerce/purchase-options";
 import { useCart, useCartDisplayLines } from "@/features/cart/cart-context";
 import { trackEvent } from "@/lib/analytics";
 import { formatRupiah } from "@/lib/format";
+import { nextAttemptKey } from "@/lib/proxy-headers";
 
 type CheckoutPhase = "form" | "creating" | "redirecting" | "error";
 
@@ -34,6 +35,10 @@ export function CheckoutView() {
   const [form, setForm] = useState<CheckoutFormState>(EMPTY_FORM);
   const [mode, setMode] = useState<"unknown" | "live" | "preview">("unknown");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // One logical checkout attempt = one idempotency key. The key survives a
+  // network-ambiguous failure (fetch threw) so a retry dedupes at the server;
+  // any definitive HTTP response closes the attempt.
+  const attemptKeyRef = useRef<string | null>(null);
 
   useEffect(() => { if (hydrated && count > 0) trackEvent("begin_checkout", { item_count: count }); }, [hydrated, count]);
 
@@ -59,10 +64,12 @@ export function CheckoutView() {
     if (!formValid || phase === "creating") return;
     setPhase("creating");
     setErrorMessage(null);
+    const attemptKey = nextAttemptKey(attemptKeyRef.current, "ambiguous", crypto.randomUUID());
+    attemptKeyRef.current = attemptKey;
     try {
       const response = await fetch("/api/checkout", {
         method: "POST",
-        headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
+        headers: { "content-type": "application/json", "idempotency-key": attemptKey },
         body: JSON.stringify({
           lines: lines.map(({ line }) => ({ productId: line.productId, sizeId: line.sizeId, quantity: line.quantity })),
           customerEmail: form.email.trim(),
@@ -79,6 +86,9 @@ export function CheckoutView() {
       });
       const payload = await response.json().catch(() => null);
       const data = payload?.data;
+      // Any HTTP response is definitive: the server has decided this key's
+      // fate, so the attempt closes (the next submit starts a fresh key).
+      attemptKeyRef.current = nextAttemptKey(attemptKeyRef.current, "definitive", "");
       if (response.status === 201 && data?.mode === "live" && typeof data.redirectUrl === "string") {
         trackEvent("add_payment_info", { item_count: count, value: data.totalAmount });
         setMode("live");
@@ -93,13 +103,20 @@ export function CheckoutView() {
       }
       setMode("preview");
       setPhase("error");
-      setErrorMessage(payload?.code === "UNAVAILABLE_LINE"
-        ? "Salah satu item tidak lagi tersedia. Muat ulang keranjang Anda."
-        : "Checkout gagal dibuat. Coba lagi beberapa saat.");
+      const code = payload?.code;
+      setErrorMessage(code === "INSUFFICIENT_INVENTORY" || code === "UNAVAILABLE_LINE"
+        ? "Stok salah satu item sedang habis. Muat ulang keranjang Anda dan coba ukuran lain."
+        : code === "PROVIDER_UNAVAILABLE" || code === "API_TIMEOUT"
+          ? "Penyedia pembayaran sedang tidak dapat dihubungi. Coba lagi beberapa saat."
+          : code === "IDEMPOTENCY_KEY_REUSED"
+            ? "Permintaan sebelumnya masih diproses. Tunggu sebentar lalu coba lagi."
+            : "Checkout gagal dibuat. Coba lagi beberapa saat.");
     } catch {
+      // Network-ambiguous: the attempt key is KEPT so the retry dedupes at
+      // the server even if the first request already created the order.
       setMode("preview");
       setPhase("error");
-      setErrorMessage("Koneksi ke server gagal. Coba lagi.");
+      setErrorMessage("Koneksi ke server gagal. Coba lagi — pesanan Anda tidak akan terduplikasi.");
     }
   };
 

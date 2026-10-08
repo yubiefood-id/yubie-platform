@@ -2,10 +2,17 @@ import { createServer } from "node:http";
 import { Readable } from "node:stream";
 import { handleRequest, setAppContext } from "./index.js";
 import { createAppContext } from "./composition/create-app.js";
+import { inspectServiceRuntimeConfig } from "@yubie/config";
 
 // Fail closed at process start, not on first request: invalid commerce
 // configuration (CONFIG_ERROR) must stop the server before it can serve a
-// half-configured payments mode.
+// half-configured payments mode. The api scope additionally requires
+// API_PROXY_TOKEN in staging/production (web→api hop trust boundary).
+const startupScope = inspectServiceRuntimeConfig(process.env, "api");
+if (!startupScope.ok) {
+  console.error(JSON.stringify({ level: "error", event: "api.config_error", errors: startupScope.errors }));
+  process.exit(1);
+}
 try {
   setAppContext(createAppContext());
 } catch (error) {
