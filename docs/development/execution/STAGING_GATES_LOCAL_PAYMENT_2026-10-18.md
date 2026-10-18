@@ -55,7 +55,7 @@ MIDTRANS_SERVER_KEY=
 MIDTRANS_CLIENT_KEY=
 MIDTRANS_MERCHANT_ID=
 ```
-Keep `MIDTRANS_SERVER_KEY` server-side; the API and payment-reconciliation worker should receive only the credentials they need. The frontend should never make server-signed Midtrans API calls. Do not add Midtrans keys to `apps/web/wrangler.jsonc` vars.
+Keep `MIDTRANS_SERVER_KEY` server-side; the API and payment-reconciliation worker should receive only the credentials they need. The frontend should never make server-signed Midtrans API calls. Do not add Midtrans keys to `apps/web/wrangler.jsonc` vars. Extend `apps/web/scripts/validate-artifact.sh` and any other client-artifact scanners to reject `MIDTRANS_*` server credentials (the current scan names Xendit but not Midtrans).
 
 ## Parallel workstreams / hard acceptance
 
@@ -87,6 +87,8 @@ docker compose --env-file /etc/yubie/staging.env -f infrastructure/docker-compos
 docker compose --env-file /etc/yubie/staging.env -f infrastructure/docker-compose.prod.yml up -d --remove-orphans
 ```
 Avoid dumping `docker compose config`, shell environment, or application tokens to shared logs; `--quiet` avoids printing secrets.
+
+If only the API/database is being commissioned and Zammad is not provisioned, first run the **API-only** validator (`npm run build --workspace @yubie/config && node scripts/validate-runtime-config.mjs --service api`). Do not mark worker/bot ready and do not use `up -d --remove-orphans` for the full stack until their external Zammad configuration is valid. Compose's `api` service can be brought up independently after its postgres + successful migration prerequisites are met.
 4. **Add Midtrans** in a separate reviewed code PR: `packages/domain/src/orders.ts`, `packages/config/src/index.ts`, `packages/integrations/src/midtrans`, API composition + authenticated webhook endpoint, worker reconciliation, Compose variable scopes, unit/integration tests, and a new/superseding payment ADR. Keep the existing Xendit adapter fully intact. No production switch until sandbox evidence.
 5. **Zammad then WhatsApp**: follow `infrastructure/zammad/README.md`, `npm run zammad:provision`, `docs/development/execution/M5_D_RC_LIVE_STAGING_PLAYBOOK.md`. Zammad requires **WhatsApp Cloud API**, not a WhatsApp Business mobile-app login.
 6. **Web staging**: follow `docs/development/STAGING_WEB_DEPLOY.md` (Cloudflare/Vinext); `API_PROXY_TOKEN` is a Wrangler **secret** and must match API. Vercel remains preview.
