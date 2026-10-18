@@ -7,19 +7,19 @@ Audit snapshot: **2026-10-18**. Source: `main@3a06b46dea980880f62e13660937172c06
 
 - GitHub main CI at `3a06b46`: successful. The last visible release-candidate workflow was successful on `aa00c53`, **not** on current main; image publication/digests for a chosen SHA must be confirmed before deploying.
 - Postgres 17 migrations `0001`–`0010`, `apps/api`, `apps/worker`, `apps/bot`, Xendit integration, lot reservations, FEFO, webhook deduplication and reconciliation exist in source.
-- `COMMERCE_PROVIDER` currently accepts only `preview`, `xendit`, `disabled`. No Midtrans/Duitku/iPaymu adapter or gateway-specific webhook is implemented. `COMMERCE_PROVIDER=midtrans` **will fail validation** today.
+- `COMMERCE_PROVIDER` currently accepts only `preview`, `xendit`, `disabled`. No iPaymu/Duitku/iPaymu adapter or gateway-specific webhook is implemented. `COMMERCE_PROVIDER=ipaymu` **will fail validation** today.
 - `apps/web/wrangler.jsonc` and `docs/development/STAGING_WEB_DEPLOY.md` prescribe Cloudflare/Vinext staging. A Vercel READY preview does not prove the staging API or payment gateway is live.
 - `docs/development/execution/PRE_STAGING_ENGINEERING_ACCEPTANCE.md` reports **PRE_STAGING_ENGINEERING_READY**, but explicitly marks Xendit, Google, Zammad, WhatsApp, DNS/TLS as external blockers. Re-verify live environment before changing status.
 
 ## Decision: local provider without false claims of immediate live availability
 
-**Recommended first integration: Midtrans Snap redirect in SANDBOX** (hosted checkout, IDR, QRIS and other enabled methods). Docs: https://docs.midtrans.com/docs/snap and https://docs.midtrans.com/docs/https-notification-webhooks . Operator signup: https://midtrans.com/id/passport .
+**Approved first integration: iPaymu Redirect Payment in SANDBOX** (hosted checkout, IDR, available wallet/QRIS/VA channels). Official docs: https://docs.ipaymu.com/id/docs/payment/redirect-payment ; signup: https://sandbox.ipaymu.com/register . Sandbox merchant credentials are issued separately from production credentials; never mistake signup for live-money activation.
 
-**Fallback:** Duitku POP sandbox (hosted redirect): https://docs.duitku.com/pop/id/ ; or iPaymu sandbox: https://docs.ipaymu.com/id/docs/getting-started . These can be investigated in parallel, but do not add multiple provider adapters at once before one end-to-end integration succeeds.
+**Fallback:** Xendit adapter stays in code and is not removed; use Xendit only after merchant KYC/docs are available. Duitku POP sandbox is a secondary evaluated alternative: https://docs.duitku.com/pop/id/ . Do not add multiple new adapters in the same milestone.
 
-**Commercial constraint:** live merchant payment activation is subject to provider KYC/verification, even when sandbox can be tested. An existing static GoPay Merchant QRIS (if verified) can serve only a *separately labelled, human-reviewed manual-payment fallback*; it is not an API payment session with authoritative order-specific webhook and must not auto-confirm paid orders.
+**Commercial constraint:** live merchant payment activation is subject to iPaymu KYC/verification (KTP, selfie KTP, verified merchant bank account, public website, required terms/privacy/refunds policy), and may need production IP/domain registration, even when sandbox can be tested. An existing static GoPay Merchant QRIS (if verified) can serve only a *separately labelled, human-reviewed manual-payment fallback*; it is not an API payment session with authoritative order-specific webhook and must not auto-confirm paid orders.
 
-**Until adapter exists:** use `COMMERCE_PROVIDER=preview` for infra smoke; this is not live checkout. Do not replace Xendit placeholder credentials with Midtrans secrets.
+**Until adapter exists:** use `COMMERCE_PROVIDER=preview` for infra smoke; this is not live checkout. Do not replace Xendit placeholder credentials with iPaymu secrets.
 
 ## Environment variable owner map
 
@@ -34,7 +34,7 @@ Audit snapshot: **2026-10-18**. Source: `main@3a06b46dea980880f62e13660937172c06
 | `INVENTORY_MODE` | `lots` | Ops/engineering | Released synthetic lots, no oversell |
 | `PURCHASE_OPTIONS_SOURCE` | `database` | Engineering | Postgres listed offerings |
 | `SHIPPING_POLICY` | Currently `free_promotional`; confirm cost approval before live | CEO/operations | No unapproved free-shipping losses |
-| `XENDIT_SECRET_KEY`, `XENDIT_WEBHOOK_TOKEN`, `XENDIT_BUSINESS_ID`, `XENDIT_API_BASE_URL` | empty/inactive in preview or eventual Midtrans mode; Xendit deferred | Finance/operator | Never re-used as Midtrans fields |
+| `XENDIT_SECRET_KEY`, `XENDIT_WEBHOOK_TOKEN`, `XENDIT_BUSINESS_ID`, `XENDIT_API_BASE_URL` | empty/inactive in preview or eventual iPaymu mode; Xendit deferred | Finance/operator | Never re-used as iPaymu fields |
 | `GOOGLE_CLIENT_ID` | Google OAuth web app client ID, authorized staging origin | Google Cloud owner | Real sign-in smoke |
 | `API_PROXY_TOKEN` | generated shared hop token in API secret + Wrangler **secret** | DevOps | API 401 invalid; 200 valid |
 | `OPS_API_TOKEN` | generated ops token, server-side only | DevOps | Protected /ops routes |
@@ -49,13 +49,15 @@ Audit snapshot: **2026-10-18**. Source: `main@3a06b46dea980880f62e13660937172c06
 **Proposed adapter environment (not yet valid):**
 ```dotenv
 # Design only; do not paste into production until implementation + tests.
-COMMERCE_PROVIDER=midtrans
-MIDTRANS_ENV=sandbox
-MIDTRANS_SERVER_KEY=
-MIDTRANS_CLIENT_KEY=
-MIDTRANS_MERCHANT_ID=
+COMMERCE_PROVIDER=ipaymu
+IPAYMU_ENV=sandbox
+IPAYMU_VA=
+IPAYMU_API_KEY=
+IPAYMU_API_BASE_URL=https://sandbox.ipaymu.com
+# Callback route is a future integration requirement, not yet implemented:
+IPAYMU_NOTIFY_URL=https://api-staging.yubie.id/v1/webhooks/ipaymu
 ```
-Keep `MIDTRANS_SERVER_KEY` server-side; the API and payment-reconciliation worker should receive only the credentials they need. The frontend should never make server-signed Midtrans API calls. Do not add Midtrans keys to `apps/web/wrangler.jsonc` vars. Extend `apps/web/scripts/validate-artifact.sh` and any other client-artifact scanners to reject `MIDTRANS_*` server credentials (the current scan names Xendit but not Midtrans).
+Keep `IPAYMU_VA` and `IPAYMU_API_KEY` server-side and in distinct secret-scoped API/worker runtime environments. iPaymu API v2 requires request signatures using HMAC-SHA256 of method, VA, JSON body hash and API key. The frontend must never sign calls. Extend `apps/web/scripts/validate-artifact.sh` to reject `IPAYMU_API_KEY`, `IPAYMU_VA` and other server-only credentials (currently scans Xendit but not iPaymu).
 
 ## Parallel workstreams / hard acceptance
 
@@ -65,7 +67,7 @@ Keep `MIDTRANS_SERVER_KEY` server-side; the API and payment-reconciliation worke
 | Database | PG17 migrated & synthetic lot seed | 0001-0010 migration, query checks, **restore** drill | DevOps/DB |
 | ERP | ERPNext isolated pilot, SKU/lot mapping, no double-write | item mapping, reconcile report, QA quarantine/recall read | Operations |
 | Image | Product SKU artwork audit | 200 assets, responsive/CLS checks, no prototype sold as approved SKU | Brand/web |
-| Payment | Midtrans sandbox hosted redirect behind `PaymentProviderPort` | success/pending/expire/cancel/refund, duplicate/forged/out-of-order callbacks, amount check, ambiguity reconciliation | Engineering/Finance |
+| Payment | iPaymu sandbox hosted redirect behind `PaymentProviderPort` | success/pending/expire/refund, duplicate/forged/out-of-order callbacks, amount/reference/merchant check, ambiguity reconciliation; cancellation and SessionID lookup contract require separate provider confirmation | Engineering/Finance |
 | Zammad | isolated staging instance + routing | API token, real IDs, inbound ticket, handoff and agent reply | Support/DevOps |
 | WhatsApp | official Meta WhatsApp Cloud API test number connected to Zammad | inbound/outbound, opt-in/template where applicable, human takeover, food-safety escalation | Support/Meta |
 
@@ -89,7 +91,7 @@ docker compose --env-file /etc/yubie/staging.env -f infrastructure/docker-compos
 Avoid dumping `docker compose config`, shell environment, or application tokens to shared logs; `--quiet` avoids printing secrets.
 
 If only the API/database is being commissioned and Zammad is not provisioned, first run the **API-only** validator (`npm run build --workspace @yubie/config && node scripts/validate-runtime-config.mjs --service api`). Do not mark worker/bot ready and do not use `up -d --remove-orphans` for the full stack until their external Zammad configuration is valid. Compose's `api` service can be brought up independently after its postgres + successful migration prerequisites are met.
-4. **Add Midtrans** in a separate reviewed code PR: `packages/domain/src/orders.ts`, `packages/config/src/index.ts`, `packages/integrations/src/midtrans`, API composition + authenticated webhook endpoint, worker reconciliation, Compose variable scopes, unit/integration tests, and a new/superseding payment ADR. Keep the existing Xendit adapter fully intact. No production switch until sandbox evidence.
+4. **Add iPaymu** in a separate reviewed code PR: `packages/domain/src/orders.ts`, `packages/config/src/index.ts`, `packages/integrations/src/midtrans`, API composition + authenticated webhook endpoint, worker reconciliation, Compose variable scopes, unit/integration tests, and a new/superseding payment ADR. Keep the existing Xendit adapter fully intact. No production switch until sandbox evidence.
 5. **Zammad then WhatsApp**: follow `infrastructure/zammad/README.md`, `npm run zammad:provision`, `docs/development/execution/M5_D_RC_LIVE_STAGING_PLAYBOOK.md`. Zammad requires **WhatsApp Cloud API**, not a WhatsApp Business mobile-app login.
 6. **Web staging**: follow `docs/development/STAGING_WEB_DEPLOY.md` (Cloudflare/Vinext); `API_PROXY_TOKEN` is a Wrangler **secret** and must match API. Vercel remains preview.
 7. **ERP shadow pilot**: `docs/development/phases/PHASE_M7_ERP_BACKOFFICE.md` defines ERPNext as candidate physical-stock/QA authority. Do not make ERP and Yubie both writable inventory masters until sync rules and financial controls are approved.
@@ -106,7 +108,18 @@ If only the API/database is being commissioned and Zammad is not provisioned, fi
 
 - Confirm actual deadline and accountable approvers.
 - Confirm legal recipient of funds (merchant individual or business), merchant bank account, product sale/regulatory approvals and shipping-charge policy.
-- Create a Midtrans **sandbox** account; report only the **presence** of credentials, never their values.
+- Create an iPaymu **sandbox** account; report only the **presence** of credentials, never their values.
 - Confirm DNS/Cloudflare access and which VPS hosts core services and Zammad.
 - Confirm Meta WhatsApp Business Account admin/system-user access and approved staging test number.
 - Record a gate ledger with timestamps, git SHA, test evidence, PASS/FAIL/BLOCKED_EXTERNAL and rollback owners. No gate passes by inference from a local mock.
+
+## iPaymu-specific payment verification safety (2026-10-18 addendum)
+
+Verified official documentation:
+
+- Redirect: `POST https://sandbox.ipaymu.com/api/v2/payment` with arrays `product`, `qty`, `price`, `description`, and `returnUrl`, `notifyUrl`, `cancelUrl`, `referenceId`; response `Data.SessionID` and `Data.Url`. Source: https://docs.ipaymu.com/id/docs/payment/redirect-payment .
+- Request signature: SHA256 of exact JSON request body, then HMAC-SHA256 of `POST:VA:bodySha256:apiKey`, key `apiKey`; headers `va`, `signature`, `timestamp`. Source: https://docs.ipaymu.com/id/docs/signature .
+- Callback: dashboard can choose form-encoded (default) or JSON. Verify `X-Signature` using provider-documented normalization, sorted payload keys and **merchant VA as callback signing secret**, with timing-safe equality. The callback key is NOT interchangeable with API request signing key. Verify merchant, reference, and amount; then independently confirm payment using transaction check API before changing order state. Source: https://docs.ipaymu.com/id/docs/callback .
+- Transaction status: `POST /api/v2/transaction` requires `transactionId`; status 0 pending, 1 succeeded, 6 succeeded-not-settled, 2 cancelled, 3 refund, 4 error, 5 failed, -2 expired. Source: https://docs.ipaymu.com/id/docs/transaction/check-transaction .
+- **Unresolved provider contract blockers:** Redirect response only documents `SessionID`, but transaction lookup requires `transactionId`; verify mapping and any supported cancel-by-session endpoint with iPaymu before enabling automated release/cancellation. Existing Yubie payment saga calls `cancelPaymentSession()` on attach failure and worker recovery; never assume cancel succeeded. Explicitly hold for operator reconciliation until resolved.
+- Do not add these proposed env fields to live compose until implementation and tests are green; source currently recognizes only `preview`, `xendit`, `disabled`.
