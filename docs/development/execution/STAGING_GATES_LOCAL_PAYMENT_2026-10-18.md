@@ -7,7 +7,7 @@ Audit snapshot: **2026-10-18**. Source: `main@3a06b46dea980880f62e13660937172c06
 
 - GitHub main CI at `3a06b46`: successful. The last visible release-candidate workflow was successful on `aa00c53`, **not** on current main; image publication/digests for a chosen SHA must be confirmed before deploying.
 - Postgres 17 migrations `0001`–`0010`, `apps/api`, `apps/worker`, `apps/bot`, Xendit integration, lot reservations, FEFO, webhook deduplication and reconciliation exist in source.
-- `COMMERCE_PROVIDER` currently accepts only `preview`, `xendit`, `disabled`. No iPaymu/Duitku/iPaymu adapter or gateway-specific webhook is implemented. `COMMERCE_PROVIDER=ipaymu` **will fail validation** today.
+- `COMMERCE_PROVIDER` currently accepts only `preview`, `xendit`, `disabled`. No iPaymu/Duitku adapter or gateway-specific webhook is implemented. `COMMERCE_PROVIDER=ipaymu` **will fail validation** today.
 - `apps/web/wrangler.jsonc` and `docs/development/STAGING_WEB_DEPLOY.md` prescribe Cloudflare/Vinext staging. A Vercel READY preview does not prove the staging API or payment gateway is live.
 - `docs/development/execution/PRE_STAGING_ENGINEERING_ACCEPTANCE.md` reports **PRE_STAGING_ENGINEERING_READY**, but explicitly marks Xendit, Google, Zammad, WhatsApp, DNS/TLS as external blockers. Re-verify live environment before changing status.
 
@@ -30,7 +30,7 @@ Audit snapshot: **2026-10-18**. Source: `main@3a06b46dea980880f62e13660937172c06
 | `POSTGRES_USER`, `POSTGRES_DB` | staging-only Postgres role/db | DevOps | Dedicated staging data |
 | `POSTGRES_PASSWORD`, `DATABASE_URL` | generated secret / internal `postgres:5432` DSN | DevOps | Secret store, migrations + restore |
 | `APP_ORIGIN` | `https://staging.yubie.id` | DNS/web owner | HTTPS and return URLs work |
-| `COMMERCE_PROVIDER` | `preview` **now**; `midtrans` only after implemented | Engineering | Config + gateway sandbox matrix |
+| `COMMERCE_PROVIDER` | `preview` **now**; `ipaymu` only after implemented | Engineering | Config + gateway sandbox matrix |
 | `INVENTORY_MODE` | `lots` | Ops/engineering | Released synthetic lots, no oversell |
 | `PURCHASE_OPTIONS_SOURCE` | `database` | Engineering | Postgres listed offerings |
 | `SHIPPING_POLICY` | Currently `free_promotional`; confirm cost approval before live | CEO/operations | No unapproved free-shipping losses |
@@ -91,7 +91,7 @@ docker compose --env-file /etc/yubie/staging.env -f infrastructure/docker-compos
 Avoid dumping `docker compose config`, shell environment, or application tokens to shared logs; `--quiet` avoids printing secrets.
 
 If only the API/database is being commissioned and Zammad is not provisioned, first run the **API-only** validator (`npm run build --workspace @yubie/config && node scripts/validate-runtime-config.mjs --service api`). Do not mark worker/bot ready and do not use `up -d --remove-orphans` for the full stack until their external Zammad configuration is valid. Compose's `api` service can be brought up independently after its postgres + successful migration prerequisites are met.
-4. **Add iPaymu** in a separate reviewed code PR: `packages/domain/src/orders.ts`, `packages/config/src/index.ts`, `packages/integrations/src/midtrans`, API composition + authenticated webhook endpoint, worker reconciliation, Compose variable scopes, unit/integration tests, and a new/superseding payment ADR. Keep the existing Xendit adapter fully intact. No production switch until sandbox evidence.
+4. **Add iPaymu** in a separate reviewed code PR: `packages/domain/src/orders.ts`, `packages/config/src/index.ts`, `packages/integrations/src/ipaymu`, API composition + authenticated callback endpoint, worker reconciliation, Compose variable scopes, client-artifact secret scanner, unit/integration tests, and a new/superseding payment ADR. Keep the existing Xendit adapter fully intact. No production switch until sandbox evidence.
 5. **Zammad then WhatsApp**: follow `infrastructure/zammad/README.md`, `npm run zammad:provision`, `docs/development/execution/M5_D_RC_LIVE_STAGING_PLAYBOOK.md`. Zammad requires **WhatsApp Cloud API**, not a WhatsApp Business mobile-app login.
 6. **Web staging**: follow `docs/development/STAGING_WEB_DEPLOY.md` (Cloudflare/Vinext); `API_PROXY_TOKEN` is a Wrangler **secret** and must match API. Vercel remains preview.
 7. **ERP shadow pilot**: `docs/development/phases/PHASE_M7_ERP_BACKOFFICE.md` defines ERPNext as candidate physical-stock/QA authority. Do not make ERP and Yubie both writable inventory masters until sync rules and financial controls are approved.
