@@ -20,8 +20,12 @@
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
-    "YUBIE_API_ORIGIN": "https://api-staging.yubie.id"
-  }
+    "YUBIE_API_ORIGIN": "https://api-staging.yubiefood.com"
+  },
+  // Preflight: Cloudflare zone yubiefood.com must be Active, and the staging
+  // hostname must have no existing DNS record, Route, or Custom Domain.
+  // Deploy only after reviewed staging approval and Worker Access planning.
+  "routes": [{ "pattern": "staging.yubiefood.com", "custom_domain": true }]
   // Secrets (set via `wrangler secret put`, never committed):
   //   API_PROXY_TOKEN — authenticates the web→api server hop.
 }
