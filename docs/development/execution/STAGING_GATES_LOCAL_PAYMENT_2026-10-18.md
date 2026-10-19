@@ -29,7 +29,7 @@ Audit snapshot: **2026-10-18**. Source: `main@3a06b46dea980880f62e13660937172c06
 | `YUBIE_ENV` | `staging` | DevOps | Fail-closed startup |
 | `POSTGRES_USER`, `POSTGRES_DB` | staging-only Postgres role/db | DevOps | Dedicated staging data |
 | `POSTGRES_PASSWORD`, `DATABASE_URL` | generated secret / internal `postgres:5432` DSN | DevOps | Secret store, migrations + restore |
-| `APP_ORIGIN` | `https://staging.yubie.id` | DNS/web owner | HTTPS and return URLs work |
+| `APP_ORIGIN` | `https://staging.yubiefood.com` | DNS/web owner | HTTPS and return URLs work |
 | `COMMERCE_PROVIDER` | `preview` **now**; `ipaymu` only after implemented | Engineering | Config + gateway sandbox matrix |
 | `INVENTORY_MODE` | `lots` | Ops/engineering | Released synthetic lots, no oversell |
 | `PURCHASE_OPTIONS_SOURCE` | `database` | Engineering | Postgres listed offerings |
@@ -55,7 +55,7 @@ IPAYMU_VA=
 IPAYMU_API_KEY=
 IPAYMU_API_BASE_URL=https://sandbox.ipaymu.com
 # Callback route is a future integration requirement, not yet implemented:
-IPAYMU_NOTIFY_URL=https://api-staging.yubie.id/v1/webhooks/ipaymu
+IPAYMU_NOTIFY_URL=https://api-staging.yubiefood.com/v1/webhooks/ipaymu
 ```
 Keep `IPAYMU_VA` and `IPAYMU_API_KEY` server-side and in distinct secret-scoped API/worker runtime environments. iPaymu API v2 requires request signatures using HMAC-SHA256 of method, VA, JSON body hash and API key. The frontend must never sign calls. Extend `apps/web/scripts/validate-artifact.sh` to reject `IPAYMU_API_KEY`, `IPAYMU_VA` and other server-only credentials (currently scans Xendit but not iPaymu).
 
@@ -76,7 +76,7 @@ Existing inventory behavior: avoid directly decrementing stock on browser return
 ## Phase sequence and operator commands
 
 1. **Freeze release**: compare latest `main` CI and target SHA. Dispatch `.github/workflows/release-candidate.yml` for that exact approved SHA; verify GHCR tag **and digest** before changing `RELEASE_SHA`.
-2. **Provision infrastructure**: DNS/TLS for `staging.yubie.id`, `api-staging.yubie.id`, `bot-staging.yubie.id` and `support-staging.yubie.id` as applicable; separate staging Postgres and Zammad storage. Keep all data services off public ports.
+2. **Provision infrastructure**: DNS/TLS for `staging.yubiefood.com`, `api-staging.yubiefood.com`, `bot-staging.yubiefood.com` and `support-staging.yubiefood.com` as applicable; separate staging Postgres and Zammad storage. Keep all data services off public ports.
 3. **Deploy DB + API** with safe `COMMERCE_PROVIDER=preview` first. Do not claim transactions are enabled. On the staging host, after filling `/etc/yubie/staging.env` with restricted permissions:
 ```bash
 # Working directory: Yubie repository root; this is NOT executed by this document.

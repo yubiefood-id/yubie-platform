@@ -1,20 +1,20 @@
 # Staging web deployment contract (Vinext on Cloudflare)
 
-Status: **CONTRACT ONLY — not deployed.** Cloudflare account access and DNS
-are operator actions outside the pre-staging engineering milestone. This
-document plus `apps/web/wrangler.jsonc` make the deploy deterministic once
-access exists.
+Status: **CONTRACT ONLY — not deployed or externally verified.** Operator
+reports Cloudflare manages the active `yubiefood.com` zone; this is not proof
+that the staging Worker, custom domain, API origin, or TLS exist. Verify the
+actual zone and any existing `staging` DNS records before deploying.
 
 ## Topology (ADR-012 §1)
 
 ```
-Browser ──> https://staging.yubie.id            (Cloudflare, Vinext worker)
+Browser ──> https://staging.yubiefood.com            (Cloudflare, Vinext worker)
               └─ /api/* same-origin route handlers (server-side only)
-                   └─> https://api-staging.yubie.id   (core VPS, Caddy → apps/api)
+                   └─> https://api-staging.yubiefood.com   (core VPS, Caddy → apps/api)
                          hop auth: x-api-proxy-token (API_PROXY_TOKEN)
 ```
 
-The browser only ever talks to `staging.yubie.id`. First-party cookies, no
+The browser only ever talks to `staging.yubiefood.com`. First-party cookies, no
 CORS. Vercel remains **preview-only** (ADR-012) and is never evidence of a
 backend deployment.
 
@@ -37,6 +37,15 @@ npm run build        # scripts/build-verified.sh:
    `OPS_API_TOKEN`, `ZAMMAD_API_TOKEN`, `postgresql://`) appears anywhere in
    `dist/client`** — the client bundle is scanned on every build.
 
+## Preflight: avoid modifying production
+
+1. Verify `yubiefood.com` zone is Active and existing production DNS/Workers/routes remain untouched.
+2. In Cloudflare DNS, confirm there are no pre-existing records or domain bindings for `staging.yubiefood.com`. If occupied, **STOP** rather than deleting or overriding anything.
+3. Check Workers & Pages for any existing `yubie-web-staging` Worker to avoid deploying over another project. Use the account containing the verified zone.
+4. Plan restricted staging access with Cloudflare Access (Worker-wide or hostname-scoped); require team login where feasible. Do not accidentally protect all production Workers.
+5. Confirm the API staging origin is real and HTTPS-ready before promising functional checkout/auth; frontend pages may render while `/api/*` returns 502.
+6. Do not point `api-staging` or `support-staging` to guessed IPs. No NS, apex, `www`, email, or production route edits.
+
 ## Deploy (when Cloudflare access is provisioned)
 
 ```
@@ -49,7 +58,7 @@ npx wrangler secret put API_PROXY_TOKEN  # paste the SAME value as the api's env
 Binding rules:
 
 - `YUBIE_API_ORIGIN` is a **var** in `wrangler.jsonc`
-  (`https://api-staging.yubie.id`) — non-secret by design.
+  (`https://api-staging.yubiefood.com`) — non-secret by design.
 - `API_PROXY_TOKEN` is a wrangler **secret**, set per-environment with
   `wrangler secret put`. It must equal the api service's `API_PROXY_TOKEN`.
   It is read only inside server route handlers (`apps/web/lib/api-proxy.ts`);
@@ -75,6 +84,15 @@ acceptance:
 
 Record the enforced values in the staging acceptance doc; they are
 BLOCKED_EXTERNAL until the edge is configured.
+
+## Acceptance
+
+- `staging.yubiefood.com` resolves to the Worker over valid HTTPS and requires access approval if Access is enabled.
+- Existing `yubiefood.com` and `www` continue to behave unchanged.
+- Worker `YUBIE_API_ORIGIN` points to `https://api-staging.yubiefood.com`; the API uses `APP_ORIGIN=https://staging.yubiefood.com`.
+- `API_PROXY_TOKEN` is a Worker secret equal to the staging API token; it never appears in `dist/client` or git.
+- `GET /api/*` may fail 502 while staging API is offline: this is **BLOCKED_EXTERNAL**, not evidence that backend is deployed.
+- Google authorized JavaScript origin must include `https://staging.yubiefood.com`; payment callback needs a separate backend route and must not be turned on until verified.
 
 ## Rollback
 

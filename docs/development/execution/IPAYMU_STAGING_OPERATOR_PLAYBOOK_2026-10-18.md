@@ -71,7 +71,7 @@ Set fields in root-only `/etc/yubie/staging.env`:
 | `POSTGRES_PASSWORD` | generated 32+ byte random hex | secret |
 | `POSTGRES_DB` | `yubie` | staging-only |
 | `DATABASE_URL` | `postgresql://yubie:<same DB password>@postgres:5432/yubie` | secret/internal Compose DNS |
-| `APP_ORIGIN` | `https://staging.yubie.id` | after DNS/TLS |
+| `APP_ORIGIN` | `https://staging.yubiefood.com` | after DNS/TLS |
 | `COMMERCE_PROVIDER` | **`preview` for this phase** | iPaymu not implemented |
 | `INVENTORY_MODE` | `lots` | default |
 | `PURCHASE_OPTIONS_SOURCE` | `database` | default |
@@ -122,7 +122,7 @@ sudo docker compose --env-file /etc/yubie/staging.env \
   node -e 'fetch("http://127.0.0.1:8787/healthz").then(r=>{console.log("status:",r.status);process.exit(r.ok?0:1)}).catch(()=>process.exit(1))'
 ```
 
-The Compose stack intentionally publishes **no host ports**. Do not expose Postgres to the internet to "make it work". Ensure reverse-proxy joins the designed Docker edge network or has a secure, explicit local connection to API. External verification (after TLS) is `curl -fsS https://api-staging.yubie.id/healthz` and the `/readyz` endpoint; confirm readiness responses and proxy-hop 401/200 contracts from the documented runbooks.
+The Compose stack intentionally publishes **no host ports**. Do not expose Postgres to the internet to "make it work". Ensure reverse-proxy joins the designed Docker edge network or has a secure, explicit local connection to API. External verification (after TLS) is `curl -fsS https://api-staging.yubiefood.com/healthz` and the `/readyz` endpoint; confirm readiness responses and proxy-hop 401/200 contracts from the documented runbooks.
 
 Required DB acceptance: fresh migration, inventory_lots schema, released synthetic test inventory for each sellable SKU, non-release/quarantine blocks purchase, backup and isolated restore. **Never reset an existing staging DB to add demo lots.** Synthetic inventory must be labeled and isolated from any real fulfillment.
 
@@ -153,7 +153,7 @@ IPAYMU_ENV=sandbox
 IPAYMU_VA=<sandbox_merchant_VA>
 IPAYMU_API_KEY=<sandbox_API_key>
 IPAYMU_API_BASE_URL=https://sandbox.ipaymu.com
-IPAYMU_NOTIFY_URL=https://api-staging.yubie.id/v1/webhooks/ipaymu
+IPAYMU_NOTIFY_URL=https://api-staging.yubiefood.com/v1/webhooks/ipaymu
 ```
 
 The names above are design proposals; they are NOT runtime-supported by the current main SHA. Leave Xendit credentials empty/inactive for now, and never replace them with iPaymu values.
@@ -163,7 +163,7 @@ Acceptance: create redirect, verified successful payment, duplicate callback, fo
 ## Phase 6 — Zammad and official WhatsApp Cloud API
 
 - Deploy pinned Zammad on the separately provisioned VPS following `infrastructure/zammad/README.md`, `infrastructure/zammad/zammad.lock.json` and the override file. Keep its PostgreSQL/Redis/Elasticsearch private.
-- Confirm `https://support-staging.yubie.id` is HTTPS reachable and login succeeds, then create least-privilege Zammad API service token.
+- Confirm `https://support-staging.yubiefood.com` is HTTPS reachable and login succeeds, then create least-privilege Zammad API service token.
 - Run `npm run zammad:provision -- --dry-run`; inspect expected changes; then `npm run zammad:provision` with authorized approval. Read discovered `ZAMMAD_GROUP_*`, `ZAMMAD_PRIORITY_HIGH`, `ZAMMAD_WHATSAPP_ARTICLE_TYPE` from **actual instance**.
 - Configure `ZAMMAD_WEBHOOK_SECRET` and/or `ZAMMAD_WEBHOOK_BEARER` on bot service; ensure bot cannot see `ZAMMAD_API_TOKEN`.
 - Integrate Meta official WhatsApp Cloud API test number into Zammad, not personal WhatsApp Business app login.
