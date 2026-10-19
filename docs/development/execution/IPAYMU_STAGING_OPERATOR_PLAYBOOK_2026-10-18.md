@@ -1,6 +1,7 @@
 # Operator playbook: Yubie staging, iPaymu sandbox, Zammad and WhatsApp
 
 Updated **2026-10-18**. **Not yet executed against the user's VPS or any third-party account.**
+Live baseline on 2026-10-19 is `STAGING_BASELINE_EVIDENCE.md`. Provider questions are in `IPAYMU_PROVIDER_CONTRACT.md`. Do not treat this playbook as a PASS.
 Follow `AGENTS.md`, `infrastructure/staging.env.example`, `infrastructure/docker-compose.prod.yml` and `docs/development/STAGING_WEB_DEPLOY.md`.
 
 ## Phase 0 — prerequisites and separation of duties

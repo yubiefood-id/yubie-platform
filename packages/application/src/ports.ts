@@ -98,6 +98,8 @@ export interface PaymentRepository {
   findByOrderId(orderId: string): Promise<UseCaseResult<PaymentRecord[]>>;
   /** Still-pending payments past expiry — reconciliation poll candidates. */
   listPendingExpired(now: string, limit: number): Promise<UseCaseResult<PaymentRecord[]>>;
+  /** Open payment for this authenticated principal and request hash, if one exists. */
+  findUnresolvedByPrincipalHash(principalKey: string, requestHash: string): Promise<UseCaseResult<PaymentRecord | null>>;
   save(payment: PaymentRecord): Promise<UseCaseResult<void>>;
 }
 

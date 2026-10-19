@@ -36,7 +36,7 @@ NODE
 
 # Client-bundle secret scan: no server-only env name may leak into dist/client.
 # Covers API_PROXY_TOKEN, XENDIT_*, ZAMMAD_*, OPS_API_TOKEN, DATABASE_URL.
-leak=$(grep -rEl "API_PROXY_TOKEN|XENDIT_SECRET_KEY|XENDIT_WEBHOOK_TOKEN|OPS_API_TOKEN|ZAMMAD_API_TOKEN|postgresql://" \
+leak=$(grep -rEl "API_PROXY_TOKEN|XENDIT_SECRET_KEY|XENDIT_WEBHOOK_TOKEN|IPAYMU_API_KEY|IPAYMU_VA|OPS_API_TOKEN|ZAMMAD_API_TOKEN|postgresql://" \
   "${SITES_PROJECT_ROOT}/dist/client" 2>/dev/null || true)
 if [[ -n "${leak}" ]]; then
   echo "Server-only secrets leaked into the client bundle:" >&2

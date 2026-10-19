@@ -71,7 +71,7 @@ export interface OrderRecord {
   updatedAt: string;
 }
 
-export type PaymentProviderKind = "xendit" | "preview";
+export type PaymentProviderKind = "xendit" | "ipaymu" | "preview";
 
 export interface PaymentRecord {
   id: string;
@@ -88,6 +88,10 @@ export interface PaymentRecord {
   providerPaymentId?: string | null;
   /** "ambiguous" when the provider outcome is unknown and needs reconciliation. */
   reconciliationState?: string | null;
+  /** Authenticated customer id. Guests stay null so they do not share one global lock. */
+  principalKey?: string | null;
+  /** SHA-256 of the canonical checkout request body. */
+  requestHash?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -166,6 +170,8 @@ export function paymentStatusFromProviderSession(rawStatus: string): PaymentStat
       return "failed";
     case "EXPIRED":
       return "expired";
+    case "REFUNDED":
+      return "refunded";
     case "CANCELLED":
     case "CANCELED":
     case "VOIDED":

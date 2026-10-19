@@ -1,0 +1,25 @@
+rules:
+  - id: yubie-ipaymu-production-host
+    languages: [ts, js]
+    severity: ERROR
+    message: Production iPaymu hosts are refused. Sandbox calls use https://sandbox.ipaymu.com only.
+    paths:
+      include:
+        - apps
+        - packages
+      exclude:
+        - "**/tests/**"
+        - "**/dist/**"
+    pattern-regex: https://(my|live)\.ipaymu\.com
+  - id: yubie-ipaymu-production-env
+    languages: [ts, js]
+    severity: ERROR
+    message: IPAYMU_ENV must stay sandbox. Production activation is an operator gate, not a source default.
+    paths:
+      include:
+        - apps
+        - packages
+      exclude:
+        - "**/tests/**"
+        - "**/dist/**"
+    pattern-regex: IPAYMU_ENV\s*[:=]\s*["']production["']

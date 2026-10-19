@@ -35,7 +35,7 @@ import {
   parseCommerceRuntimeConfig,
   type CommerceRuntimeConfig,
 } from "@yubie/config";
-import { DefaultRedirectAllowlistPolicy, GoogleIdTokenVerifier, XenditPaymentProvider } from "@yubie/integrations";
+import { DefaultRedirectAllowlistPolicy, GoogleIdTokenVerifier, createCommercePaymentProvider } from "@yubie/integrations";
 import {
   createDatabase,
   PostgresHealthProbe,
@@ -68,8 +68,10 @@ export interface AppContext {
   users: UserRepository;
   authSessions: SessionRepository;
   tokens: CryptoSessionTokenService;
-  paymentMode: "preview" | "xendit";
+  paymentMode: "preview" | "xendit" | "ipaymu";
   paymentProvider: PaymentProviderPort | null;
+  /** Merchant VA for iPaymu callback HMAC. Null unless that provider is selected. */
+  ipaymuVa: string | null;
   webhookToken: string | null;
   /** Expected Xendit business_id for webhook validation (ADR-012 §5). */
   xenditBusinessId: string | null;
@@ -142,13 +144,9 @@ export function createAppContext(): AppContext {
   const ids: IdGenerator = new CryptoIdGenerator();
   const tokens = new CryptoSessionTokenService();
 
-  const paymentMode = commerce.provider === "xendit" ? "xendit" : "preview";
-  const paymentProvider = paymentMode === "xendit"
-    ? new XenditPaymentProvider({
-        secretKey: process.env.XENDIT_SECRET_KEY ?? "",
-        ...(process.env.XENDIT_API_BASE_URL ? { apiBaseUrl: process.env.XENDIT_API_BASE_URL } : {}),
-      })
-    : null;
+  const paymentMode = commerce.provider === "xendit" || commerce.provider === "ipaymu" ? commerce.provider : "preview";
+  const paymentProvider = paymentMode === "preview" ? null : createCommercePaymentProvider(process.env);
+  const ipaymuVa = paymentMode === "ipaymu" ? (process.env.IPAYMU_VA ?? null) : null;
 
   const googleClientId = process.env.GOOGLE_CLIENT_ID ?? null;
   const verifier = googleClientId ? new GoogleIdTokenVerifier({ clientId: googleClientId }) : null;
@@ -162,7 +160,7 @@ export function createAppContext(): AppContext {
   // flag into memory. parseCommerceRuntimeConfig guarantees DATABASE_URL is
   // present before this branch is taken in xendit mode.
   const listingsFromDatabase = commerce.purchaseOptionsSource === "database";
-  const transactionalFromDatabase = paymentMode === "xendit" || listingsFromDatabase;
+  const transactionalFromDatabase = paymentMode !== "preview" || listingsFromDatabase;
 
   if (databaseUrl && (listingsFromDatabase || transactionalFromDatabase)) {
     const database = createDatabase(databaseUrl);
@@ -194,6 +192,7 @@ export function createAppContext(): AppContext {
       tokens,
       paymentMode,
       paymentProvider,
+      ipaymuVa,
       webhookToken,
       xenditBusinessId,
       inventoryMode: commerce.inventoryMode,
@@ -240,6 +239,7 @@ export function createAppContext(): AppContext {
     tokens,
     paymentMode,
     paymentProvider,
+    ipaymuVa,
     webhookToken,
     xenditBusinessId,
     verifier,

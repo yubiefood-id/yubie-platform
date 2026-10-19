@@ -65,6 +65,14 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     return ok([...this.items.values()].filter((item) => item.orderId === orderId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
   }
 
+  async findUnresolvedByPrincipalHash(principalKey: string, requestHash: string) {
+    return ok(
+      [...this.items.values()].find((item) =>
+        item.status === "pending" && item.principalKey === principalKey && item.requestHash === requestHash,
+      ) ?? null,
+    );
+  }
+
   async listPendingExpired(now: string, limit: number) {
     return ok(
       [...this.items.values()]

@@ -7,6 +7,7 @@ import {
   googleLogin,
   joinProductWaitlist,
   logout,
+  applyIpaymuCallback,
   processPaymentWebhook,
   resolveMarketplaceRedirect,
   resolveSession,
@@ -17,6 +18,8 @@ import {
 } from "@yubie/application";
 import { b2bLeadSchema, checkoutRequestSchema, googleLoginSchema, newsletterSubmissionSchema, productWaitlistSchema } from "@yubie/validation";
 import { parseYubieEnvName } from "@yubie/config";
+import { paymentStatusFromProviderSession } from "@yubie/domain";
+import { parseIpaymuCallbackBody, verifyIpaymuCallback } from "@yubie/integrations";
 import { tokensMatch } from "@yubie/application";
 import { catalog } from "./catalog.js";
 import { createAppContext, type AppContext } from "./composition/create-app.js";
@@ -111,6 +114,17 @@ async function readJsonBody(request: Request, maxBytes = MAX_JSON_BYTES): Promis
 
 const tooLarge = () => json({ ok: false, code: "PAYLOAD_TOO_LARGE" }, { status: 413 });
 
+function stringField(fields: Record<string, unknown>, key: string): string {
+  const value = fields[key];
+  return typeof value === "string" ? value : "";
+}
+
+function integerField(value: unknown): number | null {
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value === "string" && /^[0-9]+$/.test(value)) return Number.parseInt(value, 10);
+  return null;
+}
+
 /**
  * Checkout failure semantics the storefront can act on. A sold-out line and a
  * reused idempotency key are both 409s with DIFFERENT meanings; a provider
@@ -124,6 +138,8 @@ function checkoutError(code: string): { status: number; code: string } {
       return { status: 409, code: "INSUFFICIENT_INVENTORY" };
     case "conflict":
       return { status: 409, code: "IDEMPOTENCY_KEY_REUSED" };
+    case "pending_reconciliation":
+      return { status: 503, code: "PENDING_RECONCILIATION" };
     case "timeout":
     case "unavailable":
       return { status: 503, code: "PROVIDER_UNAVAILABLE" };
@@ -276,7 +292,7 @@ export async function handleRequest(request: Request): Promise<Response> {
     }
     const parsed = checkoutRequestSchema.safeParse(parsedJson);
     if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
-    if (ctx.paymentMode === "xendit" && ctx.paymentProvider) {
+    if (ctx.paymentMode !== "preview" && ctx.paymentProvider) {
       // First-party flow (ADR-012): server re-prices every line from the
       // canonical catalog, creates the order + Xendit payment session, and
       // returns only {checkoutToken, redirectUrl, ...} to the browser. The
@@ -292,6 +308,7 @@ export async function handleRequest(request: Request): Promise<Response> {
         successReturnUrl: `${appOrigin}/checkout/success`,
         cancelReturnUrl: `${appOrigin}/checkout/cancel`,
         ...(process.env.SHIPPING_POLICY ? { shippingPolicy: process.env.SHIPPING_POLICY } : {}),
+        provider: ctx.paymentMode === "ipaymu" ? "ipaymu" : "xendit",
         inventoryMode: ctx.inventoryMode,
         idempotencyKey: request.headers.get("idempotency-key"),
         idempotencyPrincipal: sessionUser.value?.id ?? "guest",
@@ -333,6 +350,45 @@ export async function handleRequest(request: Request): Promise<Response> {
     if (!result.ok) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
     if (!result.value) return json({ ok: false, code: "NOT_FOUND" }, { status: 404 });
     return json({ ok: true, data: result.value });
+  }
+
+  if (request.method === "POST" && url.pathname === "/v1/webhooks/ipaymu") {
+    if (ctx.paymentMode !== "ipaymu" || !ctx.ipaymuVa || !ctx.paymentProvider) {
+      return json({ ok: false, code: "WEBHOOK_NOT_CONFIGURED" }, { status: 503 });
+    }
+    const contentType = request.headers.get("content-type") ?? "";
+    const rawBody = await readBoundedText(request, MAX_WEBHOOK_BYTES);
+    if (rawBody === null) return tooLarge();
+    const fields = parseIpaymuCallbackBody(rawBody, contentType);
+    const signature = request.headers.get("x-signature") ?? "";
+    if (!fields || !verifyIpaymuCallback(fields, ctx.ipaymuVa, signature)) {
+      logEvent("api.ipaymu_webhook", { requestId, outcome: "rejected" });
+      return json({ ok: false, code: "INVALID_SIGNATURE" }, { status: 401 });
+    }
+    const referenceId = stringField(fields, "reference_id") || stringField(fields, "referenceId");
+    const merchant = stringField(fields, "merchant");
+    const amount = integerField(fields.amount);
+    const trxId = fields.trx_id == null ? null : String(fields.trx_id);
+    const sessionId = stringField(fields, "sid") || null;
+    let authoritativeStatus = null;
+    if (trxId && /^\d+$/.test(trxId)) {
+      const checked = await ctx.paymentProvider.getPaymentSession(trxId);
+      if (checked.ok && checked.value) authoritativeStatus = paymentStatusFromProviderSession(checked.value.rawStatus);
+    }
+    const applied = await applyIpaymuCallback({
+      referenceId,
+      merchant,
+      expectedMerchant: ctx.ipaymuVa,
+      amount,
+      authoritativeStatus,
+      trxId,
+      sessionId,
+      dedupeKey: `ipaymu:${referenceId}:${trxId ?? "none"}:${authoritativeStatus ?? "unchecked"}`,
+    }, { tx: ctx.tx, clock: ctx.clock, ids: ctx.ids });
+    logEvent("api.ipaymu_webhook", { requestId, outcome: applied.result });
+    if (!applied.persisted) return json({ ok: false, code: "UNAVAILABLE" }, { status: 503 });
+    if (applied.result === "rejected") return json({ ok: false, code: "REJECTED" }, { status: 409 });
+    return json({ ok: true, data: { result: applied.result } });
   }
 
   if (request.method === "POST" && url.pathname === "/v1/webhooks/xendit/payment-session") {

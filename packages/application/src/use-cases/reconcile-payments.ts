@@ -98,7 +98,12 @@ export async function reconcilePayments(deps: ReconcilePaymentsDeps): Promise<{ 
         const payment = payments.ok ? payments.value[0] ?? null : null;
         const freshOrder = await repos.orders.findById(order.id);
         if (!freshOrder.ok || freshOrder.value?.status !== "draft") return null;
-        if (!payment || !payment.providerSessionId) return { kind: "no_session" as const, orderId: order.id };
+        if (!payment || !payment.providerSessionId) {
+          if (payment && (payment.reconciliationState === "ambiguous_create" || payment.reconciliationState === "pending_reconciliation")) {
+            return { kind: "ambiguous" as const, orderId: order.id, payment };
+          }
+          return { kind: "no_session" as const, orderId: order.id };
+        }
         if (payment.reconciliationState === "attach_failed") return { kind: "attach_failed" as const, orderId: order.id, payment };
         return { kind: "ambiguous" as const, orderId: order.id, payment };
       });
