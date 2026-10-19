@@ -19,6 +19,8 @@ export type ErrorCode =
   | "forbidden"
   | "not_found"
   | "conflict"
+  | "pending_reconciliation"
+  | "unsupported"
   | "out_of_stock"
   | "rate_limited"
   | "timeout"

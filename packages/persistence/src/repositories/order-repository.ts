@@ -104,6 +104,17 @@ export class PostgresPaymentRepository implements PaymentRepository {
     return ok(rows.map(mapPaymentRow));
   }
 
+  async findUnresolvedByPrincipalHash(principalKey: string, requestHash: string) {
+    const rows = await this.database.db.select().from(orderPayments)
+      .where(and(
+        eq(orderPayments.principalKey, principalKey),
+        eq(orderPayments.requestHash, requestHash),
+        eq(orderPayments.status, "pending"),
+      ))
+      .limit(1);
+    return ok(rows[0] ? mapPaymentRow(rows[0]) : null);
+  }
+
   async listPendingExpired(now: string, limit: number) {
     const rows = await this.database.db.select().from(orderPayments)
       .where(and(eq(orderPayments.status, "pending"), isNotNull(orderPayments.expiresAt), lt(orderPayments.expiresAt, now)))
@@ -126,6 +137,8 @@ export class PostgresPaymentRepository implements PaymentRepository {
       ...(payment.providerBusinessId !== undefined ? { providerBusinessId: payment.providerBusinessId } : {}),
       ...(payment.providerPaymentId !== undefined ? { providerPaymentId: payment.providerPaymentId } : {}),
       ...(payment.reconciliationState !== undefined ? { reconciliationState: payment.reconciliationState } : {}),
+      ...(payment.principalKey !== undefined ? { principalKey: payment.principalKey } : {}),
+      ...(payment.requestHash !== undefined ? { requestHash: payment.requestHash } : {}),
       createdAt: payment.createdAt,
       updatedAt: payment.updatedAt,
     }).onConflictDoUpdate({
@@ -213,6 +226,8 @@ function mapPaymentRow(row: typeof orderPayments.$inferSelect): PaymentRecord {
     ...(row.providerBusinessId !== null ? { providerBusinessId: row.providerBusinessId } : {}),
     ...(row.providerPaymentId !== null ? { providerPaymentId: row.providerPaymentId } : {}),
     ...(row.reconciliationState !== null ? { reconciliationState: row.reconciliationState } : {}),
+    ...(row.principalKey !== null ? { principalKey: row.principalKey } : {}),
+    ...(row.requestHash !== null ? { requestHash: row.requestHash } : {}),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

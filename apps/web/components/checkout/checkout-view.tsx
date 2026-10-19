@@ -7,7 +7,7 @@ import { PurchaseOptions } from "@/components/commerce/purchase-options";
 import { useCart, useCartDisplayLines } from "@/features/cart/cart-context";
 import { trackEvent } from "@/lib/analytics";
 import { formatRupiah } from "@/lib/format";
-import { nextAttemptKey } from "@/lib/proxy-headers";
+import { attemptOutcomeForHttpStatus, nextAttemptKey } from "@/lib/proxy-headers";
 
 type CheckoutPhase = "form" | "creating" | "redirecting" | "error";
 
@@ -86,9 +86,9 @@ export function CheckoutView() {
       });
       const payload = await response.json().catch(() => null);
       const data = payload?.data;
-      // Any HTTP response is definitive: the server has decided this key's
-      // fate, so the attempt closes (the next submit starts a fresh key).
-      attemptKeyRef.current = nextAttemptKey(attemptKeyRef.current, "definitive", "");
+      // 408/409/502/503/504 are not proof the provider create finished.
+      const outcome = attemptOutcomeForHttpStatus(response.status);
+      attemptKeyRef.current = nextAttemptKey(attemptKeyRef.current, outcome, "");
       if (response.status === 201 && data?.mode === "live" && typeof data.redirectUrl === "string") {
         trackEvent("add_payment_info", { item_count: count, value: data.totalAmount });
         setMode("live");
@@ -108,8 +108,8 @@ export function CheckoutView() {
         ? "Stok salah satu item sedang habis. Muat ulang keranjang Anda dan coba ukuran lain."
         : code === "PROVIDER_UNAVAILABLE" || code === "API_TIMEOUT"
           ? "Penyedia pembayaran sedang tidak dapat dihubungi. Coba lagi beberapa saat."
-          : code === "IDEMPOTENCY_KEY_REUSED"
-            ? "Permintaan sebelumnya masih diproses. Tunggu sebentar lalu coba lagi."
+          : code === "IDEMPOTENCY_KEY_REUSED" || code === "PENDING_RECONCILIATION"
+            ? "Pembayaran sebelumnya masih menunggu konfirmasi. Jangan buat pembayaran baru; coba lagi dengan percobaan yang sama."
             : "Checkout gagal dibuat. Coba lagi beberapa saat.");
     } catch {
       // Network-ambiguous: the attempt key is KEPT so the retry dedupes at

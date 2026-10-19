@@ -31,7 +31,7 @@ test("purchase options source defaults to database when DATABASE_URL is present"
 });
 
 test("unknown COMMERCE_PROVIDER value fails closed with the offending value", () => {
-  assert.throws(() => parseCommerceProviderName("xendti"), /COMMERCE_PROVIDER must be one of: preview, xendit, disabled \(received "xendti"\)/);
+  assert.throws(() => parseCommerceProviderName("xendti"), /COMMERCE_PROVIDER must be one of: preview, xendit, ipaymu, disabled \(received "xendti"\)/);
   assert.throws(() => parseCommerceRuntimeConfig({ COMMERCE_PROVIDER: "live" }), RuntimeConfigError);
 });
 
@@ -105,4 +105,40 @@ test("INVENTORY_MODE is validated and lot-gating is required for deployment xend
     /INVENTORY_MODE=lots/,
   );
   assert.equal(parseCommerceRuntimeConfig({ ...XENDIT_BASE, YUBIE_ENV: "production", INVENTORY_MODE: "lots" }).inventoryMode, "lots");
+});
+
+const IPAYMU_BASE = {
+  COMMERCE_PROVIDER: "ipaymu",
+  IPAYMU_ENV: "sandbox",
+  IPAYMU_VA: "sandbox-va",
+  IPAYMU_API_KEY: "sandbox-key",
+  IPAYMU_NOTIFY_URL: "https://api-staging.yubiefood.com/v1/webhooks/ipaymu",
+  DATABASE_URL: "postgresql://yubie:yubie@127.0.0.1:5432/yubie_test",
+  APP_ORIGIN: "https://staging.yubiefood.com",
+  INVENTORY_MODE: "lots",
+  YUBIE_ENV: "staging",
+};
+
+test("ipaymu sandbox configuration parses and never echoes secrets", () => {
+  const config = parseCommerceRuntimeConfig(IPAYMU_BASE);
+  assert.equal(config.provider, "ipaymu");
+  assert.equal(config.inventoryMode, "lots");
+});
+
+test("ipaymu refuses production env, production hosts, and missing secrets by name only", () => {
+  assert.throws(() => parseCommerceRuntimeConfig({ ...IPAYMU_BASE, IPAYMU_ENV: "production" }), /IPAYMU_ENV=sandbox/);
+  assert.throws(
+    () => parseCommerceRuntimeConfig({ ...IPAYMU_BASE, IPAYMU_API_BASE_URL: "https://my.ipaymu.com/api/v2" }),
+    /sandbox\.ipaymu\.com/,
+  );
+  assert.throws(() => parseCommerceRuntimeConfig({ ...IPAYMU_BASE, IPAYMU_NOTIFY_URL: "http://127.0.0.1/hook" }), /public https URL/);
+  let message = "";
+  try {
+    parseCommerceRuntimeConfig({ COMMERCE_PROVIDER: "ipaymu", IPAYMU_API_KEY: "sandbox-key", IPAYMU_VA: "sandbox-va" });
+  } catch (error) {
+    message = String(error);
+  }
+  assert.match(message, /IPAYMU_VA|IPAYMU_API_KEY|IPAYMU_NOTIFY_URL|IPAYMU_ENV/);
+  assert.equal(message.includes("sandbox-key"), false);
+  assert.equal(message.includes("sandbox-va"), false);
 });

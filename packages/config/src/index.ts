@@ -342,11 +342,11 @@ function configMessage(error: unknown): string {
 
 // --- ADR-012: first-party commerce selection (fail-closed) ---
 
-export type CommerceProviderName = "preview" | "xendit" | "disabled";
+export type CommerceProviderName = "preview" | "xendit" | "ipaymu" | "disabled";
 export type PurchaseOptionsSourceName = "static" | "database";
 export type InventoryModeName = "none" | "lots";
 
-const COMMERCE_PROVIDER_NAMES: readonly CommerceProviderName[] = ["preview", "xendit", "disabled"];
+const COMMERCE_PROVIDER_NAMES: readonly CommerceProviderName[] = ["preview", "xendit", "ipaymu", "disabled"];
 const PURCHASE_OPTIONS_SOURCE_NAMES: readonly PurchaseOptionsSourceName[] = ["static", "database"];
 const INVENTORY_MODE_NAMES: readonly InventoryModeName[] = ["none", "lots"];
 
@@ -483,6 +483,52 @@ export function parseCommerceRuntimeConfig(env: RuntimeEnvSource = process.env):
       errors.push(
         `COMMERCE_PROVIDER=xendit in ${parseYubieEnvName(env.YUBIE_ENV)} requires INVENTORY_MODE=lots (direct commerce must not sell without released, unexpired lots)`,
       );
+    }
+  }
+
+  if (provider === "ipaymu") {
+    if (env.IPAYMU_ENV !== "sandbox") {
+      errors.push("COMMERCE_PROVIDER=ipaymu requires IPAYMU_ENV=sandbox (production iPaymu activation is refused)");
+    }
+    if (!databaseConfigured) {
+      errors.push("COMMERCE_PROVIDER=ipaymu requires DATABASE_URL");
+    }
+    for (const varName of ["IPAYMU_VA", "IPAYMU_API_KEY", "IPAYMU_NOTIFY_URL"] as const) {
+      if (!env[varName]) errors.push(`COMMERCE_PROVIDER=ipaymu requires ${varName}`);
+    }
+    const base = (env.IPAYMU_API_BASE_URL ?? "https://sandbox.ipaymu.com").trim();
+    try {
+      const parsed = new URL(base);
+      if (parsed.protocol !== "https:" || parsed.host !== "sandbox.ipaymu.com") {
+        errors.push("IPAYMU_API_BASE_URL must be https://sandbox.ipaymu.com");
+      }
+    } catch {
+      errors.push("IPAYMU_API_BASE_URL must be https://sandbox.ipaymu.com");
+    }
+    if (!appOrigin) {
+      errors.push("COMMERCE_PROVIDER=ipaymu requires APP_ORIGIN");
+    } else {
+      try {
+        const parsed = new URL(appOrigin);
+        if (parsed.protocol !== "https:") errors.push("APP_ORIGIN must be an https URL when COMMERCE_PROVIDER=ipaymu");
+      } catch {
+        errors.push("APP_ORIGIN must be a valid URL when COMMERCE_PROVIDER=ipaymu");
+      }
+    }
+    if (env.IPAYMU_NOTIFY_URL) {
+      try {
+        const parsed = new URL(env.IPAYMU_NOTIFY_URL);
+        const host = parsed.hostname.toLowerCase();
+        const local = host === "localhost" || host.endsWith(".local") || host === "127.0.0.1" || host === "0.0.0.0";
+        if (parsed.protocol !== "https:" || local) {
+          errors.push("IPAYMU_NOTIFY_URL must be a public https URL");
+        }
+      } catch {
+        errors.push("IPAYMU_NOTIFY_URL must be a public https URL");
+      }
+    }
+    if (deployment && inventoryMode !== "lots") {
+      errors.push(`COMMERCE_PROVIDER=ipaymu in ${parseYubieEnvName(env.YUBIE_ENV)} requires INVENTORY_MODE=lots`);
     }
   }
 

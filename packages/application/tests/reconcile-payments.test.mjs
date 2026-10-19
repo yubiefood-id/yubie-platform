@@ -112,6 +112,20 @@ test("stale drafts without a delivered payment link are cancelled", async () => 
   assert.ok(deps.audit.events.some((event) => event.action === "order.stale_draft_cancelled" && event.resourceId === order.id));
 });
 
+test("an ambiguous create without a session id does not release stock", async () => {
+  const deps = makeDeps();
+  const { order } = await seedOrder(deps, { status: "draft", createdAt: "2026-10-02T10:00:00.000Z", session: null, sessionStatus: "pending", expiresAt: null });
+  const payment = [...deps.payments.items.values()].find((item) => item.orderId === order.id);
+  await deps.payments.save({ ...payment, providerSessionId: null, reconciliationState: "ambiguous_create" });
+  deps.inventory.seedLot({ id: "lot_amb", productId: "flour", sizeId: "250g", lotCode: "AMB", quantityOnHand: 10, expiryDate: "2027-06-30", status: "released", releasedAt: NOW, releaseReason: "coa", createdAt: NOW });
+  await deps.inventory.reserveForOrder({ orderId: order.id, lines: [{ productId: "flour", sizeId: "250g", quantity: 2 }], now: NOW, expiresAt: "2026-10-03T00:00:00.000Z" });
+
+  const report = await reconcilePayments(deps);
+  assert.equal(report.value.staleDraftsCancelled, 0);
+  assert.equal(deps.orders.items.get(order.id).status, "draft");
+  assert.equal(deps.inventory.lots.get("lot_amb").quantityOnHand, 8);
+});
+
 test("a draft with an attached session is flagged ambiguous, never cancelled blind", async () => {
   const deps = makeDeps();
   const { order } = await seedOrder(deps, { status: "draft", createdAt: "2026-10-02T10:00:00.000Z", session: "ps_unknown_outcome", sessionStatus: "pending", expiresAt: "2026-10-02T23:00:00.000Z" });

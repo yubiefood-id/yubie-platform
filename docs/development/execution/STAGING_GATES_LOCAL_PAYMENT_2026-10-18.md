@@ -1,6 +1,7 @@
 # Yubie staging unblock: Indonesian payment gateway, operators and go/no-go gates
 
 Audit snapshot: **2026-10-18**. Source: `main@3a06b46dea980880f62e13660937172c0671698b`.
+Superseded for live status by `STAGING_E2E_MASTER_PLAN.md` and `STAGING_BASELINE_EVIDENCE.md` (2026-10-19, HEAD `7167636`). This file stays the decision record.
 **This is an execution plan, not proof of live staging.** No account secrets, DNS, gateway transaction, Zammad ticket or WhatsApp message were validated in this documentation change.
 
 ## Verified software baseline

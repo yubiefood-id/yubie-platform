@@ -34,7 +34,17 @@ export function forwardableProxyHeaders(headers: Headers): Record<string, string
  */
 export function nextAttemptKey(previous: string | null, outcome: "ambiguous", freshKey: string): string;
 export function nextAttemptKey(previous: string | null, outcome: "definitive" | "reset", freshKey: string): null;
+export function nextAttemptKey(previous: string | null, outcome: "ambiguous" | "definitive" | "reset", freshKey: string): string | null;
 export function nextAttemptKey(previous: string | null, outcome: "ambiguous" | "definitive" | "reset", freshKey: string): string | null {
   if (outcome === "ambiguous") return previous ?? freshKey;
   return null;
+}
+
+/**
+ * Gateway and idempotency responses are not proof the provider create finished.
+ * 408/409/502/503/504 keep the attempt key. Other HTTP statuses close it.
+ */
+export function attemptOutcomeForHttpStatus(status: number): "ambiguous" | "definitive" {
+  if (status === 408 || status === 409 || status === 502 || status === 503 || status === 504) return "ambiguous";
+  return "definitive";
 }

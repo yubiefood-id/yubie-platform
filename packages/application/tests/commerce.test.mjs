@@ -156,8 +156,31 @@ test("AMBIGUOUS provider create keeps the draft + reservations and never blind-r
   const before = deps.provider.created.length;
   const replay = await createFirstPartyCheckout(input, deps);
   assert.equal(replay.ok, false);
-  assert.equal(replay.error.code, "conflict");
+  assert.equal(replay.error.code, "pending_reconciliation");
   assert.equal(deps.provider.created.length, before);
+});
+
+test("a second idempotency key for the same authenticated cart does not create another session", async () => {
+  const deps = makeDeps();
+  const body = JSON.stringify({ lines: [{ productId: "flour", sizeId: "250g", quantity: 2 }] });
+  const first = await createFirstPartyCheckout({
+    ...BASE_INPUT,
+    userId: "user_1",
+    idempotencyPrincipal: "user_1",
+    idempotencyKey: "key-a",
+    rawRequestBody: body,
+  }, deps);
+  assert.equal(first.ok, true);
+  const second = await createFirstPartyCheckout({
+    ...BASE_INPUT,
+    userId: "user_1",
+    idempotencyPrincipal: "user_1",
+    idempotencyKey: "key-b",
+    rawRequestBody: body,
+  }, deps);
+  assert.equal(second.ok, true);
+  assert.equal(second.value.redirectUrl, first.value.redirectUrl);
+  assert.equal(deps.provider.created.length, 1);
 });
 
 test("a late webhook attaches an orphan session by reference and resolves an ambiguous create", async () => {

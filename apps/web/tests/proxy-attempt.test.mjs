@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // Native TS type-stripping (node >= 22.18) imports the pure helpers directly.
-import { forwardableProxyHeaders, nextAttemptKey } from "../lib/proxy-headers.ts";
+import { attemptOutcomeForHttpStatus, forwardableProxyHeaders, nextAttemptKey } from "../lib/proxy-headers.ts";
 
 test("the proxy forwards ONLY the allowlisted browser headers", () => {
   const headers = new Headers({
@@ -48,4 +48,15 @@ test("one logical checkout attempt keeps ONE key across ambiguous retries", () =
   // A new attempt after closure starts fresh.
   const renewed = nextAttemptKey(nextAttemptKey(first, "definitive", fresh()), "ambiguous", fresh());
   assert.ok(renewed && renewed !== first, "closed attempt rotates to a new key");
+});
+
+test("gateway and conflict HTTP statuses keep the same attempt key", () => {
+  const key = "attempt-gateway";
+  for (const status of [408, 409, 502, 503, 504]) {
+    assert.equal(attemptOutcomeForHttpStatus(status), "ambiguous");
+    assert.equal(nextAttemptKey(key, attemptOutcomeForHttpStatus(status), "fresh"), key);
+  }
+  assert.equal(attemptOutcomeForHttpStatus(201), "definitive");
+  assert.equal(attemptOutcomeForHttpStatus(400), "definitive");
+  assert.equal(nextAttemptKey(key, attemptOutcomeForHttpStatus(201), "fresh"), null);
 });

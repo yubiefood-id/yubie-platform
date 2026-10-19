@@ -13,6 +13,7 @@ import {
   type AppError,
   type OrderLineRecord,
   type OrderRecord,
+  type PaymentProviderKind,
   type PaymentRecord,
 } from "@yubie/domain";
 import type {
@@ -25,6 +26,7 @@ import type {
   TransactionalRepositories,
 } from "../ports.js";
 import { InsufficientInventoryError } from "../ports.js";
+import { erpStockWriteDecision } from "../policies/erp-authority.js";
 import { applyPaymentStatus } from "./process-payment-webhook.js";
 
 export interface CheckoutLineInput {
@@ -57,6 +59,8 @@ export interface CreateFirstPartyCheckoutInput {
   rawRequestBody: string;
   /** Public promotion identifier. The server is always the pricing authority. */
   promoCode?: string;
+  /** Adapter selected by commerce config. Existing callers stay on xendit. */
+  provider?: PaymentProviderKind;
 }
 
 export interface CreateFirstPartyCheckoutResult {
@@ -78,7 +82,8 @@ export interface CreateFirstPartyCheckoutResult {
  */
 export type StoredCheckoutOutcome =
   | { kind: "success"; result: CreateFirstPartyCheckoutResult }
-  | { kind: "failure"; error: { code: string; message: string; retryable: boolean } };
+  | { kind: "failure"; error: { code: string; message: string; retryable: boolean } }
+  | { kind: "pending"; message: string };
 
 /** Minimal, PII-free view for the unauthenticated success-page poll. */
 export interface PublicCheckoutStatusView {
@@ -156,6 +161,9 @@ export async function createFirstPartyCheckout(
   input: CreateFirstPartyCheckoutInput,
   deps: CreateCheckoutDeps,
 ): Promise<{ ok: true; value: CreateFirstPartyCheckoutResult } | { ok: false; error: AppError }> {
+  if (erpStockWriteDecision().allowed) {
+    return err({ code: "unsupported", message: "Checkout does not write ERP stock", retryable: false, requestId: "checkout" });
+  }
   const priced: OrderLineRecord[] = [];
   for (const line of input.lines) {
     const product = productFamilies.find((item) => item.id === line.productId && item.status === "available");
@@ -201,11 +209,14 @@ export async function createFirstPartyCheckout(
   /** Replay semantics for a duplicate claim encountered inside TX1. */
   const replayStored = (stored: string | null) => {
     if (!stored) {
-      return err({ code: "conflict", message: "This checkout attempt is still being resolved; retry with the same key shortly or start a new checkout.", retryable: false, requestId: "checkout" });
+      return err({ code: "pending_reconciliation", message: "This checkout attempt is still unresolved. Retry the same attempt; a second payable session will not be created.", retryable: true, requestId: "checkout" });
     }
     try {
       const parsed = JSON.parse(stored) as StoredCheckoutOutcome;
       if (parsed && parsed.kind === "success") return ok(parsed.result);
+      if (parsed && parsed.kind === "pending") {
+        return err({ code: "pending_reconciliation", message: parsed.message, retryable: true, requestId: "checkout" });
+      }
       if (parsed && parsed.kind === "failure") {
         const code = parsed.error.code === "validation" ? "validation" : "unavailable";
         return err({ code, message: parsed.error.message, retryable: parsed.error.retryable, requestId: "checkout" });
@@ -217,6 +228,38 @@ export async function createFirstPartyCheckout(
   };
 
   const now = deps.clock.now();
+  const requestHash = requestHashOf(input.rawRequestBody);
+  if (input.userId) {
+    const open = await deps.tx.run("checkout.find_open_intent", async (repos) => {
+      const payment = await repos.payments.findUnresolvedByPrincipalHash(input.userId as string, requestHash);
+      if (!payment.ok || !payment.value) return null;
+      const order = await repos.orders.findById(payment.value.orderId);
+      if (!order.ok || !order.value) return null;
+      return { payment: payment.value, order: order.value };
+    });
+    if (open?.payment.redirectUrl) {
+      return ok({
+        mode: "live",
+        checkoutToken: open.order.checkoutPublicToken,
+        checkoutRef: open.order.checkoutRef,
+        redirectUrl: open.payment.redirectUrl,
+        expiresAt: open.payment.expiresAt,
+        subtotalAmount: open.order.totals.subtotalAmount,
+        shippingAmount: open.order.totals.shippingAmount,
+        totalAmount: open.order.totalAmount,
+        currency: "IDR",
+      });
+    }
+    if (open) {
+      return err({
+        code: "pending_reconciliation",
+        message: "An unresolved payment attempt already exists for this cart. A second payable session will not be created.",
+        retryable: true,
+        requestId: "checkout",
+      });
+    }
+  }
+
   const orderId = `ord_${deps.ids.nextId()}`;
   const checkoutRef = `co_${deps.ids.nextId()}_${Date.now().toString(36)}`;
   const token = checkoutPublicToken();
@@ -242,8 +285,10 @@ export async function createFirstPartyCheckout(
   const paymentIntent: PaymentRecord = {
     id: `pay_${deps.ids.nextId()}`,
     orderId,
-    provider: "xendit",
+    provider: input.provider === "ipaymu" ? "ipaymu" : "xendit",
     providerSessionId: null,
+    principalKey: input.userId ?? null,
+    requestHash,
     redirectUrl: null,
     currency: "IDR",
     amount: totals.grandTotalAmount,
@@ -261,7 +306,7 @@ export async function createFirstPartyCheckout(
   try {
     const tx1 = await deps.tx.run("checkout.draft", async (repos) => {
       if (idempotencyKey) {
-        const claim = await repos.idempotency.claim({ ...claimInput, requestHash: requestHashOf(input.rawRequestBody), createdAt: now });
+        const claim = await repos.idempotency.claim({ ...claimInput, requestHash, createdAt: now });
         if (!claim.ok) return claim;
         if (claim.value.status === "duplicate") return replayStored(claim.value.responseJson);
         claimed = true;
@@ -342,13 +387,15 @@ export async function createFirstPartyCheckout(
     // browser. Never blind-retry the create; flag the intent for
     // reconciliation and answer retryable-unavailable. A late webhook for the
     // orphan session can still land: it attaches by reference.
+    const pendingMessage = "Payment provider outcome unknown. Retry this same attempt; a second payable session will not be created.";
     await deps.tx.run("checkout.provider_ambiguous", async (repos) => {
       await repos.payments.save({ ...paymentIntent, reconciliationState: "ambiguous_create", updatedAt: deps.clock.now() });
       await repos.audit.append({ action: "order.provider_create_ambiguous", resourceType: "order", resourceId: orderId, actor: "checkout", occurredAt: deps.clock.now() });
+      if (idempotencyKey) await attachOutcome(repos, { kind: "pending", message: pendingMessage });
     });
     return err({
       code: session.error.code === "timeout" ? "timeout" : "unavailable",
-      message: "Payment provider outcome unknown; the attempt is flagged for reconciliation. Retry with a new Idempotency-Key to start a new checkout.",
+      message: pendingMessage,
       retryable: true,
       requestId: "checkout",
     });

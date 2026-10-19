@@ -1,5 +1,5 @@
 import { reconcilePayments, SystemClock, CryptoIdGenerator } from "@yubie/application";
-import { XenditPaymentProvider } from "@yubie/integrations";
+import { createCommercePaymentProvider } from "@yubie/integrations";
 import {
   PostgresOrderRepository,
   PostgresPaymentRepository,
@@ -18,16 +18,14 @@ function logEvent(event: string, fields: Record<string, string | number | boolea
  * fail-closed commerce config that gates the API gates this handler.
  */
 export async function runPaymentReconcile(database: Database): Promise<void> {
-  if (process.env.COMMERCE_PROVIDER !== "xendit" || !process.env.XENDIT_SECRET_KEY) return;
+  const provider = createCommercePaymentProvider(process.env);
+  if (!provider) return;
 
   const result = await reconcilePayments({
     tx: new PostgresTransactionManager(database),
     orders: new PostgresOrderRepository(database),
     payments: new PostgresPaymentRepository(database),
-    provider: new XenditPaymentProvider({
-      secretKey: process.env.XENDIT_SECRET_KEY,
-      ...(process.env.XENDIT_API_BASE_URL ? { apiBaseUrl: process.env.XENDIT_API_BASE_URL } : {}),
-    }),
+    provider,
     clock: new SystemClock(),
     ids: new CryptoIdGenerator(),
   });
