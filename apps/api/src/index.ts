@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { PreviewCommerceProvider } from "@yubie/commerce";
 import {
   GUEST_CHECKOUT_TOKEN_PATTERN,
@@ -385,10 +385,14 @@ export async function handleRequest(request: Request): Promise<Response> {
     const amount = integerField(fields.amount);
     const trxId = fields.trx_id == null ? null : String(fields.trx_id);
     const sessionId = stringField(fields, "sid") || null;
+    if (!referenceId || !merchant || amount === null || amount <= 0 || (trxId !== null && !/^[1-9]\d*$/.test(trxId))) {
+      logEvent("api.ipaymu_webhook", { requestId, outcome: "rejected", code: "invalid_payload" });
+      return json({ ok: false, code: "INVALID_PAYLOAD" }, { status: 400 });
+    }
     let authoritativeStatus = null;
     let authoritativeReferenceId: string | null = null;
     let authoritativeAmount: number | null = null;
-    if (trxId && /^\d+$/.test(trxId)) {
+    if (trxId) {
       const checked = await ctx.paymentProvider.getPaymentSession(trxId);
       if (checked.ok && checked.value) {
         authoritativeStatus = paymentStatusFromProviderSession(checked.value.rawStatus);
@@ -404,6 +408,7 @@ export async function handleRequest(request: Request): Promise<Response> {
       authoritativeStatus,
       authoritativeReferenceId,
       authoritativeAmount,
+      payloadHash: createHash("sha256").update(rawBody).digest("hex"),
       currency: stringField(fields, "currency") || null,
       trxId,
       sessionId,
