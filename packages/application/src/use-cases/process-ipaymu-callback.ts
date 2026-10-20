@@ -22,7 +22,18 @@ export interface IpaymuCallbackInput {
 }
 
 export type IpaymuCallbackResult =
-  | { persisted: true; result: "applied" | "duplicate" | "pending" | "rejected" }
+  | { persisted: true; result: "applied" | "duplicate" | "pending" }
+  | {
+      persisted: true;
+      result: "rejected";
+      reason:
+        | "merchant_mismatch"
+        | "callback_amount_invalid"
+        | "currency_mismatch"
+        | "payment_amount_mismatch"
+        | "session_mismatch"
+        | "authoritative_mismatch";
+    }
   | { persisted: false; result: "unavailable" };
 
 /**
@@ -35,25 +46,29 @@ export async function applyIpaymuCallback(
   input: IpaymuCallbackInput,
   deps: { tx: TransactionManager; clock: Clock; ids: IdGenerator },
 ): Promise<IpaymuCallbackResult> {
-  if (input.merchant !== input.expectedMerchant || input.amount === null || !Number.isInteger(input.amount) || (input.currency != null && input.currency !== "IDR")) {
-    return { persisted: true, result: "rejected" };
-  }
+  if (input.merchant !== input.expectedMerchant) return { persisted: true, result: "rejected", reason: "merchant_mismatch" };
+  if (input.amount === null || !Number.isInteger(input.amount)) return { persisted: true, result: "rejected", reason: "callback_amount_invalid" };
+  if (input.currency != null && input.currency !== "IDR") return { persisted: true, result: "rejected", reason: "currency_mismatch" };
   try {
     return await deps.tx.run("ipaymu.callback", async (repos) => {
       const orderResult = await repos.orders.findByCheckoutRef(input.referenceId);
       if (!orderResult.ok || !orderResult.value) return { persisted: false, result: "unavailable" as const };
       const order = orderResult.value;
       const payments = await repos.payments.findByOrderId(order.id);
-      const payment = payments.ok ? payments.value[0] ?? null : null;
-      if (!payment || payment.amount !== input.amount || payment.currency !== "IDR") {
-        return { persisted: true, result: "rejected" as const };
+      if (!payments.ok) return { persisted: false, result: "unavailable" as const };
+      const payment = payments.value[0] ?? null;
+      if (!payment || payment.currency !== "IDR") {
+        return { persisted: false, result: "unavailable" as const };
+      }
+      if (payment.amount !== input.amount) {
+        return { persisted: true, result: "rejected" as const, reason: "payment_amount_mismatch" as const };
       }
       if (payment.providerSessionId && input.sessionId && payment.providerSessionId !== input.sessionId) {
-        return { persisted: true, result: "rejected" as const };
+        return { persisted: true, result: "rejected" as const, reason: "session_mismatch" as const };
       }
       // A transaction-check status counts only when that response names this order and this amount.
       if (input.authoritativeStatus && (input.authoritativeReferenceId !== order.checkoutRef || input.authoritativeAmount !== payment.amount)) {
-        return { persisted: true, result: "rejected" as const };
+        return { persisted: true, result: "rejected" as const, reason: "authoritative_mismatch" as const };
       }
       const inboxAppend = await repos.inbox.recordProcessed({
         provider: "ipaymu",

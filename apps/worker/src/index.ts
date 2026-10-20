@@ -73,13 +73,16 @@ async function start() {
   await boss.work("support.reply", handleReply);
   await boss.work("chatwoot.reply", handleReply);
 
-  const handleReconcile = async () => {
+  const handleReconcile = async (jobs: Array<{ id: string }>) => {
     const support = createSupportProvider();
-    await reconcileSupport(repos.database, support);
+    for (const job of jobs) {
+      const jobId = job.id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 48);
+      await reconcileSupport(repos.database, support, `worker_${jobId}`);
+    }
   };
 
-  await boss.work("support.reconcile", handleReconcile);
-  await boss.work("chatwoot.reconcile", handleReconcile);
+  await boss.work("support.reconcile", { batchSize: 1 }, handleReconcile);
+  await boss.work("chatwoot.reconcile", { batchSize: 1 }, handleReconcile);
 
   await boss.work("webhook.cleanup", async () => {
     const { PostgresWebhookInboxRepository } = await import("@yubie/persistence");
@@ -91,8 +94,11 @@ async function start() {
   // past expiry, unknown provider outcomes. The handler no-ops unless
   // COMMERCE_PROVIDER=xendit is fully configured.
   await boss.createQueue("payment.reconcile");
-  await boss.work("payment.reconcile", async () => {
-    await runPaymentReconcile(repos.database);
+  await boss.work("payment.reconcile", { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      const jobId = job.id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 48);
+      await runPaymentReconcile(repos.database, `worker_${jobId}`);
+    }
   });
   await boss.schedule("payment.reconcile", "*/5 * * * *", {});
 

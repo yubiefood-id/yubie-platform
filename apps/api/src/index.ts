@@ -23,6 +23,7 @@ import { b2bLeadSchema, checkoutRequestSchema, googleLoginSchema, newsletterSubm
 import { parseYubieEnvName } from "@yubie/config";
 import { paymentStatusFromProviderSession } from "@yubie/domain";
 import { parseIpaymuCallbackBody, verifyIpaymuCallback } from "@yubie/integrations";
+import { createDatabase, type Database } from "@yubie/persistence";
 import { tokensMatch } from "@yubie/application";
 import { catalog } from "./catalog.js";
 import { createAppContext, type AppContext } from "./composition/create-app.js";
@@ -31,6 +32,7 @@ import { logEvent } from "./middleware/log.js";
 
 const commerce = new PreviewCommerceProvider();
 let appContext: AppContext | null = null;
+let operationsDatabase: Database | null = null;
 
 function getContext(): AppContext {
   if (!appContext) appContext = createAppContext();
@@ -39,6 +41,19 @@ function getContext(): AppContext {
 
 export function setAppContext(context: AppContext) {
   appContext = context;
+}
+
+export function setOperationsDatabase(database: Database | null) {
+  operationsDatabase = database;
+}
+
+function getOperationsDatabase(): Database {
+  if (!operationsDatabase) {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) throw new Error("DATABASE_URL is required for operations routes");
+    operationsDatabase = createDatabase(databaseUrl);
+  }
+  return operationsDatabase;
 }
 
 const json = (body: unknown, init?: ResponseInit) => new Response(JSON.stringify(body), {
@@ -152,10 +167,21 @@ function checkoutError(code: string): { status: number; code: string } {
 }
 
 export async function handleRequest(request: Request): Promise<Response> {
-  const url = new URL(request.url);
-  const ctx = getContext();
   const incomingId = request.headers.get("x-request-id");
   const requestId = incomingId && /^[A-Za-z0-9_-]{1,64}$/.test(incomingId) ? incomingId : createRequestId();
+  const response = await routeRequest(request, requestId);
+  const headers = new Headers(response.headers);
+  headers.set("x-request-id", requestId);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+async function routeRequest(request: Request, requestId: string): Promise<Response> {
+  const url = new URL(request.url);
+  const ctx = getContext();
 
   const gate = proxyTrustGate(request, url.pathname);
   if (gate) return gate;
@@ -171,10 +197,18 @@ export async function handleRequest(request: Request): Promise<Response> {
   }
 
   if (url.pathname.startsWith("/ops/assistant") && process.env.DATABASE_URL) {
-    const { createDatabase } = await import("@yubie/persistence");
     const { handleOpsAssistant } = await import("./ops-assistant.js");
-    const database = createDatabase(process.env.DATABASE_URL);
-    const opsResponse = await handleOpsAssistant(request, database);
+    const opsResponse = await handleOpsAssistant(request, getOperationsDatabase());
+    if (opsResponse) return opsResponse;
+  }
+
+  if (url.pathname.startsWith("/ops/payments")) {
+    const { handleOpsPayments } = await import("./ops-payments.js");
+    const opsResponse = await handleOpsPayments(
+      request,
+      process.env.DATABASE_URL ? getOperationsDatabase : null,
+      requestId,
+    );
     if (opsResponse) return opsResponse;
   }
 
@@ -310,6 +344,7 @@ export async function handleRequest(request: Request): Promise<Response> {
       const result = await createFirstPartyCheckout({
         lines: parsed.data.lines,
         customerEmail: parsed.data.customerEmail,
+        requestId,
         ...(parsed.data.customerName ? { customerName: parsed.data.customerName } : {}),
         ...(parsed.data.delivery ? { delivery: parsed.data.delivery } : {}),
         userId: sessionUser.value?.id ?? null,
@@ -414,7 +449,11 @@ export async function handleRequest(request: Request): Promise<Response> {
       sessionId,
       dedupeKey: `ipaymu:${referenceId}:${trxId ?? "none"}:${authoritativeStatus ?? "unchecked"}`,
     }, { tx: ctx.tx, clock: ctx.clock, ids: ctx.ids });
-    logEvent("api.ipaymu_webhook", { requestId, outcome: applied.result });
+    logEvent("api.ipaymu_webhook", {
+      requestId,
+      outcome: applied.result,
+      ...(applied.result === "rejected" ? { code: applied.reason } : {}),
+    });
     if (!applied.persisted) return json({ ok: false, code: "UNAVAILABLE" }, { status: 503 });
     if (applied.result === "rejected") return json({ ok: false, code: "REJECTED" }, { status: 409 });
     return json({ ok: true, data: { result: applied.result } });
