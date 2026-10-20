@@ -29,7 +29,7 @@ function makeDeps() {
   const clock = new FixedClock(NOW);
   const ids = new SequentialIdGenerator();
   const tx = new InMemoryTransactionManager({ orders, payments, paymentEvents, audit, outbox, idempotency, inbox, inventory });
-  return { orders, payments, paymentEvents, inventory, clock, ids, tx };
+  return { orders, payments, paymentEvents, inbox, inventory, clock, ids, tx };
 }
 
 async function seed(deps) {
@@ -90,6 +90,61 @@ test("authoritative success consumes stock once and a replay does not consume ag
   const replay = await applyIpaymuCallback({ ...base, authoritativeStatus: "succeeded" }, deps);
   assert.equal(replay.result, "duplicate");
   assert.equal(deps.orders.items.get("ord_1").status, "paid");
+});
+
+test("a second succeeded transaction for an already-paid order does not consume stock twice", async () => {
+  const deps = makeDeps();
+  await seed(deps);
+  const first = await applyIpaymuCallback({ ...base, authoritativeStatus: "succeeded" }, deps);
+  const second = await applyIpaymuCallback({
+    ...base,
+    trxId: "100",
+    dedupeKey: "ipaymu:co_test:100:succeeded",
+    authoritativeStatus: "succeeded",
+  }, deps);
+  assert.equal(first.result, "applied");
+  assert.equal(second.result, "applied");
+  assert.equal(deps.orders.items.get("ord_1").status, "paid");
+  assert.equal([...deps.inventory.reservations.values()].filter((row) => row.status === "consumed").length, 1);
+});
+
+test("an authoritative refund keeps the order paid and never releases consumed stock", async () => {
+  const deps = makeDeps();
+  await seed(deps);
+  await applyIpaymuCallback({ ...base, authoritativeStatus: "succeeded" }, deps);
+  const refunded = await applyIpaymuCallback({
+    ...base,
+    authoritativeStatus: "refunded",
+    dedupeKey: "ipaymu:co_test:99:refunded",
+  }, deps);
+  assert.equal(refunded.result, "applied");
+  assert.equal(deps.payments.items.get("pay_1").status, "refunded");
+  assert.equal(deps.orders.items.get("ord_1").status, "paid");
+  assert.equal(deps.inventory.lots.get("lot_1").quantityOnHand, 8);
+  assert.equal([...deps.inventory.reservations.values()].every((row) => row.status === "consumed"), true);
+});
+
+test("a crash after inbox append rolls back, and redelivery applies exactly once", async () => {
+  const deps = makeDeps();
+  await seed(deps);
+  const save = deps.payments.save.bind(deps.payments);
+  let failOnce = true;
+  deps.payments.save = async (payment) => {
+    if (payment.status === "succeeded" && failOnce) {
+      failOnce = false;
+      throw new Error("simulated crash before commit");
+    }
+    return save(payment);
+  };
+
+  const first = await applyIpaymuCallback({ ...base, authoritativeStatus: "succeeded" }, deps);
+  assert.equal(first.result, "unavailable");
+  assert.equal(deps.orders.items.get("ord_1").status, "pending_payment");
+
+  const redelivery = await applyIpaymuCallback({ ...base, authoritativeStatus: "succeeded" }, deps);
+  assert.equal(redelivery.result, "applied");
+  assert.equal(deps.orders.items.get("ord_1").status, "paid");
+  assert.equal(deps.paymentEvents.events.length, 1);
 });
 
 test("a callback without an authoritative check does not mark paid or release stock", async () => {

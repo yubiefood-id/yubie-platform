@@ -25,11 +25,14 @@
     "config:validate": "npm run build --workspace @yubie/config && node scripts/validate-runtime-config.mjs",
     "build": "npm run build --workspace @yubie/config && npm run build --workspace @yubie/domain && npm run build --workspace @yubie/validation && npm run build --workspace @yubie/application && npm run build --workspace @yubie/integrations && npm run build --workspace @yubie/assistant && npm run build --workspace @yubie/persistence && npm run build --workspace @yubie/commerce && npm run build --workspace @yubie/ui && npm run build --workspace @yubie/api && npm run build --workspace @yubie/worker && npm run build --workspace @yubie/bot && npm run build --workspace @yubie/admin && npm run build --workspace @yubie/web",
     "lint": "npm run lint --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present && npm run typecheck:e2e",
+    "typecheck:e2e": "tsc --noEmit -p tsconfig.e2e.json",
     "test": "npm run test --workspace @yubie/config && npm run test --workspace @yubie/domain && npm run test --workspace @yubie/validation && npm run test --workspace @yubie/integrations && npm run test --workspace @yubie/application && npm run test --workspace @yubie/assistant && npm run test --workspace @yubie/persistence && npm run test --workspace @yubie/commerce && npm run test --workspace @yubie/api && npm run test --workspace @yubie/worker && npm run test --workspace @yubie/bot && npm run test --workspace @yubie/admin && npm run test --workspace @yubie/web",
     "check": "npm run lint && npm run typecheck && npm run secret:scan && npm run payment:scan && npm run test",
     "payment:scan": "node scripts/payment-rule-scan.mjs",
     "secret:scan": "node scripts/secret-scan.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install --with-deps chromium",
     "graph:bootstrap": "bash scripts/graphify/bootstrap.sh",
     "graph:update": "bash scripts/graphify/update.sh",
     "graph:doctor": "bash scripts/graphify/doctor.sh",
@@ -42,9 +45,37 @@
     "graph:test": "node --test scripts/graphify/tests/*.test.mjs"
   },
   "devDependencies": {
-    "typescript": "5.9.3"
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.64.1",
+    "brace-expansion": "5.0.11",
+    "fast-uri": "3.1.7",
+    "image-size": "2.0.3",
+    "next": "16.3.8",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-server-dom-webpack": "19.2.8",
+    "sharp": "0.35.5",
+    "source-map-js": "1.2.2",
+    "typescript": "5.9.3",
+    "undici": "7.29.1",
+    "vite": "8.0.16",
+    "ws": "8.21.0"
   },
   "overrides": {
-    "fast-uri": "3.1.5"
+    "brace-expansion": "$brace-expansion",
+    "minimatch@3.1.5": {
+      "brace-expansion": "1.1.20"
+    },
+    "fast-uri": "3.1.7",
+    "image-size": "2.0.3",
+    "next": "16.3.8",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-server-dom-webpack": "19.2.8",
+    "sharp": "0.35.5",
+    "source-map-js": "1.2.2",
+    "undici": "7.29.1",
+    "vite": "8.0.16",
+    "ws": "8.21.0"
   }
 }

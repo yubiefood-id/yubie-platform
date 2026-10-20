@@ -133,11 +133,14 @@ async function seed() {
   });
 }
 
-function post(fields, signature) {
+function post(fields, signature, contentType = "application/json") {
+  const body = contentType === "application/x-www-form-urlencoded"
+    ? new URLSearchParams(Object.entries(fields).map(([key, value]) => [key, String(value)])).toString()
+    : JSON.stringify(fields);
   return handleRequest(new Request("https://api.yubiefood.id/v1/webhooks/ipaymu", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-signature": signature },
-    body: JSON.stringify(fields),
+    headers: { "content-type": contentType, "x-signature": signature },
+    body,
   }));
 }
 
@@ -183,3 +186,30 @@ test("forged, mismatched, unchecked, and replayed iPaymu callbacks keep the stoc
   assert.equal((await again.json()).data.result, "duplicate");
   assert.equal(inventory.lots.get("lot_ipaymu").quantityOnHand, 8);
 });
+
+test("form callbacks normalize like JSON callbacks", async () => {
+  await seed();
+  provider.rawStatus = "UNSETTLED";
+  const fields = { reference_id: "co_ipaymu", merchant: VA, amount: 35000, sid: "sess-1", trx_id: 201 };
+  const response = await post(fields, signIpaymuCallback(fields, VA), "application/x-www-form-urlencoded");
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).data.result, "pending");
+  assert.equal(orders.items.get("ord_ipaymu").status, "pending_payment");
+});
+
+for (const fields of [
+  { merchant: VA, amount: 35000, trx_id: 301 },
+  { reference_id: "co_ipaymu", amount: 35000, trx_id: 302 },
+  { reference_id: "co_ipaymu", merchant: VA, amount: "not-a-number", trx_id: 303 },
+  { reference_id: "co_ipaymu", merchant: VA, amount: 35000, trx_id: 0 },
+  { reference_id: "co_ipaymu", merchant: VA, amount: 35000, trx_id: "not-numeric" },
+]) {
+  test(`malformed signed callback is rejected before provider polling: ${JSON.stringify(fields)}`, async () => {
+    await seed();
+    const gets = provider.gets;
+    const response = await post(fields, signIpaymuCallback(fields, VA));
+    assert.equal(response.status, 400);
+    assert.equal(provider.gets, gets);
+    assert.equal(orders.items.get("ord_ipaymu").status, "pending_payment");
+  });
+}

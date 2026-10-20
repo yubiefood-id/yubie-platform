@@ -14,6 +14,19 @@ export class InMemoryInventoryRepository implements InventoryRepository {
   readonly reservations = new Map<string, InventoryReservation>();
   readonly movements: InventoryMovement[] = [];
 
+  snapshot(): () => void {
+    const lots = new Map([...this.lots].map(([id, lot]) => [id, { ...lot }]));
+    const reservations = new Map([...this.reservations].map(([id, reservation]) => [id, { ...reservation }]));
+    const movements = this.movements.map((movement) => ({ ...movement }));
+    return () => {
+      this.lots.clear();
+      for (const [id, lot] of lots) this.lots.set(id, lot);
+      this.reservations.clear();
+      for (const [id, reservation] of reservations) this.reservations.set(id, reservation);
+      this.movements.splice(0, this.movements.length, ...movements);
+    };
+  }
+
   seedLot(lot: Omit<InventoryLot, "updatedAt"> & { updatedAt?: string }): InventoryLot {
     const full = { ...lot, updatedAt: lot.updatedAt ?? lot.createdAt } as InventoryLot;
     this.lots.set(full.id, full);
