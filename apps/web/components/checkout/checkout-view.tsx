@@ -7,9 +7,9 @@ import { PurchaseOptions } from "@/components/commerce/purchase-options";
 import { useCart, useCartDisplayLines } from "@/features/cart/cart-context";
 import { trackEvent } from "@/lib/analytics";
 import { formatRupiah } from "@/lib/format";
-import { attemptOutcomeForHttpStatus, nextAttemptKey } from "@/lib/proxy-headers";
+import { attemptKeyForCart, attemptOutcomeForHttpStatus, classifyCheckoutResponse, type HeldAttempt } from "@/lib/proxy-headers";
 
-type CheckoutPhase = "form" | "creating" | "redirecting" | "error";
+type CheckoutPhase = "form" | "creating" | "redirecting" | "pending" | "error";
 
 interface CheckoutFormState {
   email: string;
@@ -35,12 +35,18 @@ export function CheckoutView() {
   const [form, setForm] = useState<CheckoutFormState>(EMPTY_FORM);
   const [mode, setMode] = useState<"unknown" | "live" | "preview">("unknown");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  // One logical checkout attempt = one idempotency key. The key survives a
-  // network-ambiguous failure (fetch threw) so a retry dedupes at the server;
-  // any definitive HTTP response closes the attempt.
-  const attemptKeyRef = useRef<string | null>(null);
+  // One logical checkout attempt = one idempotency key, bound to the cart it
+  // was minted for. The key survives an ambiguous outcome so a retry dedupes
+  // at the server; a definitive HTTP response closes the attempt.
+  const attemptRef = useRef<HeldAttempt | null>(null);
+  // The guest checkout cookie is issued before the first submit so a lost
+  // first response cannot leave the retry under a different guest identity.
+  const sessionReadyRef = useRef<Promise<unknown> | null>(null);
 
   useEffect(() => { if (hydrated && count > 0) trackEvent("begin_checkout", { item_count: count }); }, [hydrated, count]);
+  useEffect(() => {
+    sessionReadyRef.current = fetch("/api/checkout/session", { cache: "no-store" }).catch(() => null);
+  }, []);
 
   if (!hydrated) return <div className="checkout-page" aria-busy="true"><p className="cart-loading">Memuat checkout…</p></div>;
 
@@ -59,64 +65,62 @@ export function CheckoutView() {
   const hasFlour = lines.some(({ line }) => line.productId === "flour");
   const formValid = form.email.includes("@") && form.phone.trim().length >= 8 && form.address.trim().length >= 8 && form.city.trim().length >= 2;
 
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!formValid || phase === "creating") return;
+  const submit = async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    if (!formValid || phase === "creating" || phase === "redirecting") return;
     setPhase("creating");
     setErrorMessage(null);
-    const attemptKey = nextAttemptKey(attemptKeyRef.current, "ambiguous", crypto.randomUUID());
-    attemptKeyRef.current = attemptKey;
+    const body = JSON.stringify({
+      lines: lines.map(({ line }) => ({ productId: line.productId, sizeId: line.sizeId, quantity: line.quantity })),
+      customerEmail: form.email.trim(),
+      ...(form.name.trim() ? { customerName: form.name.trim() } : {}),
+      delivery: {
+        ...(form.name.trim() ? { name: form.name.trim() } : {}),
+        phone: form.phone.trim(),
+        address: form.address.trim(),
+        city: form.city.trim(),
+        ...(form.postalCode.trim() ? { postalCode: form.postalCode.trim() } : {}),
+      },
+      ...(promoCode ? { promoCode } : {}),
+    });
+    const attempt = attemptKeyForCart(attemptRef.current, body, crypto.randomUUID());
+    attemptRef.current = attempt;
     try {
+      await sessionReadyRef.current;
       const response = await fetch("/api/checkout", {
         method: "POST",
-        headers: { "content-type": "application/json", "idempotency-key": attemptKey },
-        body: JSON.stringify({
-          lines: lines.map(({ line }) => ({ productId: line.productId, sizeId: line.sizeId, quantity: line.quantity })),
-          customerEmail: form.email.trim(),
-          ...(form.name.trim() ? { customerName: form.name.trim() } : {}),
-          delivery: {
-            ...(form.name.trim() ? { name: form.name.trim() } : {}),
-            phone: form.phone.trim(),
-            address: form.address.trim(),
-            city: form.city.trim(),
-            ...(form.postalCode.trim() ? { postalCode: form.postalCode.trim() } : {}),
-          },
-          ...(promoCode ? { promoCode } : {}),
-        }),
+        headers: { "content-type": "application/json", "idempotency-key": attempt.key },
+        body,
       });
       const payload = await response.json().catch(() => null);
-      const data = payload?.data;
-      // 408/409/502/503/504 are not proof the provider create finished.
-      const outcome = attemptOutcomeForHttpStatus(response.status);
-      attemptKeyRef.current = nextAttemptKey(attemptKeyRef.current, outcome, "");
-      if (response.status === 201 && data?.mode === "live" && typeof data.redirectUrl === "string") {
-        trackEvent("add_payment_info", { item_count: count, value: data.totalAmount });
+      if (attemptOutcomeForHttpStatus(response.status) === "definitive") attemptRef.current = null;
+      const outcome = classifyCheckoutResponse(response.status, payload);
+      if (outcome === "redirect") {
+        trackEvent("add_payment_info", { item_count: count, value: payload.data.totalAmount });
         setMode("live");
         setPhase("redirecting");
-        window.location.assign(data.redirectUrl);
+        window.location.assign(payload.data.redirectUrl);
         return;
       }
-      if (response.ok && data?.status === "preview") {
+      if (outcome === "preview") {
         setMode("preview");
         setPhase("form");
         return;
       }
-      setMode("preview");
+      if (outcome === "pending") {
+        setPhase("pending");
+        return;
+      }
       setPhase("error");
-      const code = payload?.code;
-      setErrorMessage(code === "INSUFFICIENT_INVENTORY" || code === "UNAVAILABLE_LINE"
+      setErrorMessage(outcome === "sold_out"
         ? "Stok salah satu item sedang habis. Muat ulang keranjang Anda dan coba ukuran lain."
-        : code === "PROVIDER_UNAVAILABLE" || code === "API_TIMEOUT"
-          ? "Penyedia pembayaran sedang tidak dapat dihubungi. Coba lagi beberapa saat."
-          : code === "IDEMPOTENCY_KEY_REUSED" || code === "PENDING_RECONCILIATION"
-            ? "Pembayaran sebelumnya masih menunggu konfirmasi. Jangan buat pembayaran baru; coba lagi dengan percobaan yang sama."
-            : "Checkout gagal dibuat. Coba lagi beberapa saat.");
+        : outcome === "invalid"
+          ? "Data checkout belum lengkap atau tidak valid. Periksa kembali isian Anda."
+          : "Checkout gagal dibuat. Tidak ada pembayaran yang dibuat. Coba lagi beberapa saat.");
     } catch {
-      // Network-ambiguous: the attempt key is KEPT so the retry dedupes at
-      // the server even if the first request already created the order.
-      setMode("preview");
-      setPhase("error");
-      setErrorMessage("Koneksi ke server gagal. Coba lagi — pesanan Anda tidak akan terduplikasi.");
+      // No HTTP response: the attempt key is kept so a retry dedupes at the
+      // server even if the first request already created the payment.
+      setPhase("pending");
     }
   };
 
@@ -131,7 +135,14 @@ export function CheckoutView() {
           <p>Pesanan telah divalidasi, tetapi halaman pembayaran belum dibuat karena konfigurasi pembayaran produksi belum aktif.</p>
           {hasFlour && <PurchaseOptions productSlug="yubie-flour" productId="flour" placement="checkout" />}
         </div>}
-        {mode !== "live" && <form className="checkout-form" onSubmit={submit} noValidate>
+        {phase === "pending" && <div className="checkout-status" role="status">
+          <strong>Pembayaran Anda sedang kami pastikan.</strong>
+          <p>Kami belum menerima kepastian dari penyedia pembayaran. Jangan membuat pesanan baru: tombol di bawah melanjutkan percobaan yang sama, dan Anda tidak akan ditagih dua kali.</p>
+          <button className="button primary full" type="button" onClick={() => void submit()}>Cek status dan lanjutkan</button>
+          <p>Butuh bantuan? Hubungi kami lewat WhatsApp.</p>
+          <PurchaseOptions productSlug="yubie-flour" productId="flour" placement="checkout" />
+        </div>}
+        {mode !== "live" && phase !== "pending" && <form className="checkout-form" onSubmit={submit} noValidate>
           <fieldset>
             <legend>1 · Kontak</legend>
             <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} autoComplete="email" required aria-invalid={!form.email.includes("@")} />{phase !== "creating" && form.email.length > 3 && !form.email.includes("@") && <small>Masukkan email yang valid.</small>}</label>
@@ -166,7 +177,7 @@ export function CheckoutView() {
         </form>
         {promotion && <div className="discount-row"><span>Promo {promotion.code} <button type="button" onClick={clearPromo}>Hapus</button></span><span>−{formatRupiah(promotion.discountAmount)}</span></div>}
         <div className="total"><span>Total</span><span>{formatRupiah(total)}</span></div>
-        <p>Ongkir dan total final diverifikasi oleh server sebelum halaman pembayaran Xendit dibuat.</p>
+        <p>Ongkir dan total final diverifikasi oleh server sebelum halaman pembayaran dibuat.</p>
         <Link className="button warm full" href="/cart">Kembali ke keranjang</Link>
       </aside>
     </div>

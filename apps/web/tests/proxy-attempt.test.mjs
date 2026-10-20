@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // Native TS type-stripping (node >= 22.18) imports the pure helpers directly.
-import { attemptOutcomeForHttpStatus, forwardableProxyHeaders, nextAttemptKey } from "../lib/proxy-headers.ts";
+import { attemptKeyForCart, attemptOutcomeForHttpStatus, classifyCheckoutResponse, forwardableProxyHeaders, nextAttemptKey } from "../lib/proxy-headers.ts";
 
 test("the proxy forwards ONLY the allowlisted browser headers", () => {
   const headers = new Headers({
@@ -52,11 +52,32 @@ test("one logical checkout attempt keeps ONE key across ambiguous retries", () =
 
 test("gateway and conflict HTTP statuses keep the same attempt key", () => {
   const key = "attempt-gateway";
-  for (const status of [408, 409, 502, 503, 504]) {
+  for (const status of [408, 409, 429, 502, 503, 504]) {
     assert.equal(attemptOutcomeForHttpStatus(status), "ambiguous");
     assert.equal(nextAttemptKey(key, attemptOutcomeForHttpStatus(status), "fresh"), key);
   }
   assert.equal(attemptOutcomeForHttpStatus(201), "definitive");
   assert.equal(attemptOutcomeForHttpStatus(400), "definitive");
   assert.equal(nextAttemptKey(key, attemptOutcomeForHttpStatus(201), "fresh"), null);
+});
+
+test("a held attempt key is reused only for the same cart; a changed cart starts a new attempt", () => {
+  const held = { key: "attempt-a", fingerprint: "cart-1" };
+  assert.deepEqual(attemptKeyForCart(held, "cart-1", "fresh"), held);
+  assert.deepEqual(attemptKeyForCart(held, "cart-2", "fresh"), { key: "fresh", fingerprint: "cart-2" });
+  assert.deepEqual(attemptKeyForCart(null, "cart-1", "fresh"), { key: "fresh", fingerprint: "cart-1" });
+});
+
+test("checkout responses map to UI outcomes; errors never fall back to preview", () => {
+  assert.equal(classifyCheckoutResponse(201, { data: { mode: "live", redirectUrl: "https://pay.example/x" } }), "redirect");
+  assert.equal(classifyCheckoutResponse(202, { data: { status: "preview" } }), "preview");
+  for (const code of ["PENDING_RECONCILIATION", "PROVIDER_UNAVAILABLE", "API_TIMEOUT", "IDEMPOTENCY_KEY_REUSED"]) {
+    assert.equal(classifyCheckoutResponse(503, { code }), "pending", code);
+  }
+  for (const status of [408, 429, 502, 504]) assert.equal(classifyCheckoutResponse(status, null), "pending", String(status));
+  assert.equal(classifyCheckoutResponse(409, { code: "INSUFFICIENT_INVENTORY" }), "sold_out");
+  assert.equal(classifyCheckoutResponse(409, { code: "UNAVAILABLE_LINE" }), "sold_out");
+  assert.equal(classifyCheckoutResponse(400, { code: "INVALID_REQUEST" }), "invalid");
+  assert.equal(classifyCheckoutResponse(500, null), "failed");
+  assert.equal(classifyCheckoutResponse(201, { data: { mode: "live" } }), "failed", "a 201 without a redirect is not a success");
 });

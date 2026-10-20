@@ -150,7 +150,9 @@ async function openIntentOutcome(repos: TransactionalRepositories, principalKey:
   if (!payment.ok || !payment.value) return null;
   const order = await repos.orders.findById(payment.value.orderId);
   if (!order.ok || !order.value) return null;
-  if (!payment.value.redirectUrl) return { kind: "pending", message: OPEN_INTENT_PENDING_MESSAGE };
+  // A flagged intent (ambiguous create, attach failure, pending reconciliation)
+  // may point at a cancelled or unknown session; only a clean one is reused.
+  if (!payment.value.redirectUrl || payment.value.reconciliationState) return { kind: "pending", message: OPEN_INTENT_PENDING_MESSAGE };
   return {
     kind: "success",
     result: {
@@ -403,7 +405,10 @@ export async function createFirstPartyCheckout(
     cancelReturnUrl: input.cancelReturnUrl,
     expiresAt: orderExpiresAt,
     items: buildProviderLineItems(input.provider, checkoutRef, priced, totals),
-  });
+  }).catch((): Awaited<ReturnType<PaymentProviderPort["createPaymentSession"]>> =>
+    // A thrown adapter error says nothing about whether the provider accepted
+    // the create, so it is handled as ambiguous.
+    err({ code: "unavailable", message: "Payment provider call threw", retryable: true, requestId: "checkout" }));
 
   if (!session.ok) {
     const definitive = session.error.code === "validation";
