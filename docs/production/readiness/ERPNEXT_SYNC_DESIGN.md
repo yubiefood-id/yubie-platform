@@ -10,6 +10,14 @@ Recorded 2026-10-20 after main `84b6603`. No ERPNext process is installed. The s
 
 `ErpNextShadowClient.read` remains GET-only under `/api/resource/` on an https origin. `write` returns `refused` and does not call the network.
 
+## Shadow reconcile (built, not scheduled)
+
+- `validateErpMappings` requires one ERP item code per Yubie product size and one size per item code, with a strict item-code and warehouse format. The mapped warehouse must be the released (QA-passed) warehouse.
+- `ErpNextStockReader` reads `Bin.actual_qty` through the GET-only shadow client, filtered by mapped item codes and warehouse. Fractional, negative, or malformed quantities and items outside the mapping are `invalid_response`, never rounded or trusted.
+- `runErpShadowReconcile` compares sellable Yubie stock with ERP stock. A mismatch enqueues one `erp.stock_discrepancy_reported` outbox event (deduped per run). Failures retry with exponential backoff (1 min doubling, capped at 30 min) for 6 attempts, then enqueue `erp.shadow_reconcile_dead_letter` for an operator. A failed dead-letter write throws. It has no write port and refuses to run if `erpStockWriteDecision` is ever opened.
+- Tests: `packages/application/tests/erp-shadow-reconcile.test.mjs`, `packages/integrations/tests/erpnext-stock-reader.test.mjs` (local mock Frappe).
+- Not scheduled in the worker: no ERP host, item mapping, or credentials are approved.
+
 ## Proposed one-way flow, after a host is approved
 
 1. ERPNext is the physical on-hand, batch, warehouse, and QA record for the four product families.
