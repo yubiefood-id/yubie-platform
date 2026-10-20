@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { parseYubieEnvName } from "@yubie/config";
 import {
   createDatabase,
@@ -7,13 +7,14 @@ import {
   type Database,
 } from "@yubie/persistence";
 
-function authorizeOps(request: Request): boolean {
+export function authorizeOps(request: Request): boolean {
   const token = process.env.OPS_API_TOKEN ?? "";
   if (token) {
     const auth = request.headers.get("authorization") ?? "";
     const expected = `Bearer ${token}`;
-    if (auth.length !== expected.length) return false;
-    return timingSafeEqual(Buffer.from(auth), Buffer.from(expected));
+    const presentedDigest = createHash("sha256").update(auth).digest();
+    const expectedDigest = createHash("sha256").update(expected).digest();
+    return timingSafeEqual(presentedDigest, expectedDigest);
   }
   // Without a token the ops surface is reachable only in explicitly local
   // environments — never staging/preview/production deployments.

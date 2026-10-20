@@ -43,6 +43,8 @@ export interface CreateFirstPartyCheckoutInput {
   lines: CheckoutLineInput[];
   customerEmail: string;
   customerName?: string;
+  /** Bounded non-PII API correlation id for audit evidence. */
+  requestId?: string;
   delivery?: import("@yubie/domain").OrderDelivery;
   userId?: string | null;
   /** Base of the success return URL; the opaque checkout token is appended. */
@@ -289,6 +291,9 @@ export async function createFirstPartyCheckout(
   };
 
   const now = deps.clock.now();
+  const auditActor = input.requestId && /^[A-Za-z0-9_-]{1,64}$/.test(input.requestId)
+    ? `checkout:${input.requestId}`
+    : "checkout";
   const intentHash = checkoutIntentHash({ lines: priced, promoCode: input.promoCode, delivery: input.delivery ?? null });
   const requestHash = checkoutRequestHash(intentHash, input.customerEmail, input.customerName);
 
@@ -358,7 +363,7 @@ export async function createFirstPartyCheckout(
           expiresAt: orderExpiresAt,
         });
       }
-      await repos.audit.append({ action: "order.draft_created", resourceType: "order", resourceId: orderId, actor: "checkout", occurredAt: now });
+      await repos.audit.append({ action: "order.draft_created", resourceType: "order", resourceId: orderId, actor: auditActor, occurredAt: now });
       await repos.outbox.enqueue({
         eventType: "order.draft_created",
         aggregateType: "order",
@@ -425,7 +430,7 @@ export async function createFirstPartyCheckout(
         await repos.orders.save({ ...draftOrder, status: "cancelled", updatedAt: deps.clock.now() });
         await repos.payments.save({ ...paymentIntent, status: "failed", reconciliationState: "provider_create_failed", updatedAt: deps.clock.now() });
         await repos.inventory.releaseForOrder(orderId, "provider_create_failed", deps.clock.now());
-        await repos.audit.append({ action: "order.provider_create_failed", resourceType: "order", resourceId: orderId, actor: "checkout", occurredAt: deps.clock.now() });
+        await repos.audit.append({ action: "order.provider_create_failed", resourceType: "order", resourceId: orderId, actor: auditActor, occurredAt: deps.clock.now() });
         if (idempotencyKey) await attachOutcome(repos, failure);
       });
       return err({ code: "validation", message: "Payment provider rejected the checkout request; nothing was charged. Retry with a new Idempotency-Key.", retryable: false, requestId: "checkout" });
@@ -439,7 +444,7 @@ export async function createFirstPartyCheckout(
     const pendingMessage = "Payment provider outcome unknown. Retry this same attempt; a second payable session will not be created.";
     await deps.tx.run("checkout.provider_ambiguous", async (repos) => {
       await repos.payments.save({ ...paymentIntent, reconciliationState: "ambiguous_create", updatedAt: deps.clock.now() });
-      await repos.audit.append({ action: "order.provider_create_ambiguous", resourceType: "order", resourceId: orderId, actor: "checkout", occurredAt: deps.clock.now() });
+      await repos.audit.append({ action: "order.provider_create_ambiguous", resourceType: "order", resourceId: orderId, actor: auditActor, occurredAt: deps.clock.now() });
       if (idempotencyKey) await attachOutcome(repos, { kind: "pending", message: pendingMessage });
     });
     return err({
@@ -474,7 +479,7 @@ export async function createFirstPartyCheckout(
         updatedAt: deps.clock.now(),
       });
       await repos.orders.save({ ...draftOrder, status: "pending_payment", updatedAt: deps.clock.now() });
-      await repos.audit.append({ action: "order.pending_payment", resourceType: "order", resourceId: orderId, actor: "checkout", occurredAt: deps.clock.now() });
+      await repos.audit.append({ action: "order.pending_payment", resourceType: "order", resourceId: orderId, actor: auditActor, occurredAt: deps.clock.now() });
       await repos.outbox.enqueue({
         eventType: "order.pending_payment",
         aggregateType: "order",
@@ -501,7 +506,7 @@ export async function createFirstPartyCheckout(
           reconciliationState: "attach_failed",
           updatedAt: deps.clock.now(),
         });
-        await repos.audit.append({ action: "order.attach_failed", resourceType: "order", resourceId: orderId, actor: "checkout", occurredAt: deps.clock.now() });
+        await repos.audit.append({ action: "order.attach_failed", resourceType: "order", resourceId: orderId, actor: auditActor, occurredAt: deps.clock.now() });
       });
       // Cancel OUTSIDE any transaction; a network failure here leaves the
       // session live — reconciliation still has the persisted session id.

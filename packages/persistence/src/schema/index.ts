@@ -152,6 +152,9 @@ export const webhookInbox = pgTable("webhook_inbox", {
 }, (table) => [
   uniqueIndex("webhook_inbox_provider_delivery").on(table.provider, table.deliveryId),
   uniqueIndex("webhook_inbox_provider_hash").on(table.provider, table.payloadHash),
+  index("webhook_inbox_payment_provider_received")
+    .on(table.provider, table.receivedAt.desc())
+    .where(sql`provider IN ('xendit', 'ipaymu')`),
 ]);
 
 export const conversationSessions = pgTable("conversation_sessions", {
@@ -413,6 +416,11 @@ export const orderPayments = pgTable("order_payments", {
   uniqueIndex("order_payments_provider_session").on(table.provider, table.providerSessionId).where(sql`provider_session_id IS NOT NULL`),
   uniqueIndex("order_payments_unresolved_request").on(table.principalKey, table.requestHash).where(sql`status = 'pending' AND principal_key IS NOT NULL AND request_hash IS NOT NULL`),
   index("order_payments_order").on(table.orderId),
+  index("order_payments_pending_created").on(table.createdAt).where(sql`status = 'pending'`),
+  index("order_payments_exception_cursor").on(table.updatedAt.desc(), table.id.desc()),
+  index("order_payments_active_reconciliation")
+    .on(table.updatedAt.desc(), table.id.desc())
+    .where(sql`reconciliation_state IN ('ambiguous', 'ambiguous_create', 'pending_reconciliation', 'attach_failed')`),
 ]);
 
 export const paymentEvents = pgTable("payment_events", {
@@ -458,7 +466,9 @@ export const inventoryReservations = pgTable("inventory_reservations", {
   expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
-});
+}, (table) => [
+  index("inventory_reservations_active_created").on(table.createdAt).where(sql`status = 'active'`),
+]);
 
 export const inventoryMovements = pgTable("inventory_movements", {
   id: text("id").primaryKey(),
