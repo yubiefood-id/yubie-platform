@@ -40,6 +40,7 @@ function makeDeps() {
       this.created.push(input);
       if (this.behaviour === "throw") throw new Error("socket hang up after request was written");
       if (this.behaviour === "timeout") return { ok: false, error: { code: "timeout", message: "timed out", retryable: true, requestId: "p" } };
+      if (this.behaviour === "rate_limit") return { ok: false, error: { code: "unavailable", message: "rate limited", retryable: true, requestId: "p" } };
       return { ok: true, value: { provider: "ipaymu", providerSessionId: `sess-${input.referenceId}`, redirectUrl: `https://sandbox.example/pay/${input.referenceId}`, rawStatus: "ACTIVE", expiresAt: null } };
     },
     async getPaymentSession() { return { ok: true, value: null }; },
@@ -62,7 +63,7 @@ function activeReserved(deps) {
   return [...deps.inventory.reservations.values()].filter((row) => row.status === "active").reduce((sum, row) => sum + row.quantity, 0);
 }
 
-for (const behaviour of ["throw", "timeout"]) {
+for (const behaviour of ["throw", "timeout", "rate_limit"]) {
   test(`provider ${behaviour} after the request was sent: retryable, stock held, no second session on any retry`, async () => {
     const deps = makeDeps();
     deps.provider.behaviour = behaviour;

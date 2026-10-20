@@ -29,7 +29,7 @@ function makeDeps() {
   const clock = new FixedClock(NOW);
   const ids = new SequentialIdGenerator();
   const tx = new InMemoryTransactionManager({ orders, payments, paymentEvents, audit, outbox, idempotency, inbox, inventory });
-  return { orders, payments, paymentEvents, inventory, clock, ids, tx };
+  return { orders, payments, paymentEvents, inbox, inventory, clock, ids, tx };
 }
 
 async function seed(deps) {
@@ -92,6 +92,61 @@ test("authoritative success consumes stock once and a replay does not consume ag
   assert.equal(deps.orders.items.get("ord_1").status, "paid");
 });
 
+test("a second succeeded transaction for an already-paid order does not consume stock twice", async () => {
+  const deps = makeDeps();
+  await seed(deps);
+  const first = await applyIpaymuCallback({ ...base, authoritativeStatus: "succeeded" }, deps);
+  const second = await applyIpaymuCallback({
+    ...base,
+    trxId: "100",
+    dedupeKey: "ipaymu:co_test:100:succeeded",
+    authoritativeStatus: "succeeded",
+  }, deps);
+  assert.equal(first.result, "applied");
+  assert.equal(second.result, "applied");
+  assert.equal(deps.orders.items.get("ord_1").status, "paid");
+  assert.equal([...deps.inventory.reservations.values()].filter((row) => row.status === "consumed").length, 1);
+});
+
+test("an authoritative refund keeps the order paid and never releases consumed stock", async () => {
+  const deps = makeDeps();
+  await seed(deps);
+  await applyIpaymuCallback({ ...base, authoritativeStatus: "succeeded" }, deps);
+  const refunded = await applyIpaymuCallback({
+    ...base,
+    authoritativeStatus: "refunded",
+    dedupeKey: "ipaymu:co_test:99:refunded",
+  }, deps);
+  assert.equal(refunded.result, "applied");
+  assert.equal(deps.payments.items.get("pay_1").status, "refunded");
+  assert.equal(deps.orders.items.get("ord_1").status, "paid");
+  assert.equal(deps.inventory.lots.get("lot_1").quantityOnHand, 8);
+  assert.equal([...deps.inventory.reservations.values()].every((row) => row.status === "consumed"), true);
+});
+
+test("a crash after inbox append rolls back, and redelivery applies exactly once", async () => {
+  const deps = makeDeps();
+  await seed(deps);
+  const save = deps.payments.save.bind(deps.payments);
+  let failOnce = true;
+  deps.payments.save = async (payment) => {
+    if (payment.status === "succeeded" && failOnce) {
+      failOnce = false;
+      throw new Error("simulated crash before commit");
+    }
+    return save(payment);
+  };
+
+  const first = await applyIpaymuCallback({ ...base, authoritativeStatus: "succeeded" }, deps);
+  assert.equal(first.result, "unavailable");
+  assert.equal(deps.orders.items.get("ord_1").status, "pending_payment");
+
+  const redelivery = await applyIpaymuCallback({ ...base, authoritativeStatus: "succeeded" }, deps);
+  assert.equal(redelivery.result, "applied");
+  assert.equal(deps.orders.items.get("ord_1").status, "paid");
+  assert.equal(deps.paymentEvents.events.length, 1);
+});
+
 test("a callback without an authoritative check does not mark paid or release stock", async () => {
   const deps = makeDeps();
   await seed(deps);
@@ -106,16 +161,50 @@ test("amount mismatch does not change the order", async () => {
   await seed(deps);
   const result = await applyIpaymuCallback({ ...base, amount: 1, authoritativeStatus: "succeeded", dedupeKey: "bad-amount" }, deps);
   assert.equal(result.result, "rejected");
+  assert.equal(result.reason, "payment_amount_mismatch");
   assert.equal(deps.orders.items.get("ord_1").status, "pending_payment");
 });
 
-for (const [name, patch] of [
-  ["wrong merchant", { merchant: "other-va" }],
-  ["wrong currency", { currency: "USD" }],
-  ["wrong session", { sessionId: "sess-other" }],
-  ["transaction check for another reference", { authoritativeReferenceId: "co_other" }],
-  ["transaction check for another amount", { authoritativeAmount: 1 }],
-  ["status 6 unsettled", { authoritativeStatus: null, authoritativeReferenceId: null, authoritativeAmount: null }],
+test("payment repository failure stays unavailable so the provider can retry", async () => {
+  const result = await applyIpaymuCallback(base, {
+    clock: new FixedClock("2026-01-01T00:00:00.000Z"),
+    ids: new SequentialIdGenerator(),
+    tx: {
+      async run(_operation, work) {
+        return work({
+          orders: { async findByCheckoutRef() { return { ok: true, value: { id: "ord_1" } }; } },
+          payments: { async findByOrderId() { return { ok: false, error: { code: "unavailable" } }; } },
+        });
+      },
+    },
+  });
+  assert.deepEqual(result, { persisted: false, result: "unavailable" });
+});
+
+test("missing payment record stays unavailable so a callback is never dropped", async () => {
+  const result = await applyIpaymuCallback(base, {
+    clock: new FixedClock("2026-01-01T00:00:00.000Z"),
+    ids: new SequentialIdGenerator(),
+    tx: {
+      async run(_operation, work) {
+        return work({
+          orders: { async findByCheckoutRef() { return { ok: true, value: { id: "ord_1" } }; } },
+          payments: { async findByOrderId() { return { ok: true, value: [] }; } },
+        });
+      },
+    },
+  });
+  assert.deepEqual(result, { persisted: false, result: "unavailable" });
+});
+
+for (const [name, patch, expectedReason] of [
+  ["wrong merchant", { merchant: "other-va" }, "merchant_mismatch"],
+  ["invalid callback amount", { amount: null }, "callback_amount_invalid"],
+  ["wrong currency", { currency: "USD" }, "currency_mismatch"],
+  ["wrong session", { sessionId: "sess-other" }, "session_mismatch"],
+  ["transaction check for another reference", { authoritativeReferenceId: "co_other" }, "authoritative_mismatch"],
+  ["transaction check for another amount", { authoritativeAmount: 1 }, "authoritative_mismatch"],
+  ["status 6 unsettled", { authoritativeStatus: null, authoritativeReferenceId: null, authoritativeAmount: null }, null],
 ]) {
   test(`${name} never marks the order paid`, async () => {
     const deps = makeDeps();
@@ -123,6 +212,9 @@ for (const [name, patch] of [
     const result = await applyIpaymuCallback({ ...base, authoritativeStatus: "succeeded", dedupeKey: name, ...patch }, deps);
     assert.notEqual(deps.orders.items.get("ord_1").status, "paid");
     if (name === "status 6 unsettled") assert.equal(result.result, "pending");
-    else assert.equal(result.result, "rejected");
+    else {
+      assert.equal(result.result, "rejected");
+      assert.equal(result.reason, expectedReason);
+    }
   });
 }

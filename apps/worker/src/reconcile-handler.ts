@@ -16,13 +16,14 @@ export interface ReconcileMetrics {
   scanned: number;
   changed: number;
   errors: number;
-  lastSuccess: string;
+  lastSuccess: string | null;
   provider: string;
 }
 
 export async function reconcileSupport(
   database: Database,
   support: SupportConversationProvider,
+  correlationId = "worker_support_reconcile",
 ): Promise<ReconcileMetrics> {
   const started = Date.now();
   const provider = support.provider;
@@ -59,8 +60,23 @@ export async function reconcileSupport(
 
     await inbox.purgeExpiredRawBodies(new Date().toISOString());
     await checkpoints.saveCursor(provider, latestCursor, new Date().toISOString());
-  } catch {
+  } catch (error: unknown) {
     errors += 1;
+    const errorCode = typeof error === "object"
+      && error !== null
+      && "code" in error
+      && typeof error.code === "string"
+      && /^[A-Z0-9_]{1,32}$/.test(error.code)
+      ? error.code
+      : error instanceof Error ? error.name : "UnknownError";
+    console.error(JSON.stringify({
+      level: "error",
+      event: "support.reconcile_failed",
+      correlationId,
+      provider,
+      errorCode,
+      at: new Date().toISOString(),
+    }));
   }
 
   const metrics: ReconcileMetrics = {
@@ -69,12 +85,12 @@ export async function reconcileSupport(
     scanned,
     changed,
     errors,
-    lastSuccess: new Date().toISOString(),
+    lastSuccess: errors === 0 ? new Date().toISOString() : null,
     provider,
   };
 
   setGauge("support_reconcile_lag_seconds", Math.round(metrics.lagMs / 1000));
-  console.log(JSON.stringify({ event: "support.reconcile", ...metrics }));
+  console.log(JSON.stringify({ event: "support.reconcile", correlationId, ...metrics }));
   return metrics;
 }
 

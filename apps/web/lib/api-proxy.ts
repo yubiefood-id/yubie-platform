@@ -18,6 +18,7 @@ export async function proxyApi(request: Request, path: string): Promise<Response
   if (cookie) headers.cookie = cookie;
   if (process.env.API_PROXY_TOKEN) headers["x-api-proxy-token"] = process.env.API_PROXY_TOKEN;
   if (!headers["x-request-id"]) headers["x-request-id"] = crypto.randomUUID();
+  const correlationId = headers["x-request-id"];
 
   let upstream: Response;
   try {
@@ -30,15 +31,15 @@ export async function proxyApi(request: Request, path: string): Promise<Response
     });
   } catch (error) {
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
-    if (timedOut) return Response.json({ ok: false, code: "API_TIMEOUT" }, { status: 504 });
-    return Response.json({ ok: false, code: "API_UNREACHABLE" }, { status: 502 });
+    if (timedOut) return Response.json({ ok: false, code: "API_TIMEOUT" }, { status: 504, headers: { "x-request-id": correlationId } });
+    return Response.json({ ok: false, code: "API_UNREACHABLE" }, { status: 502, headers: { "x-request-id": correlationId } });
   }
 
   const responseHeaders = new Headers();
   const contentType = upstream.headers.get("content-type");
   if (contentType) responseHeaders.set("content-type", contentType);
   const requestId = upstream.headers.get("x-request-id");
-  if (requestId && /^[A-Za-z0-9_-]{1,64}$/.test(requestId)) responseHeaders.set("x-request-id", requestId);
+  responseHeaders.set("x-request-id", requestId && /^[A-Za-z0-9_-]{1,64}$/.test(requestId) ? requestId : correlationId);
   const setCookies = typeof upstream.headers.getSetCookie === "function" ? upstream.headers.getSetCookie() : [];
   for (const setCookie of setCookies) responseHeaders.append("set-cookie", setCookie);
   return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });

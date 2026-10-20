@@ -50,6 +50,7 @@ function buildContext() {
   const orders = new InMemoryOrderRepository();
   const payments = new InMemoryPaymentRepository();
   const paymentEvents = new InMemoryPaymentEventRepository();
+  const audit = new InMemoryAuditRepository();
   const inventory = new InMemoryInventoryRepository();
   inventory.seedLot({ id: "lot_trust", productId: "flour", sizeId: "250g", lotCode: "TRUST", quantityOnHand: 1000, expiryDate: "2027-06-30", status: "released", releasedAt: "2026-01-01T00:00:00.000Z", releaseReason: "fixture", createdAt: "2026-01-01T00:00:00.000Z" });
   return {
@@ -80,7 +81,7 @@ function buildContext() {
       orders,
       payments,
       paymentEvents,
-      audit: new InMemoryAuditRepository(),
+      audit,
       outbox: new InMemoryOutboxRepository(),
       idempotency: new InMemoryIdempotencyRepository(),
       inbox: new InMemoryWebhookInboxRepository(),
@@ -88,6 +89,7 @@ function buildContext() {
       growth: new InMemoryGrowthRepository(),
     }),
     inventoryRef: inventory,
+    auditRef: audit,
   };
 }
 
@@ -143,6 +145,35 @@ test("public routes bypass the proxy gate; the webhook uses provider auth instea
   });
 });
 
+test("every response returns a bounded correlation id and preserves a valid incoming id", async () => {
+  await withEnv({ YUBIE_ENV: "development" }, async () => {
+    setAppContext(buildContext());
+    const generated = await get("/healthz", { "x-request-id": "invalid id with spaces" });
+    assert.match(generated.headers.get("x-request-id") ?? "", /^req_[A-Za-z0-9_]+$/);
+
+    const supplied = await get("/healthz", { "x-request-id": "web_checkout_123" });
+    assert.equal(supplied.headers.get("x-request-id"), "web_checkout_123");
+
+    const rejected = await get("/v1/catalog", { "x-request-id": "request_gate_456" });
+    assert.equal(rejected.headers.get("x-request-id"), "request_gate_456");
+  });
+});
+
+test("checkout audit evidence carries the bounded API correlation id", async () => {
+  await withEnv({ YUBIE_ENV: "development" }, async () => {
+    const context = buildContext();
+    setAppContext(context);
+    stubProvider.mode = "ok";
+    const response = await post("/v1/checkouts", checkoutBody, {
+      "idempotency-key": "audit-correlation-1",
+      "x-request-id": "web_checkout_audit_123",
+    });
+    assert.equal(response.status, 201);
+    assert.ok(context.auditRef.events.length > 0);
+    assert.ok(context.auditRef.events.every((event) => event.actor === "checkout:web_checkout_audit_123"));
+  });
+});
+
 test("missing proxy token fails closed in staging; development stays open", async () => {
   await withEnv({ YUBIE_ENV: "staging" }, async () => {
     setAppContext(buildContext());
@@ -180,6 +211,7 @@ test("checkout failures map to honest client codes", async () => {
     setAppContext(context);
 
     // Definitive provider rejection -> 400 INVALID_REQUEST, no fake success.
+    stubProvider.created = 0;
     stubProvider.mode = "reject";
     const rejected = await post("/v1/checkouts", checkoutBody, { "idempotency-key": "map-1" });
     assert.equal(rejected.status, 400);

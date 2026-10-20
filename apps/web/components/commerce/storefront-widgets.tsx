@@ -70,11 +70,11 @@ export function StorefrontWidgets() {
     </div>}
 
     <div className="whatsapp-widget">
-      {whatsappOpen && <div className="whatsapp-panel" role="dialog" aria-label="Bantuan belanja via WhatsApp">
+      {whatsappOpen && <div className="whatsapp-panel" role="dialog" aria-modal="true" aria-label="Bantuan belanja via WhatsApp">
         <header><div className="whatsapp-avatar" aria-hidden="true">Y</div><div><strong>Yubie Care</strong><span>Assisted shopping</span></div><button type="button" onClick={() => setWhatsappOpen(false)} aria-label="Tutup WhatsApp">×</button></header>
         <div className="whatsapp-body"><p>Halo! Perlu bantuan memilih varian, mengecek pesanan, atau pembelian dalam jumlah besar?</p>{count > 0 && <button type="button" onClick={() => { setWhatsappOpen(false); openCart(); }}>Lihat {count} item di keranjang</button>}{whatsappHref ? <a className="whatsapp-cta" href={whatsappHref} target="_blank" rel="noreferrer">Lanjut ke WhatsApp resmi</a> : <small>Nomor WhatsApp resmi belum aktif di konfigurasi storefront. Anda tetap dapat menyelesaikan checkout online.</small>}</div>
       </div>}
-      <button type="button" className="whatsapp-trigger" onClick={toggleWhatsapp} aria-expanded={whatsappOpen} aria-label="Buka bantuan WhatsApp"><span aria-hidden="true">◔</span><b>Chat Yubie</b></button>
+      <button type="button" className="whatsapp-trigger" onClick={toggleWhatsapp} aria-expanded={whatsappOpen} aria-label="Chat Yubie — buka bantuan WhatsApp"><span aria-hidden="true">◔</span><b>Chat Yubie</b></button>
     </div>
   </>;
 }

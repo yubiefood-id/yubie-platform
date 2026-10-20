@@ -192,7 +192,7 @@ test("Postgres invariants A, B, C, and E", { skip: !databaseUrl }, async () => {
     assert.equal(unsettled.result, "pending", "status 6 stays unsettled");
     assert.equal(await orderStatus(), "pending_payment");
 
-    const paid = await applyIpaymuCallback({
+    const paidInput = {
       referenceId: ref,
       merchant: MERCHANT,
       expectedMerchant: MERCHANT,
@@ -202,23 +202,33 @@ test("Postgres invariants A, B, C, and E", { skip: !databaseUrl }, async () => {
       authoritativeAmount: amount,
       trxId: "100",
       sessionId,
-      dedupeKey: "paid",
-    }, deps);
+      dedupeKey: "paid-after-crash",
+    };
+    const crashTx = {
+      run(operation, work) {
+        return tx.run(operation, async (repos) => {
+          const save = repos.payments.save.bind(repos.payments);
+          repos.payments.save = async (payment) => {
+            if (payment.status === "succeeded") throw new Error("simulated crash before commit");
+            return save(payment);
+          };
+          return work(repos);
+        });
+      },
+    };
+    const crashed = await applyIpaymuCallback(paidInput, { ...deps, tx: crashTx });
+    assert.equal(crashed.result, "unavailable");
+    assert.equal(await orderStatus(), "pending_payment");
+    const rolledBackInbox = await database.client`SELECT count(*)::int AS n FROM webhook_inbox WHERE provider = 'ipaymu' AND delivery_id = ${paidInput.dedupeKey}`;
+    assert.equal(rolledBackInbox[0].n, 0, "the inbox append rolls back with a failed transition");
+    const rolledBackEvent = await database.client`SELECT count(*)::int AS n FROM payment_events WHERE dedupe_key = ${paidInput.dedupeKey}`;
+    assert.equal(rolledBackEvent[0].n, 0, "the payment event rolls back with a failed transition");
+
+    const paid = await applyIpaymuCallback(paidInput, deps);
     assert.equal(paid.result, "applied");
     assert.equal(await orderStatus(), "paid");
 
-    const replay = await applyIpaymuCallback({
-      referenceId: ref,
-      merchant: MERCHANT,
-      expectedMerchant: MERCHANT,
-      amount,
-      authoritativeStatus: "succeeded",
-      authoritativeReferenceId: ref,
-      authoritativeAmount: amount,
-      trxId: "100",
-      sessionId,
-      dedupeKey: "paid",
-    }, deps);
+    const replay = await applyIpaymuCallback(paidInput, deps);
     assert.equal(replay.result, "duplicate");
     const consumed = await database.client`SELECT count(*)::int AS n FROM inventory_reservations r JOIN orders o ON o.id = r.order_id WHERE o.checkout_ref = ${ref} AND r.status = 'consumed'`;
     assert.equal(consumed[0].n, 1, "replay does not consume stock again");
