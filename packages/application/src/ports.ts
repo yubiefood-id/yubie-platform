@@ -118,6 +118,9 @@ export interface PaymentSessionHandle {
   providerBusinessId?: string | null;
   /** Provider payment id once the session has captured a payment. */
   providerPaymentId?: string | null;
+  /** Merchant reference and amount as reported by the provider's own lookup. */
+  referenceId?: string | null;
+  amount?: number | null;
 }
 
 export interface CreatePaymentSessionInput {

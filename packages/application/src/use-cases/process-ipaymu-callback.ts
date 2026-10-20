@@ -7,7 +7,12 @@ export interface IpaymuCallbackInput {
   merchant: string;
   expectedMerchant: string;
   amount: number | null;
+  /** Present only when the callback names a currency. Anything other than IDR is rejected. */
+  currency?: string | null;
   authoritativeStatus: PaymentStatus | null;
+  /** Reference and amount from the same transaction-check response as the status. */
+  authoritativeReferenceId: string | null;
+  authoritativeAmount: number | null;
   trxId: string | null;
   sessionId: string | null;
   dedupeKey: string;
@@ -27,7 +32,7 @@ export async function applyIpaymuCallback(
   input: IpaymuCallbackInput,
   deps: { tx: TransactionManager; clock: Clock; ids: IdGenerator },
 ): Promise<IpaymuCallbackResult> {
-  if (input.merchant !== input.expectedMerchant || input.amount === null || !Number.isInteger(input.amount)) {
+  if (input.merchant !== input.expectedMerchant || input.amount === null || !Number.isInteger(input.amount) || (input.currency != null && input.currency !== "IDR")) {
     return { persisted: true, result: "rejected" };
   }
   try {
@@ -38,6 +43,13 @@ export async function applyIpaymuCallback(
       const payments = await repos.payments.findByOrderId(order.id);
       const payment = payments.ok ? payments.value[0] ?? null : null;
       if (!payment || payment.amount !== input.amount || payment.currency !== "IDR") {
+        return { persisted: true, result: "rejected" as const };
+      }
+      if (payment.providerSessionId && input.sessionId && payment.providerSessionId !== input.sessionId) {
+        return { persisted: true, result: "rejected" as const };
+      }
+      // A transaction-check status counts only when that response names this order and this amount.
+      if (input.authoritativeStatus && (input.authoritativeReferenceId !== order.checkoutRef || input.authoritativeAmount !== payment.amount)) {
         return { persisted: true, result: "rejected" as const };
       }
       const recorded = await repos.paymentEvents.recordOnce({

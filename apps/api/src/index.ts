@@ -386,9 +386,15 @@ export async function handleRequest(request: Request): Promise<Response> {
     const trxId = fields.trx_id == null ? null : String(fields.trx_id);
     const sessionId = stringField(fields, "sid") || null;
     let authoritativeStatus = null;
+    let authoritativeReferenceId: string | null = null;
+    let authoritativeAmount: number | null = null;
     if (trxId && /^\d+$/.test(trxId)) {
       const checked = await ctx.paymentProvider.getPaymentSession(trxId);
-      if (checked.ok && checked.value) authoritativeStatus = paymentStatusFromProviderSession(checked.value.rawStatus);
+      if (checked.ok && checked.value) {
+        authoritativeStatus = paymentStatusFromProviderSession(checked.value.rawStatus);
+        authoritativeReferenceId = checked.value.referenceId ?? null;
+        authoritativeAmount = checked.value.amount ?? null;
+      }
     }
     const applied = await applyIpaymuCallback({
       referenceId,
@@ -396,6 +402,9 @@ export async function handleRequest(request: Request): Promise<Response> {
       expectedMerchant: ctx.ipaymuVa,
       amount,
       authoritativeStatus,
+      authoritativeReferenceId,
+      authoritativeAmount,
+      currency: stringField(fields, "currency") || null,
       trxId,
       sessionId,
       dedupeKey: `ipaymu:${referenceId}:${trxId ?? "none"}:${authoritativeStatus ?? "unchecked"}`,
