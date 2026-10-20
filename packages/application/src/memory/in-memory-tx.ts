@@ -93,6 +93,15 @@ export class InMemoryTransactionManager implements TransactionManager {
   constructor(private readonly repos: TransactionalRepositories) {}
 
   async run<T>(_operation: string, work: (repos: TransactionalRepositories) => Promise<T>): Promise<T> {
-    return work(this.repos);
+    // Repositories that can snapshot are restored on failure, like a rollback.
+    const restorers = Object.values(this.repos).flatMap((repo) =>
+      repo && typeof (repo as { snapshot?: unknown }).snapshot === "function" ? [(repo as { snapshot: () => () => void }).snapshot()] : [],
+    );
+    try {
+      return await work(this.repos);
+    } catch (error) {
+      for (const restore of restorers) restore();
+      throw error;
+    }
   }
 }

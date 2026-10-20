@@ -48,7 +48,7 @@ export function CartDrawer() {
             </div>
             <strong>{formatRupiah(lineTotal)}</strong>
           </article>)}
-          <p className="drawer-note">Harga dihitung ulang oleh server saat checkout. Pembayaran online menggunakan halaman aman Xendit ketika mode pembayaran telah diaktifkan.</p>
+          <p className="drawer-note">Harga dihitung ulang oleh server saat checkout. Pembayaran online menggunakan halaman aman penyedia pembayaran ketika mode pembayaran telah diaktifkan.</p>
         </div>
         <footer className="drawer-footer">
           <div><span>Subtotal</span><strong>{formatRupiah(subtotal)}</strong></div>

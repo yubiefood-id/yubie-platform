@@ -54,8 +54,7 @@ const BASE_INPUT = {
   customerEmail: "customer@example.com",
   successReturnUrl: "https://yubie.id/checkout/success",
   cancelReturnUrl: "https://yubie.id/checkout/cancel",
-  idempotencyPrincipal: "guest",
-  rawRequestBody: "{}",
+  idempotencyPrincipal: `guest:${"0".repeat(64)}`,
 };
 
 async function createOrder(deps, input = BASE_INPUT) {
@@ -108,7 +107,7 @@ test("DEFINITIVE provider rejection cancels the draft, releases stock, and repla
   deps.inventory.seedLot({ id: "lot_pf", productId: "flour", sizeId: "250g", lotCode: "PF", quantityOnHand: 10, expiryDate: "2027-06-30", status: "released", releasedAt: "2026-01-01T00:00:00.000Z", releaseReason: "coa", createdAt: "2026-01-01T00:00:00.000Z" });
   deps.provider.createPaymentSession = async () => ({ ok: false, error: { code: "validation", message: "rejected", retryable: false, requestId: "x" } });
 
-  const input = { ...BASE_INPUT, inventoryMode: "lots", idempotencyKey: "pf-1", rawRequestBody: "{}" };
+  const input = { ...BASE_INPUT, inventoryMode: "lots", idempotencyKey: "pf-1" };
   const result = await createFirstPartyCheckout(input, deps);
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "validation");
@@ -137,7 +136,7 @@ test("AMBIGUOUS provider create keeps the draft + reservations and never blind-r
   deps.inventory.seedLot({ id: "lot_am", productId: "flour", sizeId: "250g", lotCode: "AM", quantityOnHand: 10, expiryDate: "2027-06-30", status: "released", releasedAt: "2026-01-01T00:00:00.000Z", releaseReason: "coa", createdAt: "2026-01-01T00:00:00.000Z" });
   deps.provider.createPaymentSession = async () => ({ ok: false, error: { code: "timeout", message: "socket", retryable: true, requestId: "x" } });
 
-  const input = { ...BASE_INPUT, inventoryMode: "lots", idempotencyKey: "am-1", rawRequestBody: "{}" };
+  const input = { ...BASE_INPUT, inventoryMode: "lots", idempotencyKey: "am-1" };
   const result = await createFirstPartyCheckout(input, deps);
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "timeout");
@@ -162,21 +161,18 @@ test("AMBIGUOUS provider create keeps the draft + reservations and never blind-r
 
 test("a second idempotency key for the same authenticated cart does not create another session", async () => {
   const deps = makeDeps();
-  const body = JSON.stringify({ lines: [{ productId: "flour", sizeId: "250g", quantity: 2 }] });
   const first = await createFirstPartyCheckout({
     ...BASE_INPUT,
     userId: "user_1",
-    idempotencyPrincipal: "user_1",
+    idempotencyPrincipal: "user:user_1",
     idempotencyKey: "key-a",
-    rawRequestBody: body,
   }, deps);
   assert.equal(first.ok, true);
   const second = await createFirstPartyCheckout({
     ...BASE_INPUT,
     userId: "user_1",
-    idempotencyPrincipal: "user_1",
+    idempotencyPrincipal: "user:user_1",
     idempotencyKey: "key-b",
-    rawRequestBody: body,
   }, deps);
   assert.equal(second.ok, true);
   assert.equal(second.value.redirectUrl, first.value.redirectUrl);
@@ -248,7 +244,7 @@ test("a stock-out key is not poisoned: after restock the SAME key succeeds", asy
   const deps = makeDeps();
   for (const lot of deps.inventory.lots.values()) lot.quantityOnHand = 0; // only lot_pk is sellable
   deps.inventory.seedLot({ id: "lot_pk", productId: "flour", sizeId: "250g", lotCode: "PK", quantityOnHand: 1, expiryDate: "2027-06-30", status: "released", releasedAt: "2026-01-01T00:00:00.000Z", releaseReason: "coa", createdAt: "2026-01-01T00:00:00.000Z" });
-  const input = { ...BASE_INPUT, inventoryMode: "lots", idempotencyKey: "pk-1", rawRequestBody: "{}" };
+  const input = { ...BASE_INPUT, inventoryMode: "lots", idempotencyKey: "pk-1" };
 
   const soldOut = await createFirstPartyCheckout(input, deps);
   assert.equal(soldOut.ok, false);
@@ -266,17 +262,16 @@ test("idempotent replay returns the stored first response; a different request u
   const input = {
     ...BASE_INPUT,
     idempotencyKey: "idem-1",
-    rawRequestBody: JSON.stringify({ a: 1 }),
   };
   const first = await createFirstPartyCheckout(input, deps);
   assert.equal(first.ok, true);
 
-  const replay = await createFirstPartyCheckout({ ...input, rawRequestBody: JSON.stringify({ a: 1 }) }, deps);
+  const replay = await createFirstPartyCheckout({ ...input }, deps);
   assert.equal(replay.ok, true);
   assert.deepEqual(replay.value, first.value);
   assert.equal(deps.provider.created.length, 1, "no second provider session on replay");
 
-  const conflicting = await createFirstPartyCheckout({ ...input, rawRequestBody: JSON.stringify({ a: 2 }) }, deps);
+  const conflicting = await createFirstPartyCheckout({ ...input, customerEmail: "other@example.com" }, deps);
   assert.equal(conflicting.ok, false);
   assert.equal(conflicting.error.code, "conflict");
 });

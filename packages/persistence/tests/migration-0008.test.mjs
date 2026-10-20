@@ -160,8 +160,7 @@ test("checkout saga and webhook are atomic and exactly-once on real PostgreSQL",
       customerName: "PG Test",
       successReturnUrl: "https://yubie.id/checkout/success",
       cancelReturnUrl: "https://yubie.id/checkout/cancel",
-      idempotencyPrincipal: "guest",
-      rawRequestBody: JSON.stringify({ lines: [{ productId: "flour", sizeId: "250g", quantity: 2 }] }),
+      idempotencyPrincipal: `guest:${"0".repeat(64)}`,
     };
 
     // Idempotent replay against the real unique index: same response, one session.

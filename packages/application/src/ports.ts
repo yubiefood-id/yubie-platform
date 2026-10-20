@@ -118,6 +118,9 @@ export interface PaymentSessionHandle {
   providerBusinessId?: string | null;
   /** Provider payment id once the session has captured a payment. */
   providerPaymentId?: string | null;
+  /** Merchant reference and amount as reported by the provider's own lookup. */
+  referenceId?: string | null;
+  amount?: number | null;
 }
 
 export interface CreatePaymentSessionInput {
@@ -263,6 +266,18 @@ export class InsufficientInventoryError extends Error {
   ) {
     super(`Insufficient sellable inventory for ${productId}/${sizeId}: requested ${requested}, sellable ${available}`);
     this.name = "InsufficientInventoryError";
+  }
+}
+
+/**
+ * Thrown by PaymentRepository.save when another unresolved intent already
+ * holds the same principal and request hash. The enclosing transaction is
+ * rolled back.
+ */
+export class DuplicatePaymentIntentError extends Error {
+  constructor() {
+    super("An unresolved payment intent already exists for this principal and request");
+    this.name = "DuplicatePaymentIntentError";
   }
 }
 

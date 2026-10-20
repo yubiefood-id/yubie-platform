@@ -41,10 +41,41 @@ export function nextAttemptKey(previous: string | null, outcome: "ambiguous" | "
 }
 
 /**
- * Gateway and idempotency responses are not proof the provider create finished.
- * 408/409/502/503/504 keep the attempt key. Other HTTP statuses close it.
+ * Gateway, rate-limit and idempotency responses are not proof the provider
+ * create finished. 408/409/429/502/503/504 keep the attempt key. Other HTTP
+ * statuses close it.
  */
 export function attemptOutcomeForHttpStatus(status: number): "ambiguous" | "definitive" {
-  if (status === 408 || status === 409 || status === 502 || status === 503 || status === 504) return "ambiguous";
+  if (status === 408 || status === 409 || status === 429 || status === 502 || status === 503 || status === 504) return "ambiguous";
   return "definitive";
+}
+
+export interface HeldAttempt {
+  key: string;
+  fingerprint: string;
+}
+
+/**
+ * A held key belongs to the cart it was minted for. Reusing it for a changed
+ * cart would only produce an idempotency conflict, so a changed cart starts a
+ * new attempt; the server still dedupes by principal and cart.
+ */
+export function attemptKeyForCart(held: HeldAttempt | null, fingerprint: string, freshKey: string): HeldAttempt {
+  if (held && held.fingerprint === fingerprint) return held;
+  return { key: freshKey, fingerprint };
+}
+
+export type CheckoutUiOutcome = "redirect" | "preview" | "pending" | "sold_out" | "invalid" | "failed";
+
+const PENDING_CODES = new Set(["PENDING_RECONCILIATION", "PROVIDER_UNAVAILABLE", "API_TIMEOUT", "IDEMPOTENCY_KEY_REUSED"]);
+
+export function classifyCheckoutResponse(status: number, payload: { code?: unknown; data?: { mode?: unknown; redirectUrl?: unknown; status?: unknown } } | null): CheckoutUiOutcome {
+  const data = payload?.data;
+  if (status === 201 && data?.mode === "live" && typeof data.redirectUrl === "string") return "redirect";
+  if (status >= 200 && status < 300 && data?.status === "preview") return "preview";
+  const code = typeof payload?.code === "string" ? payload.code : null;
+  if (code === "INSUFFICIENT_INVENTORY" || code === "UNAVAILABLE_LINE") return "sold_out";
+  if ((code && PENDING_CODES.has(code)) || status === 408 || status === 429 || status === 502 || status === 503 || status === 504) return "pending";
+  if (status === 400) return "invalid";
+  return "failed";
 }

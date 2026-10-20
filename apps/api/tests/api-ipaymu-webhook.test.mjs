@@ -38,7 +38,7 @@ const provider = {
   },
   async getPaymentSession(id) {
     this.gets += 1;
-    return { ok: true, value: { provider: "ipaymu", providerSessionId: id, redirectUrl: null, rawStatus: this.rawStatus, expiresAt: null } };
+    return { ok: true, value: { provider: "ipaymu", providerSessionId: "sess-1", redirectUrl: null, rawStatus: this.rawStatus, expiresAt: null, referenceId: "co_ipaymu", amount: 35000, providerPaymentId: id } };
   },
   async cancelPaymentSession() {
     return { ok: true, value: { accepted: false } };

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { randomBytes } from "node:crypto";
 import { handleRequest, setAppContext } from "../dist/index.js";
 import {
   AllowlistAttributionPolicy,
@@ -92,13 +93,18 @@ const get = (path, headers = {}) => handleRequest(new Request(`https://api.yubie
 
 let idempotencyCounter = 0;
 
+/** A fresh guest checkout cookie: each simulated shopper has their own. */
+function guestCookie() {
+  return `yubie_checkout=${randomBytes(32).toString("base64url")}`;
+}
+
 async function createCheckout(extraHeaders = {}) {
   idempotencyCounter += 1;
   const response = await post("/v1/checkouts", {
     lines: [{ productId: "flour", sizeId: "250g", quantity: 2 }],
     customerEmail: "guest@example.com",
     delivery: { phone: "+62812345678", address: "Jl. Test No. 1", city: "Bogor" },
-  }, { "idempotency-key": `api-test-${idempotencyCounter}`, ...extraHeaders });
+  }, { "idempotency-key": `api-test-${idempotencyCounter}`, cookie: guestCookie(), ...extraHeaders });
   assert.equal(response.status, 201);
   return (await response.json()).data;
 }
@@ -137,15 +143,46 @@ test("idempotent checkout replay returns the first response without a second pro
     lines: [{ productId: "flour", sizeId: "250g", quantity: 1 }],
     customerEmail: "replay@example.com",
   };
-  const first = await post("/v1/checkouts", body, { "idempotency-key": key });
+  const cookie = guestCookie();
+  const first = await post("/v1/checkouts", body, { "idempotency-key": key, cookie });
   const before = stubProvider.created;
-  const replay = await post("/v1/checkouts", body, { "idempotency-key": key });
+  const replay = await post("/v1/checkouts", body, { "idempotency-key": key, cookie });
   assert.equal(replay.status, 201);
   assert.deepEqual((await replay.json()).data, (await first.json()).data);
   assert.equal(stubProvider.created, before, "no second Xendit session on replay");
 
-  const conflict = await post("/v1/checkouts", { ...body, customerEmail: "other@example.com" }, { "idempotency-key": key });
+  const conflict = await post("/v1/checkouts", { ...body, customerEmail: "other@example.com" }, { "idempotency-key": key, cookie });
   assert.equal(conflict.status, 409);
+});
+
+test("a guest without a checkout cookie gets an opaque HttpOnly one, and resubmitting with it reuses the intent", async () => {
+  const body = { lines: [{ productId: "flour", sizeId: "250g", quantity: 3 }], customerEmail: "cookie@example.com" };
+  const first = await post("/v1/checkouts", body, { "idempotency-key": "api-cookie-1" });
+  assert.equal(first.status, 201);
+  const setCookie = first.headers.get("set-cookie") ?? "";
+  const token = /yubie_checkout=([A-Za-z0-9_-]{43});/.exec(setCookie)?.[1];
+  assert.ok(token, "cookie value is 32 random bytes, base64url");
+  assert.match(setCookie, /HttpOnly/);
+  assert.match(setCookie, /SameSite=Lax/);
+  assert.match(setCookie, /Max-Age=86400/);
+  assert.match(setCookie, /Secure/);
+
+  const before = stubProvider.created;
+  const second = await post("/v1/checkouts", body, { "idempotency-key": "api-cookie-2", cookie: `yubie_checkout=${token}` });
+  assert.equal(second.status, 201);
+  assert.equal(second.headers.get("set-cookie"), null, "an existing valid cookie is not reissued");
+  assert.equal((await second.json()).data.checkoutToken, (await first.json()).data.checkoutToken);
+  assert.equal(stubProvider.created, before, "no second provider session for the same guest and cart");
+});
+
+test("the checkout session endpoint issues the guest cookie before the first submit", async () => {
+  const issued = await get("/v1/checkouts/session");
+  assert.equal(issued.status, 200);
+  assert.match(issued.headers.get("set-cookie") ?? "", /^yubie_checkout=[A-Za-z0-9_-]{43}; Path=\/; HttpOnly; SameSite=Lax; Max-Age=86400; Secure$/);
+  const kept = await get("/v1/checkouts/session", { cookie: guestCookie() });
+  assert.equal(kept.headers.get("set-cookie"), null);
+  const malformed = await get("/v1/checkouts/session", { cookie: "yubie_checkout=not-a-token" });
+  assert.match(malformed.headers.get("set-cookie") ?? "", /^yubie_checkout=/);
 });
 
 test("checkout status is token-scoped, PII-free, and confirmed only server-side", async () => {

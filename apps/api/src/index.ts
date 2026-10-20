@@ -1,5 +1,8 @@
+import { randomBytes } from "node:crypto";
 import { PreviewCommerceProvider } from "@yubie/commerce";
 import {
+  GUEST_CHECKOUT_TOKEN_PATTERN,
+  checkoutPrincipalKey,
   createFirstPartyCheckout,
   getAccountOrder,
   getCheckoutStatus,
@@ -299,6 +302,11 @@ export async function handleRequest(request: Request): Promise<Response> {
       // Idempotency-Key makes duplicate submits replay the first response.
       const sessionUser = await resolveSession(readSessionToken(request), { sessions: ctx.authSessions, users: ctx.users, tokens: ctx.tokens, clock: ctx.clock });
       const appOrigin = ctx.appOrigin ?? url.origin;
+      const guest = guestCheckoutToken(request);
+      const guestCookie = sessionUser.value || guest.existing ? null : checkoutCookie(guest.token, appOrigin.startsWith("https://"));
+      const principal = checkoutPrincipalKey({ userId: sessionUser.value?.id ?? null, guestToken: guest.token });
+      if (!principal) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+      const cookieHeaders: Record<string, string> = guestCookie ? { "set-cookie": guestCookie } : {};
       const result = await createFirstPartyCheckout({
         lines: parsed.data.lines,
         customerEmail: parsed.data.customerEmail,
@@ -311,17 +319,16 @@ export async function handleRequest(request: Request): Promise<Response> {
         provider: ctx.paymentMode === "ipaymu" ? "ipaymu" : "xendit",
         inventoryMode: ctx.inventoryMode,
         idempotencyKey: request.headers.get("idempotency-key"),
-        idempotencyPrincipal: sessionUser.value?.id ?? "guest",
-        rawRequestBody: rawBody,
+        idempotencyPrincipal: principal,
         ...(parsed.data.promoCode ? { promoCode: parsed.data.promoCode } : {}),
       }, { tx: ctx.tx, provider: ctx.paymentProvider, clock: ctx.clock, ids: ctx.ids });
       if (!result.ok) {
         logEvent("api.checkout_failed", { requestId, errorCode: result.error.code });
         const mapping = checkoutError(result.error.code);
-        return json({ ok: false, code: mapping.code }, { status: mapping.status });
+        return json({ ok: false, code: mapping.code }, { status: mapping.status, headers: cookieHeaders });
       }
       logEvent("api.checkout_created", { requestId, checkoutRef: result.value.checkoutRef, totalAmount: result.value.totalAmount, currency: result.value.currency, mode: result.value.mode });
-      return json({ ok: true, data: result.value }, { status: 201 });
+      return json({ ok: true, data: result.value }, { status: 201, headers: cookieHeaders });
     }
     const lines = parsed.data.lines.map((line) => {
       const product = catalog.find((item) => item.id === line.productId);
@@ -333,6 +340,14 @@ export async function handleRequest(request: Request): Promise<Response> {
     const origin = url.origin;
     const session = await commerce.createCheckout({ lines: lines.filter((line) => line !== null), customerEmail: parsed.data.customerEmail, successUrl: `${origin}/checkout/success`, cancelUrl: `${origin}/cart` });
     return json({ ok: true, data: session }, { status: 202 });
+  }
+
+  if (request.method === "GET" && url.pathname === "/v1/checkouts/session") {
+    // Issues the guest checkout cookie before the first submit, so a lost
+    // first response cannot leave a retry under a different principal.
+    const guest = guestCheckoutToken(request);
+    const headers: Record<string, string> = guest.existing ? {} : { "set-cookie": checkoutCookie(guest.token, (ctx.appOrigin ?? url.origin).startsWith("https://")) };
+    return json({ ok: true, data: { ready: true } }, { headers: { ...headers, "cache-control": "no-store" } });
   }
 
   const checkoutStatusMatch = url.pathname.match(/^\/v1\/checkouts\/([^/]+)$/);
@@ -371,9 +386,15 @@ export async function handleRequest(request: Request): Promise<Response> {
     const trxId = fields.trx_id == null ? null : String(fields.trx_id);
     const sessionId = stringField(fields, "sid") || null;
     let authoritativeStatus = null;
+    let authoritativeReferenceId: string | null = null;
+    let authoritativeAmount: number | null = null;
     if (trxId && /^\d+$/.test(trxId)) {
       const checked = await ctx.paymentProvider.getPaymentSession(trxId);
-      if (checked.ok && checked.value) authoritativeStatus = paymentStatusFromProviderSession(checked.value.rawStatus);
+      if (checked.ok && checked.value) {
+        authoritativeStatus = paymentStatusFromProviderSession(checked.value.rawStatus);
+        authoritativeReferenceId = checked.value.referenceId ?? null;
+        authoritativeAmount = checked.value.amount ?? null;
+      }
     }
     const applied = await applyIpaymuCallback({
       referenceId,
@@ -381,6 +402,9 @@ export async function handleRequest(request: Request): Promise<Response> {
       expectedMerchant: ctx.ipaymuVa,
       amount,
       authoritativeStatus,
+      authoritativeReferenceId,
+      authoritativeAmount,
+      currency: stringField(fields, "currency") || null,
       trxId,
       sessionId,
       dedupeKey: `ipaymu:${referenceId}:${trxId ?? "none"}:${authoritativeStatus ?? "unchecked"}`,
@@ -496,6 +520,20 @@ function readSessionToken(request: Request): string | null {
 function sessionCookie(token: string, expiresAt: string, secure: boolean): string {
   const maxAge = Math.max(0, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000));
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
+}
+
+const CHECKOUT_COOKIE = "yubie_checkout";
+const CHECKOUT_COOKIE_MAX_AGE_SECONDS = 24 * 60 * 60;
+
+function guestCheckoutToken(request: Request): { token: string; existing: boolean } {
+  const match = request.headers.get("cookie")?.match(new RegExp(`(?:^|;\\s*)${CHECKOUT_COOKIE}=([^;]+)`));
+  const value = match?.[1];
+  if (value && GUEST_CHECKOUT_TOKEN_PATTERN.test(value)) return { token: value, existing: true };
+  return { token: randomBytes(32).toString("base64url"), existing: false };
+}
+
+function checkoutCookie(token: string, secure: boolean): string {
+  return `${CHECKOUT_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${CHECKOUT_COOKIE_MAX_AGE_SECONDS}${secure ? "; Secure" : ""}`;
 }
 
 function clearSessionCookie(secure: boolean): string {

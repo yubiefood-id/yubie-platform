@@ -146,6 +146,7 @@ export class IpaymuPaymentProvider implements PaymentProviderPort {
     const data = asRecord(parsed?.Data);
     const status = typeof data?.Status === "number" ? data.Status : Number.NaN;
     const sessionId = typeof data?.SessionId === "string" ? data.SessionId : providerSessionId;
+    const amount = typeof data?.Amount === "number" ? data.Amount : typeof data?.Amount === "string" && /^\d+$/.test(data.Amount) ? Number(data.Amount) : null;
     return ok({
       provider: "ipaymu",
       providerSessionId: sessionId,
@@ -153,6 +154,8 @@ export class IpaymuPaymentProvider implements PaymentProviderPort {
       rawStatus: mapIpaymuStatus(status),
       expiresAt: null,
       providerPaymentId: providerSessionId,
+      referenceId: typeof data?.ReferenceId === "string" ? data.ReferenceId : null,
+      amount: amount !== null && Number.isSafeInteger(amount) ? amount : null,
     });
   }
 

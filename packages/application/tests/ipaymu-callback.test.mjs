@@ -75,6 +75,8 @@ const base = {
   trxId: "99",
   sessionId: "sess-1",
   dedupeKey: "ipaymu:co_test:99:succeeded",
+  authoritativeReferenceId: "co_test",
+  authoritativeAmount: 35000,
 };
 
 test("authoritative success consumes stock once and a replay does not consume again", async () => {
@@ -106,3 +108,21 @@ test("amount mismatch does not change the order", async () => {
   assert.equal(result.result, "rejected");
   assert.equal(deps.orders.items.get("ord_1").status, "pending_payment");
 });
+
+for (const [name, patch] of [
+  ["wrong merchant", { merchant: "other-va" }],
+  ["wrong currency", { currency: "USD" }],
+  ["wrong session", { sessionId: "sess-other" }],
+  ["transaction check for another reference", { authoritativeReferenceId: "co_other" }],
+  ["transaction check for another amount", { authoritativeAmount: 1 }],
+  ["status 6 unsettled", { authoritativeStatus: null, authoritativeReferenceId: null, authoritativeAmount: null }],
+]) {
+  test(`${name} never marks the order paid`, async () => {
+    const deps = makeDeps();
+    await seed(deps);
+    const result = await applyIpaymuCallback({ ...base, authoritativeStatus: "succeeded", dedupeKey: name, ...patch }, deps);
+    assert.notEqual(deps.orders.items.get("ord_1").status, "paid");
+    if (name === "status 6 unsettled") assert.equal(result.result, "pending");
+    else assert.equal(result.result, "rejected");
+  });
+}

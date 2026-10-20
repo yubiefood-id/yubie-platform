@@ -8,6 +8,7 @@ import type {
   SessionRepository,
   UserRepository,
 } from "../ports.js";
+import { DuplicatePaymentIntentError } from "../ports.js";
 
 export class InMemoryOrderRepository implements OrderRepository {
   private readonly items = new Map<string, OrderRecord>();
@@ -35,6 +36,14 @@ export class InMemoryOrderRepository implements OrderRepository {
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
         .slice(0, limit),
     );
+  }
+
+  snapshot(): () => void {
+    const saved = new Map(this.items);
+    return () => {
+      this.items.clear();
+      for (const [id, item] of saved) this.items.set(id, item);
+    };
   }
 
   async save(order: OrderRecord) {
@@ -82,7 +91,21 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     );
   }
 
+  snapshot(): () => void {
+    const saved = new Map(this.items);
+    return () => {
+      this.items.clear();
+      for (const [id, item] of saved) this.items.set(id, item);
+    };
+  }
+
   async save(payment: PaymentRecord) {
+    if (payment.status === "pending" && payment.principalKey && payment.requestHash) {
+      const clash = [...this.items.values()].some((item) =>
+        item.id !== payment.id && item.status === "pending" && item.principalKey === payment.principalKey && item.requestHash === payment.requestHash,
+      );
+      if (clash) throw new DuplicatePaymentIntentError();
+    }
     this.items.set(payment.id, payment);
     return ok(undefined);
   }

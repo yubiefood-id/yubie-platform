@@ -87,8 +87,7 @@ test("migration 0009 creates the inventory core; checkout reserves FEFO atomical
       successReturnUrl: "https://yubie.id/checkout/success",
       cancelReturnUrl: "https://yubie.id/checkout/cancel",
       inventoryMode: "lots",
-      idempotencyPrincipal: "guest",
-      rawRequestBody: "{}",
+      idempotencyPrincipal: `guest:${"0".repeat(64)}`,
     };
     const deps = { tx, provider, clock, ids };
 

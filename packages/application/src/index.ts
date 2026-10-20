@@ -5,6 +5,7 @@ export * from "./use-cases/resolve-marketplace-redirect.js";
 export * from "./use-cases/resolve-whatsapp-redirect.js";
 export * from "./use-cases/check-listing-health.js";
 export * from "./use-cases/first-party-checkout.js";
+export * from "./use-cases/checkout-intent.js";
 export * from "./use-cases/process-payment-webhook.js";
 export * from "./use-cases/process-ipaymu-callback.js";
 export * from "./policies/erp-authority.js";
