@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { createHash } from "node:crypto";
 import {
   MAX_CART_LINE_QUANTITY,
   MAX_CHECKOUT_TOTAL_IDR,
@@ -29,8 +28,9 @@ import type {
   TransactionManager,
   TransactionalRepositories,
 } from "../ports.js";
-import { InsufficientInventoryError } from "../ports.js";
+import { DuplicatePaymentIntentError, InsufficientInventoryError } from "../ports.js";
 import { erpStockWriteDecision } from "../policies/erp-authority.js";
+import { checkoutIntentHash, checkoutRequestHash, isCheckoutPrincipalKey } from "./checkout-intent.js";
 import { applyPaymentStatus } from "./process-payment-webhook.js";
 
 export interface CheckoutLineInput {
@@ -57,10 +57,8 @@ export interface CreateFirstPartyCheckoutInput {
   inventoryMode?: "none" | "lots";
   /** Idempotency-Key from the client; absent for non-idempotent callers. */
   idempotencyKey?: string | null;
-  /** Principal scoping the idempotency key (session user or guest marker). */
+  /** `user:<id>` or `guest:<sha256 of checkout cookie>`; see checkoutPrincipalKey. */
   idempotencyPrincipal: string;
-  /** Canonical request for hash comparison on key replay. */
-  rawRequestBody: string;
   /** Public promotion identifier. The server is always the pricing authority. */
   promoCode?: string;
   /** Adapter selected by commerce config. Existing callers stay on xendit. */
@@ -130,8 +128,43 @@ function checkoutPublicToken(): string {
   return randomBytes(16).toString("hex");
 }
 
-function requestHashOf(body: string): string {
-  return createHash("sha256").update(body).digest("hex");
+const OPEN_INTENT_PENDING_MESSAGE = "An unresolved payment attempt already exists for this cart. A second payable session will not be created.";
+
+type CheckoutResult = { ok: true; value: CreateFirstPartyCheckoutResult } | { ok: false; error: AppError };
+
+function outcomeResult(outcome: StoredCheckoutOutcome): CheckoutResult {
+  if (outcome.kind === "success") return ok(outcome.result);
+  if (outcome.kind === "pending") {
+    return err({ code: "pending_reconciliation", message: outcome.message, retryable: true, requestId: "checkout" });
+  }
+  if (outcome.kind === "failure") {
+    const code = outcome.error.code === "validation" ? "validation" : "unavailable";
+    return err({ code, message: outcome.error.message, retryable: outcome.error.retryable, requestId: "checkout" });
+  }
+  return err({ code: "conflict", message: "Stored idempotent response unreadable; use a new Idempotency-Key.", retryable: false, requestId: "checkout" });
+}
+
+/** The unresolved intent for this principal and cart, as a replayable outcome. */
+async function openIntentOutcome(repos: TransactionalRepositories, principalKey: string, intentHash: string): Promise<StoredCheckoutOutcome | null> {
+  const payment = await repos.payments.findUnresolvedByPrincipalHash(principalKey, intentHash);
+  if (!payment.ok || !payment.value) return null;
+  const order = await repos.orders.findById(payment.value.orderId);
+  if (!order.ok || !order.value) return null;
+  if (!payment.value.redirectUrl) return { kind: "pending", message: OPEN_INTENT_PENDING_MESSAGE };
+  return {
+    kind: "success",
+    result: {
+      mode: "live",
+      checkoutToken: order.value.checkoutPublicToken,
+      checkoutRef: order.value.checkoutRef,
+      redirectUrl: payment.value.redirectUrl,
+      expiresAt: payment.value.expiresAt,
+      subtotalAmount: order.value.totals.subtotalAmount,
+      shippingAmount: order.value.totals.shippingAmount,
+      totalAmount: order.value.totalAmount,
+      currency: "IDR",
+    },
+  };
 }
 
 /**
@@ -187,6 +220,9 @@ export async function createFirstPartyCheckout(
 ): Promise<{ ok: true; value: CreateFirstPartyCheckoutResult } | { ok: false; error: AppError }> {
   if (erpStockWriteDecision().allowed) {
     return err({ code: "unsupported", message: "Checkout does not write ERP stock", retryable: false, requestId: "checkout" });
+  }
+  if (!isCheckoutPrincipalKey(input.idempotencyPrincipal)) {
+    return err({ code: "validation", message: "Checkout requires a user or guest checkout principal.", retryable: false, requestId: "checkout" });
   }
   const priced: OrderLineRecord[] = [];
   for (const line of input.lines) {
@@ -244,53 +280,15 @@ export async function createFirstPartyCheckout(
       return err({ code: "pending_reconciliation", message: "This checkout attempt is still unresolved. Retry the same attempt; a second payable session will not be created.", retryable: true, requestId: "checkout" });
     }
     try {
-      const parsed = JSON.parse(stored) as StoredCheckoutOutcome;
-      if (parsed && parsed.kind === "success") return ok(parsed.result);
-      if (parsed && parsed.kind === "pending") {
-        return err({ code: "pending_reconciliation", message: parsed.message, retryable: true, requestId: "checkout" });
-      }
-      if (parsed && parsed.kind === "failure") {
-        const code = parsed.error.code === "validation" ? "validation" : "unavailable";
-        return err({ code, message: parsed.error.message, retryable: parsed.error.retryable, requestId: "checkout" });
-      }
+      return outcomeResult(JSON.parse(stored) as StoredCheckoutOutcome);
     } catch {
-      // fall through to the unreadable-response conflict
+      return err({ code: "conflict", message: "Stored idempotent response unreadable; use a new Idempotency-Key.", retryable: false, requestId: "checkout" });
     }
-    return err({ code: "conflict", message: "Stored idempotent response unreadable; use a new Idempotency-Key.", retryable: false, requestId: "checkout" });
   };
 
   const now = deps.clock.now();
-  const requestHash = requestHashOf(input.rawRequestBody);
-  if (input.userId) {
-    const open = await deps.tx.run("checkout.find_open_intent", async (repos) => {
-      const payment = await repos.payments.findUnresolvedByPrincipalHash(input.userId as string, requestHash);
-      if (!payment.ok || !payment.value) return null;
-      const order = await repos.orders.findById(payment.value.orderId);
-      if (!order.ok || !order.value) return null;
-      return { payment: payment.value, order: order.value };
-    });
-    if (open?.payment.redirectUrl) {
-      return ok({
-        mode: "live",
-        checkoutToken: open.order.checkoutPublicToken,
-        checkoutRef: open.order.checkoutRef,
-        redirectUrl: open.payment.redirectUrl,
-        expiresAt: open.payment.expiresAt,
-        subtotalAmount: open.order.totals.subtotalAmount,
-        shippingAmount: open.order.totals.shippingAmount,
-        totalAmount: open.order.totalAmount,
-        currency: "IDR",
-      });
-    }
-    if (open) {
-      return err({
-        code: "pending_reconciliation",
-        message: "An unresolved payment attempt already exists for this cart. A second payable session will not be created.",
-        retryable: true,
-        requestId: "checkout",
-      });
-    }
-  }
+  const intentHash = checkoutIntentHash({ lines: priced, promoCode: input.promoCode, delivery: input.delivery ?? null });
+  const requestHash = checkoutRequestHash(intentHash, input.customerEmail, input.customerName);
 
   const orderId = `ord_${deps.ids.nextId()}`;
   const checkoutRef = `co_${deps.ids.nextId()}_${Date.now().toString(36)}`;
@@ -319,8 +317,8 @@ export async function createFirstPartyCheckout(
     orderId,
     provider: input.provider === "ipaymu" ? "ipaymu" : "xendit",
     providerSessionId: null,
-    principalKey: input.userId ?? null,
-    requestHash,
+    principalKey: input.idempotencyPrincipal,
+    requestHash: intentHash,
     redirectUrl: null,
     currency: "IDR",
     amount: totals.grandTotalAmount,
@@ -342,6 +340,11 @@ export async function createFirstPartyCheckout(
         if (!claim.ok) return claim;
         if (claim.value.status === "duplicate") return replayStored(claim.value.responseJson);
         claimed = true;
+      }
+      const open = await openIntentOutcome(repos, input.idempotencyPrincipal, intentHash);
+      if (open) {
+        if (idempotencyKey) await attachOutcome(repos, open);
+        return outcomeResult(open);
       }
       await repos.orders.save(draftOrder);
       await repos.payments.save(paymentIntent);
@@ -374,6 +377,15 @@ export async function createFirstPartyCheckout(
         await deps.tx.run("checkout.idempotency.release", async (repos) => repos.idempotency.releaseClaim(claimInput)).catch(() => undefined);
       }
       return err({ code: "out_of_stock", message: `Insufficient sellable inventory for ${error.productId}/${error.sizeId}.`, retryable: false, requestId: "checkout" });
+    }
+    if (error instanceof DuplicatePaymentIntentError) {
+      // A concurrent submit for the same principal and cart committed its
+      // intent first. Answer with that intent; never create a second order.
+      if (claimed && idempotencyKey) {
+        await deps.tx.run("checkout.idempotency.release", async (repos) => repos.idempotency.releaseClaim(claimInput)).catch(() => undefined);
+      }
+      const winner = await deps.tx.run("checkout.find_open_intent", async (repos) => openIntentOutcome(repos, input.idempotencyPrincipal, intentHash));
+      return outcomeResult(winner ?? { kind: "pending", message: OPEN_INTENT_PENDING_MESSAGE });
     }
     throw error;
   }

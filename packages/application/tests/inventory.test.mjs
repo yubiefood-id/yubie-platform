@@ -61,8 +61,7 @@ const LOTS_INPUT = {
   successReturnUrl: "https://yubie.id/checkout/success",
   cancelReturnUrl: "https://yubie.id/checkout/cancel",
   inventoryMode: "lots",
-  idempotencyPrincipal: "guest",
-  rawRequestBody: "{}",
+  idempotencyPrincipal: `guest:${"0".repeat(64)}`,
 };
 
 test("lot sellability and FEFO ordering", async () => {

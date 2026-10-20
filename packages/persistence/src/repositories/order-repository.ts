@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, isNotNull, lt } from "drizzle-orm";
 import { ok, type UseCaseResult } from "@yubie/domain";
 import type { OrderLineRecord, OrderRecord, OrderShipping, PaymentEventRecord, PaymentRecord } from "@yubie/domain";
+import { DuplicatePaymentIntentError } from "@yubie/application";
 import type { OrderRepository, PaymentEventAppendOutcome, PaymentEventRepository, PaymentRepository } from "@yubie/application";
 import type { Database } from "../client.js";
 import { firstPartyOrders, orderPayments, paymentEvents } from "../schema/index.js";
@@ -124,6 +125,16 @@ export class PostgresPaymentRepository implements PaymentRepository {
   }
 
   async save(payment: PaymentRecord) {
+    try {
+      await this.insertOrUpdate(payment);
+    } catch (error) {
+      if (isUnresolvedIntentViolation(error)) throw new DuplicatePaymentIntentError();
+      throw error;
+    }
+    return ok(undefined);
+  }
+
+  private async insertOrUpdate(payment: PaymentRecord) {
     await this.database.db.insert(orderPayments).values({
       id: payment.id,
       orderId: payment.orderId,
@@ -154,8 +165,15 @@ export class PostgresPaymentRepository implements PaymentRepository {
         updatedAt: payment.updatedAt,
       },
     });
-    return ok(undefined);
   }
+}
+
+function isUnresolvedIntentViolation(error: unknown): boolean {
+  for (let current: unknown = error; current && typeof current === "object"; current = (current as { cause?: unknown }).cause) {
+    const candidate = current as { code?: unknown; constraint_name?: unknown };
+    if (candidate.code === "23505" && candidate.constraint_name === "order_payments_unresolved_request") return true;
+  }
+  return false;
 }
 
 export class PostgresPaymentEventRepository implements PaymentEventRepository {

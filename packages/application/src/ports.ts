@@ -267,6 +267,18 @@ export class InsufficientInventoryError extends Error {
 }
 
 /**
+ * Thrown by PaymentRepository.save when another unresolved intent already
+ * holds the same principal and request hash. The enclosing transaction is
+ * rolled back.
+ */
+export class DuplicatePaymentIntentError extends Error {
+  constructor() {
+    super("An unresolved payment intent already exists for this principal and request");
+    this.name = "DuplicatePaymentIntentError";
+  }
+}
+
+/**
  * Transactional inventory core. reserveForOrder allocates FEFO across
  * released, unexpired lots and MUST run inside the checkout transaction: a
  * failure (insufficient sellable stock) rolls the whole checkout back. Lots

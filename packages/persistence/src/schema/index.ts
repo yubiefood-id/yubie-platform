@@ -411,7 +411,7 @@ export const orderPayments = pgTable("order_payments", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
 }, (table) => [
   uniqueIndex("order_payments_provider_session").on(table.provider, table.providerSessionId).where(sql`provider_session_id IS NOT NULL`),
-  uniqueIndex("order_payments_unresolved_request").on(table.principalKey, table.requestHash).where(sql`status = 'pending' AND principal_key IS NOT NULL AND request_hash IS NOT NULL AND (reconciliation_state IS NULL OR reconciliation_state IN ('ambiguous_create', 'attach_failed', 'pending_reconciliation', 'creating'))`),
+  uniqueIndex("order_payments_unresolved_request").on(table.principalKey, table.requestHash).where(sql`status = 'pending' AND principal_key IS NOT NULL AND request_hash IS NOT NULL`),
   index("order_payments_order").on(table.orderId),
 ]);
 
