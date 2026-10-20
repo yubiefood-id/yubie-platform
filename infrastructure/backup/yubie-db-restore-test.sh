@@ -24,6 +24,10 @@ if [ -z "$DUMP" ]; then
   echo "{\"event\":\"restore_test.failed\",\"reason\":\"no dump found in $YUBIE_BACKUP_DIR\"}" >&2
   exit 1
 fi
+if [ ! -f "$DUMP.sha256" ] || ! sha256sum -c "$DUMP.sha256" >/dev/null 2>&1; then
+  echo "{\"event\":\"restore_test.failed\",\"reason\":\"checksum missing or mismatched\",\"dump\":\"$DUMP\"}" >&2
+  exit 1
+fi
 
 # Path-suffix swap works for standard postgres://user:pass@host:port/db URLs.
 ADMIN_URL="${DATABASE_URL%/*}/postgres"

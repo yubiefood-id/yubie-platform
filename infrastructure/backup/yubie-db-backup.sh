@@ -27,9 +27,16 @@ mkdir -p "$YUBIE_BACKUP_DIR"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 DUMP="$YUBIE_BACKUP_DIR/yubie-$STAMP.dump"
 
+PARTIAL="$DUMP.partial"
+trap 'rm -f "$PARTIAL"; echo "{\"event\":\"backup.failed\",\"at\":\"$STAMP\"}" >&2' ERR
+
 echo "{\"event\":\"backup.started\",\"at\":\"$STAMP\"}"
-pg_dump --format=custom --file="$DUMP" "$DATABASE_URL"
+# A failed dump must never leave a file the restore drill could pick as newest.
+pg_dump --format=custom --file="$PARTIAL" "$DATABASE_URL"
+pg_restore --list "$PARTIAL" > /dev/null
+mv "$PARTIAL" "$DUMP"
 sha256sum "$DUMP" > "$DUMP.sha256"
+trap - ERR
 echo "{\"event\":\"backup.completed\",\"file\":\"$DUMP\",\"bytes\":\"$(stat -c%s "$DUMP")\"}"
 
 # Retention: keep the newest $RETENTION dump+checksum pairs.
