@@ -105,6 +105,28 @@ test("two guests with the same cart get separate intents", async () => {
   assert.equal(deps.provider.created.length, 2);
 });
 
+test("a guest intent and a later authenticated intent stay separate", async () => {
+  const deps = makeDeps();
+  const guest = await createFirstPartyCheckout({
+    ...CART,
+    idempotencyPrincipal: checkoutPrincipalKey({ guestToken: GUEST_A }),
+    idempotencyKey: "guest-before-login",
+  }, deps);
+  const authenticated = await createFirstPartyCheckout({
+    ...CART,
+    idempotencyPrincipal: "user:u_1",
+    idempotencyKey: "user-after-login",
+  }, deps);
+  assert.equal(guest.ok, true);
+  assert.equal(authenticated.ok, true);
+  assert.notEqual(authenticated.value.checkoutToken, guest.value.checkoutToken);
+  assert.equal(deps.provider.created.length, 2);
+  assert.deepEqual(
+    new Set([...deps.payments.items.values()].map((payment) => payment.principalKey)),
+    new Set([checkoutPrincipalKey({ guestToken: GUEST_A }), "user:u_1"]),
+  );
+});
+
 test("reusing an idempotency key with a different email is a conflict, not a replay", async () => {
   const deps = makeDeps();
   const principal = checkoutPrincipalKey({ guestToken: GUEST_A });

@@ -115,6 +115,16 @@ export class InMemoryPaymentEventRepository implements PaymentEventRepository {
   private readonly dedupeKeys = new Set<string>();
   readonly events: PaymentEventRecord[] = [];
 
+  snapshot(): () => void {
+    const keys = new Set(this.dedupeKeys);
+    const events = [...this.events];
+    return () => {
+      this.dedupeKeys.clear();
+      for (const key of keys) this.dedupeKeys.add(key);
+      this.events.splice(0, this.events.length, ...events);
+    };
+  }
+
   async recordOnce(event: PaymentEventRecord): Promise<{ ok: true; value: PaymentEventAppendOutcome }> {
     if (this.dedupeKeys.has(event.dedupeKey)) return ok("duplicate");
     this.dedupeKeys.add(event.dedupeKey);

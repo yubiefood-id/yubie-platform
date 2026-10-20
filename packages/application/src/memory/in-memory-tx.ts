@@ -76,6 +76,14 @@ export class InMemoryIdempotencyRepository implements IdempotencyRepository {
 export class InMemoryWebhookInboxRepository implements WebhookInboxRepository {
   private readonly deliveries = new Set<string>();
 
+  snapshot(): () => void {
+    const saved = new Set(this.deliveries);
+    return () => {
+      this.deliveries.clear();
+      for (const delivery of saved) this.deliveries.add(delivery);
+    };
+  }
+
   async recordProcessed(input: WebhookInboxRecordInput): Promise<{ ok: true; value: WebhookInboxAppendOutcome }> {
     const composite = `${input.provider}:${input.deliveryId}`;
     if (this.deliveries.has(composite)) return ok("duplicate");

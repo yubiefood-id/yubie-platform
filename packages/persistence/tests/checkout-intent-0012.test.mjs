@@ -155,6 +155,34 @@ for (const n of [2, 10, 100]) {
   });
 }
 
+for (const n of [2, 10, 100]) {
+  test(`${n} concurrent authenticated submits create one order, one intent, one provider session`, { skip }, async () => {
+    await withDatabase(async ({ database, tx }) => {
+      await seedLot(database, `lot_user_${n}`, 500);
+      const provider = makeProvider({ delayMs: 20 });
+      const deps = { tx, provider, clock: new FixedClock(NOW), ids: new SequentialIdGenerator() };
+      const principal = "user:user_concurrent";
+
+      const results = await Promise.all(
+        Array.from({ length: n }, (_, i) => createFirstPartyCheckout({ ...CART, idempotencyPrincipal: principal, idempotencyKey: `user-${n}-${i}` }, deps)),
+      );
+
+      for (const result of results) {
+        if (!result.ok) assert.equal(result.error.code, "pending_reconciliation", JSON.stringify(result.error));
+      }
+      assert.equal(provider.created.length, 1);
+      const payments = await database.client`SELECT amount, principal_key FROM order_payments`;
+      assert.equal(payments.length, 1);
+      assert.equal(payments[0].principal_key, principal);
+      assert.equal(provider.created[0].amount, payments[0].amount);
+      const orders = await database.client`SELECT count(*)::int AS n FROM orders`;
+      assert.equal(orders[0].n, 1);
+      const reserved = await database.client`SELECT coalesce(sum(quantity), 0)::int AS q FROM inventory_reservations WHERE status = 'active'`;
+      assert.equal(reserved[0].q, 1);
+    });
+  });
+}
+
 test("10 concurrent submits under the same idempotency key create one intent", { skip }, async () => {
   await withDatabase(async ({ database, tx }) => {
     await seedLot(database, "lot_k", 50);

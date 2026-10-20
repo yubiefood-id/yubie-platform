@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { PaymentStatus } from "@yubie/domain";
 import type { Clock, IdGenerator, TransactionManager } from "../ports.js";
 import { applyPaymentStatus } from "./process-payment-webhook.js";
@@ -13,6 +14,8 @@ export interface IpaymuCallbackInput {
   /** Reference and amount from the same transaction-check response as the status. */
   authoritativeReferenceId: string | null;
   authoritativeAmount: number | null;
+  /** SHA-256 of the exact callback bytes when available at the HTTP boundary. */
+  payloadHash?: string;
   trxId: string | null;
   sessionId: string | null;
   dedupeKey: string;
@@ -52,6 +55,22 @@ export async function applyIpaymuCallback(
       if (input.authoritativeStatus && (input.authoritativeReferenceId !== order.checkoutRef || input.authoritativeAmount !== payment.amount)) {
         return { persisted: true, result: "rejected" as const };
       }
+      const inboxAppend = await repos.inbox.recordProcessed({
+        provider: "ipaymu",
+        deliveryId: input.dedupeKey,
+        payloadHash: input.payloadHash ?? createHash("sha256").update(JSON.stringify([
+          input.referenceId,
+          input.merchant,
+          input.amount,
+          input.currency ?? null,
+          input.trxId,
+          input.sessionId,
+        ])).digest("hex"),
+        eventType: "ipaymu.callback",
+        receivedAt: deps.clock.now(),
+      });
+      if (!inboxAppend.ok) return { persisted: false, result: "unavailable" as const };
+      if (inboxAppend.value === "duplicate") return { persisted: true, result: "duplicate" as const };
       const recorded = await repos.paymentEvents.recordOnce({
         id: `pev_${deps.ids.nextId()}`,
         paymentId: payment.id,
