@@ -1,0 +1,39 @@
+name: iPaymu sandbox probe
+
+# Manual only. A green CI run does not call iPaymu.
+# Dispatch with confirm=sandbox after a rotated sandbox VA and API key
+# are stored as IPAYMU_SANDBOX_VA and IPAYMU_SANDBOX_API_KEY.
+# The job prints a reference and a host. It does not print those secrets.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type sandbox to create one 10000 IDR sandbox session"
+        required: true
+        default: "no"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.event.inputs.confirm == 'sandbox'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace @yubie/domain --workspace @yubie/application --workspace @yubie/config --workspace @yubie/integrations
+      - run: node scripts/ipaymu-sandbox-probe.mjs
+        env:
+          YUBIE_IPAYMU_SANDBOX_E2E: "1"
+          IPAYMU_ENV: sandbox
+          IPAYMU_VA: ${{ secrets.IPAYMU_SANDBOX_VA }}
+          IPAYMU_API_KEY: ${{ secrets.IPAYMU_SANDBOX_API_KEY }}
+          IPAYMU_NOTIFY_URL: https://api-staging.yubiefood.com/v1/webhooks/ipaymu
+          IPAYMU_API_BASE_URL: https://sandbox.ipaymu.com

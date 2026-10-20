@@ -1,8 +1,8 @@
 # Milestone gates after payment P0
 
-**Production decision: NO-GO.** First-party payments stay off. Staging stays on `COMMERCE_PROVIDER=preview`. This branch is not deployed.
+**Production decision: NO-GO.** First-party payments stay off. Staging stays on `COMMERCE_PROVIDER=preview`. Main `84b6603` is not deployed.
 
-Recorded 2026-10-20. Money-path merge is an owner action. Nothing here enables a live provider.
+Recorded 2026-10-20. PR #11 merged at `84b66033cc53ee3a3180a0658f5923cb0ba83f5b` (2026-10-20T05:20:48Z). Nothing here enables a live provider.
 
 ## M1 — payment correctness
 
@@ -22,7 +22,9 @@ Recorded 2026-10-20. Money-path merge is an owner action. Nothing here enables a
 
 ## M2 — iPaymu sandbox
 
-BLOCKED_EXTERNAL. Do not start live calls until the owner rotates the exposed key, injects a sandbox pair through the secret store, and sends written answers on cancel, lookup, and duplicate references. An opt-in harness waits until this PR is merged.
+Harness: `scripts/ipaymu-sandbox-probe.mjs` and workflow `iPaymu sandbox probe`. Default is NOT_RUN. A live create happens only on a manual dispatch with confirm `sandbox` plus secrets `IPAYMU_SANDBOX_VA` and `IPAYMU_SANDBOX_API_KEY`.
+
+Live call: NOT_RUN at 2026-10-20T05:25:00Z. BLOCKED_EXTERNAL until the owner rotates the exposed key, injects that pair, and sends written answers on cancel, lookup, and duplicate references.
 
 ## M3 — staging release
 
@@ -30,11 +32,11 @@ BLOCKED_EXTERNAL. Needs a release-candidate digest for the merged SHA, restored 
 
 ## M4 — Refine admin
 
-NOT_RUN. Real paginated BFF, staff OIDC, and audit start only after M1 is merged. No `ops-staging` host until DNS and Access are approved.
+Design: `ADMIN_BFF_DESIGN.md`. The BFF pages orders through an injected reader and labels a missing reader `unconfigured`. Refine is not installed. Staff OIDC, audit, and `ops-staging` are BLOCKED_EXTERNAL. This is not a working admin UI.
 
 ## M5 — ERPNext
 
-NOT_RUN. Mapping, outbox, DLQ, and a discrepancy report against a local mock start only after M1 is merged. A real ERPNext host is BLOCKED_EXTERNAL until an isolated host and its cost are approved. Stock writes stay refused.
+Design: `ERPNEXT_SYNC_DESIGN.md`. `stockDiscrepancyReport` compares quantities and does not write. `erpStockWriteDecision` stays refused. A real ERPNext host is BLOCKED_EXTERNAL. This is not a running ERPNext.
 
 ## M6 to M8 — storefront, fulfilment, support, go-live
 

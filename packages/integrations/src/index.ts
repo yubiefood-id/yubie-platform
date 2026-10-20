@@ -7,6 +7,7 @@ export * from "./support/index.js";
 export * from "./xendit/xendit-payment-provider.js";
 export * from "./ipaymu/signature.js";
 export * from "./ipaymu/ipaymu-payment-provider.js";
+export * from "./ipaymu/sandbox-probe.js";
 export * from "./payments/create-commerce-payment-provider.js";
 export * from "./erpnext/shadow-client.js";
 export * from "./google/google-id-token-verifier.js";

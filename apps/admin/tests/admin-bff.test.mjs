@@ -54,6 +54,39 @@ test("finance can read payments; writes stay denied after a matching CSRF token"
   assert.equal((await call("/v1/orders", { method: "POST", cookie, csrf: false })).status, 403);
 });
 
+test("order pages come from the injected reader and reject an oversized limit", async () => {
+  const cookie = cookieFor("viewer");
+  const rows = [
+    { id: "ord_1", checkoutRef: "co_1", status: "pending_payment", amount: 35000, currency: "IDR" },
+    { id: "ord_2", checkoutRef: "co_2", status: "paid", amount: 29750, currency: "IDR" },
+  ];
+  const readers = {
+    async listOrders(query) {
+      assert.equal(query.limit, 1);
+      const start = query.cursor === "1" ? 1 : 0;
+      const items = rows.slice(start, start + query.limit);
+      return { items, nextCursor: start + query.limit < rows.length ? String(start + query.limit) : null };
+    },
+    async listPayments() {
+      throw new Error("viewer must not list payments");
+    },
+  };
+  const first = await handleAdminRequest(new Request("https://ops.internal/v1/orders?limit=1", { headers: { cookie } }), {
+    sessionSecret: SECRET,
+    nowMs: NOW,
+    readers,
+  });
+  const body = await first.json();
+  assert.equal(body.data.source, "reader");
+  assert.equal(body.data.orders.length, 1);
+  assert.equal(body.data.orders[0].id, "ord_1");
+  assert.equal(body.data.nextCursor, "1");
+  const unconfigured = await call("/v1/orders", { cookie });
+  assert.equal((await unconfigured.json()).data.source, "unconfigured");
+  const invalid = await call("/v1/orders?limit=500", { cookie });
+  assert.equal(invalid.status, 400);
+});
+
 test("a state-changing request without CSRF is rejected before a viewer write", async () => {
   const response = await call("/v1/orders", { method: "POST", cookie: cookieFor("finance") });
   assert.equal(response.status, 403);
