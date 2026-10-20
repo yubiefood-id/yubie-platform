@@ -24,9 +24,9 @@
 
 The untracked file whose name says an API secret is still registered. It stays out of git. Do not add the pasted iPaymu values or the Google client id.
 
-## Local patch that was already dirty and is kept
+## Web proxy and Worker URL changes
 
-`apps/web/app/api/purchase-options/[slug]/route.ts` proxies through `proxyApi`. `apps/web/wrangler.jsonc` sets `workers_dev` and `preview_urls` to false.
+These were merged in [PR #9](https://github.com/yubiefood-id/yubie-platform/pull/9) (`6a2f451`) and are no longer a local patch. `apps/web/app/api/purchase-options/[slug]/route.ts` proxies through `proxyApi`. `apps/web/wrangler.jsonc` sets `workers_dev` and `preview_urls` to false. The deployed staging Worker has not been confirmed to include them. See `docs/production/readiness/EVIDENCE_LEDGER.md`.
 
 ## Rollback
 
