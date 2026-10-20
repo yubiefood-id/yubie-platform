@@ -69,17 +69,28 @@ export async function handleAdminRequest(request: Request, options: AdminServerO
   }
   const query = pageQuery(url);
   if ("error" in query) return json({ ok: false, code: "VALIDATION" }, { status: 400 });
-  if (url.pathname === "/v1/orders") {
-    const page = options.readers
-      ? await options.readers.listOrders(query)
-      : { items: [], nextCursor: null };
-    return json({ ok: true, data: { orders: page.items, nextCursor: page.nextCursor, source: options.readers ? "reader" : "unconfigured", role: session.role } });
-  }
-  if (url.pathname === "/v1/payments") {
-    const page = options.readers
-      ? await options.readers.listPayments(query)
-      : { items: [], nextCursor: null };
-    return json({ ok: true, data: { payments: page.items, nextCursor: page.nextCursor, source: options.readers ? "reader" : "unconfigured", role: session.role } });
+  try {
+    if (url.pathname === "/v1/orders") {
+      const page = options.readers
+        ? await options.readers.listOrders(query)
+        : { items: [], nextCursor: null };
+      return json({ ok: true, data: { orders: page.items, nextCursor: page.nextCursor, source: options.readers ? "reader" : "unconfigured", role: session.role } });
+    }
+    if (url.pathname === "/v1/payments") {
+      const page = options.readers
+        ? await options.readers.listPayments(query)
+        : { items: [], nextCursor: null };
+      return json({ ok: true, data: { payments: page.items, nextCursor: page.nextCursor, source: options.readers ? "reader" : "unconfigured", role: session.role } });
+    }
+  } catch (error: unknown) {
+    console.error(JSON.stringify({
+      level: "error",
+      event: "admin.reader_failed",
+      path: url.pathname,
+      errorType: error instanceof Error ? error.name : "UnknownError",
+      at: new Date().toISOString(),
+    }));
+    return json({ ok: false, code: "UNAVAILABLE" }, { status: 503 });
   }
   return json({ ok: false, code: "FORBIDDEN" }, { status: 403 });
 }

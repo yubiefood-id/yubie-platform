@@ -8,8 +8,13 @@ export type SandboxProbeDecision =
   | { status: "BLOCKED_EXTERNAL"; reason: "missing_secret" | "production_origin" }
   | { status: "READY" };
 
+/**
+ * CREATE_SESSION_PASS proves only that the sandbox accepted one create call
+ * and redirected to the sandbox host. It is never payment acceptance.
+ */
 export interface SandboxProbeReport {
-  status: "NOT_RUN" | "BLOCKED_EXTERNAL" | "PASS" | "FAIL";
+  status: "NOT_RUN" | "BLOCKED_EXTERNAL" | "CREATE_SESSION_PASS" | "FAIL";
+  scope: "create_session_only";
   reason?: string;
   referenceId?: string;
   redirectHost?: string | null;
@@ -39,7 +44,7 @@ export async function runSandboxProbe(
   referenceId: string,
 ): Promise<SandboxProbeReport> {
   const decision = sandboxProbeDecision(env);
-  if (decision.status !== "READY") return { status: decision.status, reason: decision.reason };
+  if (decision.status !== "READY") return { status: decision.status, scope: "create_session_only", reason: decision.reason };
   const provider = new IpaymuPaymentProvider({
     va: env.IPAYMU_VA ?? "",
     apiKey: env.IPAYMU_API_KEY ?? "",
@@ -57,13 +62,13 @@ export async function runSandboxProbe(
     cancelReturnUrl: "https://staging.yubiefood.com/checkout/cancel",
     items: [{ referenceId, name: `Pesanan Yubie ${referenceId}`, quantity: 1, netUnitAmount: 10_000 }],
   });
-  if (!created.ok) return { status: "FAIL", reason: created.error.code, referenceId };
+  if (!created.ok) return { status: "FAIL", scope: "create_session_only", reason: created.error.code, referenceId };
   let redirectHost: string | null = null;
   try {
     redirectHost = new URL(created.value.redirectUrl).host;
   } catch {
     redirectHost = null;
   }
-  if (redirectHost !== "sandbox.ipaymu.com") return { status: "FAIL", reason: "redirect_host", referenceId, redirectHost };
-  return { status: "PASS", referenceId, redirectHost };
+  if (redirectHost !== "sandbox.ipaymu.com") return { status: "FAIL", scope: "create_session_only", reason: "redirect_host", referenceId, redirectHost };
+  return { status: "CREATE_SESSION_PASS", scope: "create_session_only", referenceId, redirectHost };
 }

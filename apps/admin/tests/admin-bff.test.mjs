@@ -87,6 +87,21 @@ test("order pages come from the injected reader and reject an oversized limit", 
   assert.equal(invalid.status, 400);
 });
 
+test("a failing reader returns a bounded 503 without leaking the error", async () => {
+  const response = await handleAdminRequest(new Request("https://ops.internal/v1/orders", { headers: { cookie: cookieFor("viewer") } }), {
+    sessionSecret: SECRET,
+    nowMs: NOW,
+    readers: {
+      async listOrders() { throw new Error("connect postgres://internal failed"); },
+      async listPayments() { return { items: [], nextCursor: null }; },
+    },
+  });
+  assert.equal(response.status, 503);
+  const text = await response.text();
+  assert.equal(text.includes("postgres"), false);
+  assert.equal(JSON.parse(text).code, "UNAVAILABLE");
+});
+
 test("a state-changing request without CSRF is rejected before a viewer write", async () => {
   const response = await call("/v1/orders", { method: "POST", cookie: cookieFor("finance") });
   assert.equal(response.status, 403);

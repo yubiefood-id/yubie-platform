@@ -22,9 +22,11 @@ Recorded 2026-10-20. PR #11 merged at `84b66033cc53ee3a3180a0658f5923cb0ba83f5b`
 
 ## M2 — iPaymu sandbox
 
-Harness: `scripts/ipaymu-sandbox-probe.mjs` and workflow `iPaymu sandbox probe`. Default is NOT_RUN. A live create happens only on a manual dispatch with confirm `sandbox` plus secrets `IPAYMU_SANDBOX_VA` and `IPAYMU_SANDBOX_API_KEY`.
+Harness: `scripts/ipaymu-sandbox-probe.mjs` and workflow `iPaymu sandbox probe`. Default is NOT_RUN. A live create happens only on a manual dispatch from `main` with confirm `sandbox`, `expected_sha` equal to the dispatched commit, and the protected `sandbox` environment holding `IPAYMU_SANDBOX_VA` and `IPAYMU_SANDBOX_API_KEY` (the sandbox pair the project already uses; this repo does not rotate it).
 
-Live call: NOT_RUN at 2026-10-20T05:25:00Z. BLOCKED_EXTERNAL until the owner rotates the exposed key, injects that pair, and sends written answers on cancel, lookup, and duplicate references.
+The probe reports `CREATE_SESSION_PASS` at best. That is one sandbox create, not payment acceptance. M2 passes only when every step of `docs/production/runbooks/ipaymu-sandbox-e2e.md` has evidence.
+
+Live call: NOT_RUN. BLOCKED_EXTERNAL until the `sandbox` environment with required reviewers and both secrets exists, and iPaymu answers on cancel, lookup, and duplicate references are on record.
 
 ## M3 — staging release
 

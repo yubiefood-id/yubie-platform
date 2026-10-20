@@ -32,7 +32,8 @@ test("a ready probe does not call the network until run, and the report omits se
     calls += 1;
     return { ok: true, status: 200, async json() { return { Data: { SessionID: "sess-probe", Url: "https://sandbox.ipaymu.com/payment/sess-probe" } }; } };
   }, "probe-1");
-  assert.equal(report.status, "PASS");
+  assert.equal(report.status, "CREATE_SESSION_PASS");
+  assert.equal(report.scope, "create_session_only");
   assert.equal(report.redirectHost, "sandbox.ipaymu.com");
   assert.equal(JSON.stringify(report).includes(READY.IPAYMU_API_KEY), false);
   assert.equal(JSON.stringify(report).includes(READY.IPAYMU_VA), false);
