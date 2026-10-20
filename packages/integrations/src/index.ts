@@ -10,4 +10,5 @@ export * from "./ipaymu/ipaymu-payment-provider.js";
 export * from "./ipaymu/sandbox-probe.js";
 export * from "./payments/create-commerce-payment-provider.js";
 export * from "./erpnext/shadow-client.js";
+export * from "./erpnext/stock-reader.js";
 export * from "./google/google-id-token-verifier.js";
