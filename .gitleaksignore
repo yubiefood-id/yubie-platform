@@ -1,0 +1,3 @@
+# Reviewed browser-local storage key names; neither value is a credential.
+430c440219734f1b31e5a043f9a24df9b6c17de4:apps/web/features/cart/cart-context.tsx:generic-api-key:17
+430c440219734f1b31e5a043f9a24df9b6c17de4:apps/web/components/commerce/storefront-widgets.tsx:generic-api-key:10
