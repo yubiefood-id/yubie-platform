@@ -3,9 +3,37 @@ import { issueAdminSession, readAdminSession } from "./session.js";
 
 export { issueAdminSession };
 
+export interface AdminOrderRow {
+  id: string;
+  checkoutRef: string;
+  status: string;
+  amount: number;
+  currency: "IDR";
+}
+
+export interface AdminPaymentRow {
+  id: string;
+  orderId: string;
+  status: string;
+  amount: number;
+  currency: "IDR";
+  reconciliationState: string;
+}
+
+export interface AdminPage<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
+export interface AdminReaders {
+  listOrders(query: { limit: number; cursor: string | null }): Promise<AdminPage<AdminOrderRow>>;
+  listPayments(query: { limit: number; cursor: string | null }): Promise<AdminPage<AdminPaymentRow>>;
+}
+
 export interface AdminServerOptions {
   sessionSecret: string;
   nowMs: number;
+  readers?: AdminReaders;
 }
 
 /**
@@ -39,9 +67,41 @@ export async function handleAdminRequest(request: Request, options: AdminServerO
   if (authorize(session.role, request.method, url.pathname) !== "allow") {
     return json({ ok: false, code: "FORBIDDEN" }, { status: 403 });
   }
-  if (url.pathname === "/v1/orders") return json({ ok: true, data: { orders: [] as const, role: session.role } });
-  if (url.pathname === "/v1/payments") return json({ ok: true, data: { payments: [] as const, role: session.role } });
+  const query = pageQuery(url);
+  if ("error" in query) return json({ ok: false, code: "VALIDATION" }, { status: 400 });
+  try {
+    if (url.pathname === "/v1/orders") {
+      const page = options.readers
+        ? await options.readers.listOrders(query)
+        : { items: [], nextCursor: null };
+      return json({ ok: true, data: { orders: page.items, nextCursor: page.nextCursor, source: options.readers ? "reader" : "unconfigured", role: session.role } });
+    }
+    if (url.pathname === "/v1/payments") {
+      const page = options.readers
+        ? await options.readers.listPayments(query)
+        : { items: [], nextCursor: null };
+      return json({ ok: true, data: { payments: page.items, nextCursor: page.nextCursor, source: options.readers ? "reader" : "unconfigured", role: session.role } });
+    }
+  } catch (error: unknown) {
+    console.error(JSON.stringify({
+      level: "error",
+      event: "admin.reader_failed",
+      path: url.pathname,
+      errorType: error instanceof Error ? error.name : "UnknownError",
+      at: new Date().toISOString(),
+    }));
+    return json({ ok: false, code: "UNAVAILABLE" }, { status: 503 });
+  }
   return json({ ok: false, code: "FORBIDDEN" }, { status: 403 });
+}
+
+function pageQuery(url: URL): { limit: number; cursor: string | null } | { error: "limit" | "cursor" } {
+  const rawLimit = url.searchParams.get("limit");
+  const limit = rawLimit === null ? 20 : Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) return { error: "limit" };
+  const cursor = url.searchParams.get("cursor");
+  if (cursor !== null && !/^[A-Za-z0-9_-]{1,80}$/.test(cursor)) return { error: "cursor" };
+  return { limit, cursor };
 }
 
 function csrfMatches(request: Request): boolean {

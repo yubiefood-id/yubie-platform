@@ -1,0 +1,82 @@
+name: iPaymu sandbox probe
+
+# Manual only. A green CI run does not call iPaymu.
+# This creates ONE 10000 IDR sandbox session. It is a create-session probe,
+# not payment acceptance: callback, settlement, stock, expiry and refund
+# evidence come from docs/production/runbooks/ipaymu-sandbox-e2e.md.
+#
+# Requirements before dispatch:
+# - the `sandbox` environment exists with required reviewers and holds
+#   IPAYMU_SANDBOX_VA and IPAYMU_SANDBOX_API_KEY (sandbox values only);
+# - dispatch from main with expected_sha set to the exact reviewed commit;
+# - confirm is typed exactly `sandbox`.
+# The job prints a reference and a host. It never prints those secrets.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type sandbox to create one 10000 IDR sandbox session"
+        required: true
+        default: "no"
+      expected_sha:
+        description: "Full 40-character reviewed commit SHA on main"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ipaymu-sandbox-probe
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Refuse unconfirmed or unreviewed dispatches
+        env:
+          CONFIRM: ${{ github.event.inputs.confirm }}
+          EXPECTED_SHA: ${{ github.event.inputs.expected_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$CONFIRM" != "sandbox" ]; then
+            echo "NOT_RUN: confirm must be exactly 'sandbox'" >&2; exit 1
+          fi
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "BLOCKED: dispatch from main only (got $REF)" >&2; exit 1
+          fi
+          if ! printf '%s' "$EXPECTED_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "BLOCKED: expected_sha must be a full 40-character SHA" >&2; exit 1
+          fi
+          if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo "BLOCKED: expected_sha does not match the dispatched commit" >&2; exit 1
+          fi
+
+  probe:
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: sandbox
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.3
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace @yubie/config --workspace @yubie/domain --workspace @yubie/application --workspace @yubie/integrations
+      - name: Create one sandbox session
+        run: node scripts/ipaymu-sandbox-probe.mjs
+        env:
+          YUBIE_IPAYMU_SANDBOX_E2E: "1"
+          YUBIE_SANDBOX_PROBE_REQUIRED: "1"
+          IPAYMU_ENV: sandbox
+          IPAYMU_VA: ${{ secrets.IPAYMU_SANDBOX_VA }}
+          IPAYMU_API_KEY: ${{ secrets.IPAYMU_SANDBOX_API_KEY }}
+          IPAYMU_NOTIFY_URL: https://api-staging.yubiefood.com/v1/webhooks/ipaymu
+          IPAYMU_API_BASE_URL: https://sandbox.ipaymu.com
