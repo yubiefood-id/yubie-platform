@@ -1,48 +1,81 @@
 # Post-PR11 blocker register
 
-Evidence captured **2026-10-20T06:40:00Z**. Production decision: **NO-GO**.
-First-party staging payments remain `COMMERCE_PROVIDER=preview`. No workflow was
-dispatched, no image was published, and no remote state was changed.
+Evidence refreshed **2026-10-20T14:20:00Z** at `origin/main=77a36c157039401bc7ce543afe0365a4b4006b9b`.
+Production decision: **NO-GO**. Staging still reports `releaseSha=aa00c53fe543f385eff4237ceeb1a27fdc878fd4`,
+database connected, `commerceProvider=preview`. No release candidate was published, no workflow was
+dispatched, no migration was applied remotely, and no credential was rotated.
 
-| ID | Claim | Current evidence | Owner | Severity | Next action | Dependency | Gate | Status |
+Class: `CODEX_NOW` (engineering can finish without external input), `USER_INTERVENTION` (owner or
+operator action), `PROVIDER_DEPENDENCY` (iPaymu or another vendor), `SHARED` (engineering done; needs an
+owner action to close).
+
+## Merged engineering (2026-10-20)
+
+| PR | Content | Merge |
+| --- | --- | --- |
+| [#13](https://github.com/yubiefood-id/yubie-platform/pull/13) | Callback, identity, concurrency and recovery tests on PostgreSQL | `9102983` |
+| [#14](https://github.com/yubiefood-id/yubie-platform/pull/14) | Pinned Actions, Gitleaks, Semgrep, Trivy fs/image, SBOM, Playwright desktop/mobile | `1345d53` |
+| [#15](https://github.com/yubiefood-id/yubie-platform/pull/15) | Request correlation, payment metrics, `/ops/payments/exceptions`, migration `0013`, runbook | `b66af20` |
+| [#12](https://github.com/yubiefood-id/yubie-platform/pull/12) | Sandbox probe (protected env, reviewed SHA), admin reader seam, ERP discrepancy math | `5957947` |
+| [#16](https://github.com/yubiefood-id/yubie-platform/pull/16) | Read-only PostgreSQL admin readers | `9d163ef` |
+| [#17](https://github.com/yubiefood-id/yubie-platform/pull/17) | ERP shadow reconcile: mappings, retry, dead letter; writes disabled | `579913b` |
+| [#18](https://github.com/yubiefood-id/yubie-platform/pull/18) | Staging release runbook; atomic backup; checksum-verified restore drill | `77a36c1` |
+
+## Register
+
+| ID | Claim | Current evidence | Class | Next action | Status |
+| --- | --- | --- | --- | --- | --- |
+| B01 | PR #11 payment P0 is on main | Merged `84b6603`; still the payment baseline | — | None | PASS |
+| B02 | PR #12 reused, not duplicated | Hardened and merged at `5957947` | — | None | PASS |
+| B03 | Staging runs merged code | `/healthz` reports `aa00c53` | USER_INTERVENTION | Approve RC dispatch for `77a36c1`, then follow `docs/production/runbooks/staging-release.md` | FAIL |
+| B04 | Staging stays non-paying | `/readyz` `commerceProvider=preview` | SHARED | Keep until M2 passes and a switch is approved | PASS |
+| B05 | Migrations `0011`–`0013` on staging | Not applied; runbook gives order, lock notes and rollback | USER_INTERVENTION | Backup + restore drill, then migrate per runbook step 5 | NOT_RUN |
+| B06 | Agent can inspect VPS runtime | SSH `Permission denied (publickey,password)` | USER_INTERVENTION | Add a limited deploy key, or the operator runs the runbook and shares redacted output | BLOCKED_EXTERNAL |
+| B07 | GHCR digests readable by agent | REST 403, token lacks `read:packages` | USER_INTERVENTION | Grant read-only package scope, or copy digests from the RC job summary | BLOCKED_EXTERNAL |
+| B08 | RC exists for current main | Last RC is `aa00c53` (2026-10-08) | USER_INTERVENTION | `gh workflow run release-candidate.yml --ref main -f sha=77a36c157039401bc7ce543afe0365a4b4006b9b` | NOT_RUN |
+| B09 | PostgreSQL payment invariants | CI `persistence` job green on every merged PR; local 23 pass / 0 skip | — | Keep in CI | PASS |
+| B10 | Sandbox credentials available to the probe | Project's existing sandbox pair must sit in the protected `sandbox` environment; presence unverified | USER_INTERVENTION | Create `sandbox` environment with required reviewers; store `IPAYMU_SANDBOX_VA` and `IPAYMU_SANDBOX_API_KEY`; report SET/MISSING only | BLOCKED_EXTERNAL |
+| B11 | Provider recovery semantics | Six questions in `IPAYMU_PROVIDER_CONTRACT.md` unanswered | PROVIDER_DEPENDENCY | Written iPaymu answers: cancel, lookup, duplicate reference, timeout trx id, timestamp MAC, JSON/form | BLOCKED_EXTERNAL |
+| B12 | Real sandbox E2E | Harness hardened (main only, exact SHA, protected env, `CREATE_SESSION_PASS` scope); 10-step runbook `ipaymu-sandbox-e2e.md` | SHARED | After B03, B05, B10, B11 and an isolated sandbox instance: dispatch and record all 10 steps | NOT_RUN |
+| B13 | Callback normalization and recovery | Local and CI green; missing payment record now retries instead of dropping | — | Keep in CI | PASS |
+| B14 | Security and supply-chain CI | `security`, `browser`, `containers` jobs green on main | — | Optional: enable repository Dependency graph to restore GitHub dependency review (Trivy lockfile scan already blocks HIGH/CRITICAL) | PASS |
+| B15 | Payment observability | Correlation ids, metrics, exceptions endpoint, runbook merged | SHARED | Wire metrics to alerting once monitoring is provisioned (M7) | PASS (code) |
+| B16 | Private admin | Read-only BFF + PostgreSQL readers merged; Refine UI not installed; no staff OIDC, audit or deployment | USER_INTERVENTION | Provide staff OIDC client and allowlist, approve `ops-staging` DNS and Access policy | BLOCKED_EXTERNAL |
+| B17 | ERPNext shadow pilot | Mappings, GET-only reader, retry/dead letter merged; writes refused; not scheduled | USER_INTERVENTION | Approve isolated ERPNext host, item mapping and read-only API user | BLOCKED_EXTERNAL |
+| B18 | Access and Google console config | Not visible to agent; past login PASS is historical | USER_INTERVENTION | Confirm named-email Access policy and Google Web client origins | BLOCKED_EXTERNAL |
+| B19 | Shipping, legal, product claims | No owner-signed evidence | USER_INTERVENTION | Approve shipping, privacy/terms/refunds, SKU claims | BLOCKED_EXTERNAL |
+| B20 | Production merchant and operations | No production PSP contract, payout/refund drill, on-call | SHARED | Complete M2–M7 before a separate production-provider PR | BLOCKED_EXTERNAL |
+| B21 | Off-host backup and PITR | Local `pg_dump` only; no encrypted off-host target | USER_INTERVENTION | Provision storage target for WAL archive and off-host dumps | BLOCKED_EXTERNAL |
+
+No `CODEX_NOW` item remains. Every open item needs an owner, operator, or provider action.
+
+## Acceptance matrix
+
+| Area | UNIT_PASS | DB_PASS | CI_PASS | STAGING_PASS | PSP_SANDBOX_PASS | SECURITY_PASS | OWNER_APPROVED | PROD_GO |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B01 | PR #11 payment P0 is on main | `origin/main=84b66033cc53ee3a3180a0658f5923cb0ba83f5b`; main CI run `39374400844` succeeded | CODEX | P0 | Keep as payment baseline | None | M1 | PASS |
-| B02 | PR #12 can be reused | PR #12 head `2ee54657b50cc1365417c05b8b21d6d8178917dd`, merge state CLEAN; quality, persistence, containers and Vercel checks succeeded | SHARED | P1 | Review protected-environment and reviewed-SHA gates before owner merge | Owner review | M2/M4/M5 | PASS |
-| B03 | Staging runs the merged payment code | `GET https://api-staging.yubiefood.com/healthz` reports `aa00c53fe543f385eff4237ceeb1a27fdc878fd4`, not main | USER/OPERATOR | P0 | Publish and deploy a reviewed RC only after backup/restore approval | RC digest, backup | M3 | FAIL |
-| B04 | Staging remains non-paying | `GET /readyz` reports database connected and `commerceProvider=preview` | SHARED | P0 | Preserve until sandbox acceptance and explicit switch approval | Provider and release gates | M2/M3 | PASS |
-| B05 | Migrations 0011 and 0012 are on staging | Agent cannot read the migration ledger; last verified report says not applied | USER/OPERATOR | P0 | Run SELECT-only ledger check, then backup/restore before approved apply | Read-only host access | M3 | NOT_RUN |
-| B06 | Agent can inspect VPS runtime | `ssh -o BatchMode=yes vps-contabo-yubie-1 ...` returned `Permission denied (publickey,password)` | USER/OPERATOR | P1 | Add this agent public key to the limited `yubie-deploy` account or provide redacted outputs | Host administrator | M3 | BLOCKED_EXTERNAL |
-| B07 | GHCR versions/digests are readable | GitHub REST returned HTTP 403: token needs `read:packages` | USER/OPERATOR | P1 | Grant the current GitHub identity read-only package scope or provide digest output | GitHub organization owner | M3 | BLOCKED_EXTERNAL |
-| B08 | An RC exists for main `84b6603` | Last release-candidate run is `37772177252` for older source; no digest for `84b6603` | USER/OPERATOR | P0 | After CI hardening, approve manual RC dispatch for exact reviewed SHA | Workflow dispatch approval | M3 | NOT_RUN |
-| B09 | PostgreSQL payment invariants are complete | Local PostgreSQL 17 targeted proof: 13 pass, 0 fail, 0 skipped; full persistence suite: 24 pass, 0 fail, 0 skipped. Covers guest and authenticated 2/10/100, last-unit, promo totals, callback binding and callback transaction rollback | CODEX | P0 | Preserve in CI and repeat before merge | Local Docker | M1/M2 | PASS |
-| B10 | iPaymu sandbox credentials are suitable | Credential presence and rotation cannot be inferred; exposed values will not be read or used | USER/OPERATOR | P0 | Attest that a sandbox pair is securely stored, reporting SET/MISSING only | Sandbox merchant owner | M2 | BLOCKED_EXTERNAL |
-| B11 | Provider recovery semantics are known | Six questions in `IPAYMU_PROVIDER_CONTRACT.md` remain unanswered | PROVIDER | P0 | Obtain written answers for cancel, lookup, duplicate reference, timeout transaction ID, timestamp MAC and JSON/form normalization | iPaymu support | M2 | BLOCKED_EXTERNAL |
-| B12 | Real sandbox E2E passed | PR #12 contains a create-only probe; it is not payment acceptance and has not been dispatched | SHARED | P0 | Harden protected manual harness; run only after explicit approval and prerequisites | B10, B11, deployed callback | M2 | NOT_RUN |
-| B13 | Callback normalization and crash recovery are fully proven | Local callback/recovery selection: 30 pass, 0 fail. JSON/form normalization, poison input before poll, inbox rollback/redelivery, refund and replay are covered without external traffic | CODEX | P0 | Preserve in CI and repeat before merge | None | M1/M2 | PASS |
-| B14 | Security and supply-chain CI is complete | Custom secret/payment scans exist; Gitleaks, actual Semgrep, Trivy, SBOM, dependency review and browser E2E are absent | CODEX | P1 | Add pinned least-privilege CI gates and local preview browser tests | GitHub Actions network for CI | M3 | CODEX_NOW |
-| B15 | Payment observability is release-ready | JSON logging and worker metrics exist, but correlation and payment exception metrics/alerts are incomplete | CODEX | P1 | Add redacted correlation, metrics and runbooks | None | M3 | CODEX_NOW |
-| B16 | Private admin is production-ready | PR #12 adds reader injection only; no Postgres readers, Refine UI, staff SSO, audit or deployment | SHARED | P1 | Finish local read-only app; keep OIDC, DNS and deploy operator-gated | PR #12, identity owner | M4 | CODEX_NOW |
-| B17 | ERPNext shadow pilot is production-ready | PR #12 adds pure discrepancy math; no mappings, outbox, retry/DLQ or isolated host | SHARED | P1 | Finish local mock/read-only integration; keep writes refused | Isolated host approval for live pilot | M5 | CODEX_NOW |
-| B18 | Access and Google console configuration are verified | Storefront returns HTTP 302 behind Access; account policy and OAuth console settings are not visible to this agent. Past user browser login PASS remains historical evidence | USER/OPERATOR | P1 | Verify named-email Access and Google Web client origin; report configuration only | Cloudflare/Google console access | M3/M4 | BLOCKED_EXTERNAL |
-| B19 | Shipping, legal, regulatory and product claims are approved | No owner-signed evidence in the repository | USER/OPERATOR | P0 | Approve shipping costs, privacy/terms/refunds and SKU-specific claims | Finance, legal, food QA | M6/M7 | BLOCKED_EXTERNAL |
-| B20 | Production merchant and operations are approved | No production PSP contract, payout/refund drill, canary, on-call or hypercare acceptance | SHARED | P0 | Complete sandbox, finance, security and operations gates before a separate production-provider PR | B03-B19 | M7/M8 | BLOCKED_EXTERNAL |
+| Checkout and payment correctness | PASS | PASS | PASS | BLOCKED_EXTERNAL | NOT_RUN | PASS | NOT_RUN | FAIL |
+| Callbacks and reconciliation | PASS | PASS | PASS | BLOCKED_EXTERNAL | NOT_RUN | PASS | NOT_RUN | FAIL |
+| Migrations `0011`–`0013` | PASS | PASS | PASS | NOT_RUN | — | — | NOT_RUN | FAIL |
+| Observability | PASS | PASS | PASS | NOT_RUN | — | PASS | NOT_RUN | FAIL |
+| Supply chain / CI gates | — | — | PASS | — | — | PASS | NOT_RUN | FAIL |
+| Backup / restore | — | PASS (local drill) | — | NOT_RUN | — | — | NOT_RUN | FAIL |
+| Admin (read-only) | PASS | PASS | PASS | BLOCKED_EXTERNAL | — | PASS | NOT_RUN | FAIL |
+| ERP shadow | PASS | — | PASS | BLOCKED_EXTERNAL | — | PASS | NOT_RUN | FAIL |
+| Google Login, storefront, cart | PASS | — | PASS | PASS (historical user test) | — | — | NOT_RUN | FAIL |
 
 ## Credential policy
 
-Existing project-managed secrets are not modified by engineering work. Values
-previously exposed in chat or local untracked files are never read, copied,
-logged, committed, or used. Secret state is reported only as `SET`, `MISSING`,
-or `UNVERIFIED`.
+Existing project-managed secrets are used as they are and are not rotated by engineering work. Values
+exposed in chat or local untracked files are never read, copied, logged, committed, or used. Secret
+state is reported only as `SET`, `MISSING`, or `UNVERIFIED`.
 
 ## Evidence commands
 
 ```bash
 git rev-parse origin/main
-gh pr view 12 --json state,headRefOid,mergeStateStatus,statusCheckRollup,url
-gh run list --workflow release-candidate.yml --limit 5
+gh run list --branch main --limit 1 --json headSha,conclusion
+gh run list --workflow release-candidate.yml --limit 1 --json headSha,createdAt,conclusion
 curl -fsS https://api-staging.yubiefood.com/healthz
 curl -fsS https://api-staging.yubiefood.com/readyz
-ssh -o BatchMode=yes -o ConnectTimeout=10 vps-contabo-yubie-1 \
-  'docker ps --format "{{.Names}} {{.Image}} {{.Status}}"'
-gh api /orgs/yubiefood-id/packages/container/yubie-api/versions?per_page=1
+DATABASE_URL=postgres://yubie:yubie_local@127.0.0.1:55432/yubie_test npm test --workspace @yubie/persistence
 ```
