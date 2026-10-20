@@ -197,6 +197,16 @@ export function resolveShippingPolicy(policy: string | undefined): { policy: Shi
   throw new Error(`Unknown SHIPPING_POLICY "${value}" — supported: free_promotional`);
 }
 
+/**
+ * Upper bound for one D2C web checkout, in IDR. Larger orders go through the
+ * assisted B2B channel. Raising it is an operator decision.
+ */
+export const MAX_CHECKOUT_TOTAL_IDR = 10_000_000;
+
+export function isPayableTotal(grandTotalAmount: number): boolean {
+  return Number.isSafeInteger(grandTotalAmount) && grandTotalAmount > 0 && grandTotalAmount <= MAX_CHECKOUT_TOTAL_IDR;
+}
+
 /** Integer-IDR totals; the charged grand total is always the exact sum. */
 export function buildOrderTotals(subtotalAmount: number, shippingAmount: number, taxAmount: number, discountAmount: number): OrderTotals {
   const grandTotalAmount = subtotalAmount + shippingAmount + taxAmount - discountAmount;

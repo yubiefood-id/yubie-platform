@@ -2,8 +2,10 @@ import { randomBytes } from "node:crypto";
 import { createHash } from "node:crypto";
 import {
   MAX_CART_LINE_QUANTITY,
+  MAX_CHECKOUT_TOTAL_IDR,
   buildOrderTotals,
   err,
+  isPayableTotal,
   ok,
   orderStatusForPayment,
   paymentStatusFromProviderSession,
@@ -13,11 +15,13 @@ import {
   type AppError,
   type OrderLineRecord,
   type OrderRecord,
+  type OrderTotals,
   type PaymentProviderKind,
   type PaymentRecord,
 } from "@yubie/domain";
 import type {
   Clock,
+  CreatePaymentSessionInput,
   IdGenerator,
   OrderRepository,
   PaymentProviderPort,
@@ -131,6 +135,26 @@ function requestHashOf(body: string): string {
 }
 
 /**
+ * Line items sent to the payment provider. iPaymu requires the lines to sum
+ * to the charged amount and has no discount or shipping field, so it gets one
+ * aggregate line at the grand total. Xendit keeps per-product lines.
+ */
+export function buildProviderLineItems(
+  provider: PaymentProviderKind | undefined,
+  checkoutRef: string,
+  priced: readonly OrderLineRecord[],
+  totals: OrderTotals,
+): CreatePaymentSessionInput["items"] {
+  if (!isPayableTotal(totals.grandTotalAmount)) {
+    throw new RangeError(`Grand total ${totals.grandTotalAmount} is not a payable amount`);
+  }
+  if (provider === "ipaymu") {
+    return [{ referenceId: checkoutRef, name: `Pesanan Yubie ${checkoutRef}`, quantity: 1, netUnitAmount: totals.grandTotalAmount }];
+  }
+  return priced.map((line) => ({ referenceId: line.id, name: `${line.productName} ${line.sizeLabel}`, quantity: line.quantity, netUnitAmount: line.unitPrice }));
+}
+
+/**
  * Crash-safe checkout saga (AGENTS.md §5): re-prices every line from the
  * canonical domain catalog — browser-submitted monetary values are never
  * read — then
@@ -195,6 +219,14 @@ export async function createFirstPartyCheckout(
   const subtotalAmount = priced.reduce((total, line) => total + line.unitPrice * line.quantity, 0);
   const promotion = quotePromotion(input.promoCode, subtotalAmount);
   const totals = buildOrderTotals(subtotalAmount, shipping.amount, 0, promotion?.discountAmount ?? 0);
+  if (!isPayableTotal(totals.grandTotalAmount)) {
+    return err({
+      code: "validation",
+      message: `Order total must be between 1 and ${MAX_CHECKOUT_TOTAL_IDR} IDR for web checkout. Contact us on WhatsApp for larger orders.`,
+      retryable: false,
+      requestId: "checkout",
+    });
+  }
 
   const idempotencyKey = input.idempotencyKey ?? null;
   const claimInput = {
@@ -358,7 +390,7 @@ export async function createFirstPartyCheckout(
     successReturnUrl: `${input.successReturnUrl}${separator}checkout=${token}`,
     cancelReturnUrl: input.cancelReturnUrl,
     expiresAt: orderExpiresAt,
-    items: priced.map((line) => ({ referenceId: line.id, name: `${line.productName} ${line.sizeLabel}`, quantity: line.quantity, netUnitAmount: line.unitPrice })),
+    items: buildProviderLineItems(input.provider, checkoutRef, priced, totals),
   });
 
   if (!session.ok) {
