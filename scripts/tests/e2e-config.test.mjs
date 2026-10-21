@@ -7,6 +7,7 @@ for (const [name, variables] of [
   ["staging requires a reviewed release identity", { YUBIE_E2E_TIER: "staging", EXPECTED_RELEASE_SHA: "" }],
   ["sandbox cannot reuse shared staging", { YUBIE_E2E_TIER: "sandbox", BASE_URL: "https://staging.yubiefood.com", API_BASE_URL: "https://api-staging.yubiefood.com", EXPECTED_RELEASE_SHA: "a".repeat(40) }],
   ["unknown test tiers never silently run mocks", { YUBIE_E2E_TIER: "production" }],
+  ["prebuilt catalog cannot silently run mocked commerce", { YUBIE_E2E_TIER: "mock", E2E_CATALOG_PREBUILT: "1" }],
   ["sandbox requires explicit scoped authorization", { YUBIE_E2E_TIER: "sandbox", BASE_URL: "https://sandbox-web.example.invalid", API_BASE_URL: "https://sandbox-api.example.invalid", EXPECTED_RELEASE_SHA: "a".repeat(40) }],
 ]) {
   test(name, () => {
