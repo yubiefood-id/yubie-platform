@@ -38,7 +38,7 @@ const XENDIT_ENV = {
   XENDIT_SECRET_KEY: "xnd_test_secret",
   XENDIT_WEBHOOK_TOKEN: "callback-token",
   XENDIT_BUSINESS_ID: "biz-123",
-  APP_ORIGIN: "https://yubie.id",
+  APP_ORIGIN: "https://yubiefood.com",
 };
 
 test("startup fails closed: xendit without DATABASE_URL is a CONFIG_ERROR", async () => {
@@ -63,7 +63,7 @@ test("startup fails closed: missing webhook/business-id/https-origin are aggrega
       COMMERCE_PROVIDER: "xendit",
       DATABASE_URL: XENDIT_ENV.DATABASE_URL,
       XENDIT_SECRET_KEY: "xnd_test_secret",
-      APP_ORIGIN: "http://yubie.id",
+      APP_ORIGIN: "http://yubiefood.com",
     },
     async () => {
       let message = "";

@@ -1,5 +1,6 @@
 import { getApiOrigin } from "@/lib/api-origin";
 import { forwardableProxyHeaders } from "./proxy-headers";
+import { directCommerce } from "@/config/launch";
 
 /** Server hop timeout: a hung API must never pin the web worker. */
 const PROXY_TIMEOUT_MS = 15_000;
@@ -7,12 +8,15 @@ const PROXY_TIMEOUT_MS = 15_000;
 /**
  * Same-origin API proxy (ADR-012 §7–8): thin web route handlers forward to
  * apps/api on the server side, relaying cookies both ways so the browser
- * only ever talks to yubie.id (first-party cookies, no CORS). The shared
+ * only ever talks to yubiefood.com (first-party cookies, no CORS). The shared
  * proxy token authenticates the web→api hop (verified server-side by
  * apps/api); ONLY the allowlisted browser headers are forwarded, and the hop
  * is time-bounded.
  */
 export async function proxyApi(request: Request, path: string): Promise<Response> {
+  // Catalog releases have no backend dependency and accept no customer data.
+  // Marketplace links come only from the reviewed static listing manifest.
+  if (!directCommerce) return Response.json({ ok: false, code: "FEATURE_DISABLED" }, { status: 503, headers: { "cache-control": "no-store" } });
   const headers: Record<string, string> = { "content-type": "application/json", ...forwardableProxyHeaders(request.headers) };
   const cookie = request.headers.get("cookie");
   if (cookie) headers.cookie = cookie;

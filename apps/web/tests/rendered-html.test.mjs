@@ -27,12 +27,12 @@ test("robots and sitemap are served by the Worker with the approved production d
   assert.doesNotMatch(xml, /yubie\.id|staging|\/checkout|\/account/);
 });
 
-test("renders development preview metadata", async () => {
+test("never renders development preview metadata in a built artifact", async () => {
   const { default: worker } = await makeWorker();
   const response = await worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), env, ctx);
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-  assert.match(await response.text(), developmentPreviewMeta);
+  assert.doesNotMatch(await response.text(), developmentPreviewMeta);
 });
 
 test("renders catalog, product, and supporting routes", async () => {

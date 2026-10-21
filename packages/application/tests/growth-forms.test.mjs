@@ -37,13 +37,13 @@ function makeDeps() {
 
 test("newsletter subscription is durable, deduped, and records marketing consent", async () => {
   const deps = makeDeps();
-  const first = await subscribeNewsletter({ email: "hello@yubiefood.id", name: "Hello", source: "footer" }, deps);
+  const first = await subscribeNewsletter({ email: "hello@yubiefood.com", name: "Hello", source: "footer" }, deps);
   assert.equal(first.value.outcome, "subscribed");
-  const replay = await subscribeNewsletter({ email: "hello@yubiefood.id", source: "footer" }, deps);
+  const replay = await subscribeNewsletter({ email: "hello@yubiefood.com", source: "footer" }, deps);
   assert.equal(replay.value.outcome, "already_subscribed");
 
   assert.equal(deps.growth.newsletter.size, 1);
-  const consents = deps.growth.consentLedger.filter((entry) => entry.subjectKey === "hello@yubiefood.id");
+  const consents = deps.growth.consentLedger.filter((entry) => entry.subjectKey === "hello@yubiefood.com");
   assert.deepEqual(consents.map((entry) => [entry.purpose, entry.action]), [["marketing_newsletter", "granted"]]);
   assert.ok(deps.audit.events.some((event) => event.action === "newsletter.subscribed"));
 });

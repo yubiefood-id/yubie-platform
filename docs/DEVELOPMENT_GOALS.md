@@ -13,7 +13,7 @@ Build Yubie into an owned digital growth and operating layer that makes product 
 Discovery / SEO / social
         |
         v
-     yubie.id
+     yubiefood.com
         |
    +----+--------------------+
    |                         |

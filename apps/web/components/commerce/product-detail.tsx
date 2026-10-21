@@ -7,6 +7,7 @@ import { foodApplications, productRootOfferings, recipes, rootVarieties, type Pr
 import { PurchaseOptions } from "@/components/commerce/purchase-options";
 import { BuyBox } from "@/components/commerce/pdp/buy-box";
 import { trackEvent } from "@/lib/analytics";
+import { directCommerce } from "@/config/launch";
 
 const PENDING_FACT = "Informasi ini menunggu verifikasi final untuk SKU komersial dan akan diterbitkan setelah disetujui.";
 
@@ -42,7 +43,7 @@ function FlourProductDetail({ product }: { product: Product }) {
       <div className="product-detail-image"><Image src={product.image} alt={product.imageAlt} fill priority sizes="(max-width: 800px) 100vw, 55vw" unoptimized /></div>
       <div className="product-detail-copy">
         <span className="eyebrow">{product.positioning}</span><h1>YUBIE FLOUR</h1><p className="descriptor">{product.descriptor}</p><p className="product-story">{product.story}</p>
-        <BuyBox product={product} />
+        {offering?.status === "available" && <BuyBox product={product} />}
         {offering?.status === "available"
           ? <PurchaseOptions productSlug={product.slug} productId={product.id} rootId={root.id} placement="pdp" />
           : <div className="availability-panel"><strong>{offering?.status === "b2b-only" ? "Available for B2B exploration" : "Not commercially available"}</strong><p>Belum ada size, harga, atau SKU publik yang disetujui untuk varietas ini.</p><Link className="button primary" href={`/b2b?intent=sample&interest=${product.id}&root=${root.id}#enquiry`} onClick={() => trackEvent("b2b_sample_click", { product_id: product.id, root_id: root.id })}>Minta sampel B2B <span>→</span></Link></div>}
@@ -56,7 +57,7 @@ function FlourProductDetail({ product }: { product: Product }) {
         <details open><summary>Product Story</summary><p>{product.story}</p></details>
         <details><summary>Best Applications</summary><p>{applications.map((item) => item?.name).join(" · ")}</p><Link className="text-link" href="/our-roots#everyday-use">Explore everyday use concepts <span>→</span></Link></details>
         <details><summary>Ingredients</summary><p>{product.ingredients ?? PENDING_FACT}</p></details>
-        <details><summary>Preparation</summary><p>Gunakan sebagai bahan pada resep dan formulasi pangan; takaran mengikuti resep yang dipilih.</p></details>
+        <details><summary>Preparation</summary><p>{directCommerce ? "Gunakan sebagai bahan pada resep dan formulasi pangan; takaran mengikuti resep yang dipilih." : PENDING_FACT}</p></details>
         <details><summary>Net Weight &amp; Pack Configuration</summary><ul>{product.sizes.map((size) => <li key={size.id}>{size.label}{size.available ? " · tersedia" : ""}</li>)}</ul></details>
         <details><summary>Nutrition Information</summary><p className="pending-fact">{PENDING_FACT}</p></details>
         <details><summary>Certification &amp; Legal</summary><p className="pending-fact">{PENDING_FACT}</p></details>
@@ -71,17 +72,12 @@ function FlourProductDetail({ product }: { product: Product }) {
 }
 
 function CommerceProductDetail({ product }: { product: Product }) {
-  const steps = product.usageSteps ?? [];
-  const stepDescriptions: Record<string, string[]> = {
-    shake: ["Tuangkan satu sachet ke gelas atau shaker.", "Tambahkan 250–300 mL air suhu ruang.", "Aduk, diamkan 1–2 menit, lalu aduk kembali."],
-    ppang: ["Simpan sesuai petunjuk pada kemasan.", "Hangatkan dengan microwave, air fryer, atau oven.", "Sajikan hangat untuk menikmati tekstur dan filling."],
-    mie: ["Didihkan sekitar 400 mL air.", "Masak mie selama 3–4 menit lalu tiriskan.", "Campurkan dengan bumbu hingga merata."],
-  };
+  const steps = directCommerce ? product.usageSteps ?? [] : [];
   return <>
     <section className="product-hero commerce-product">
       <div className="product-detail-image"><Image src={product.image} alt={product.imageAlt} fill priority sizes="(max-width: 800px) 100vw, 55vw" unoptimized /></div>
       <div className="product-detail-copy"><span className="eyebrow">{product.eyebrow}</span><h1>{product.name.toUpperCase()}</h1><p className="descriptor">{product.descriptor}</p><p className="product-story">{product.story}</p><BuyBox product={product} /><PurchaseOptions productSlug={product.slug} productId={product.id} placement="pdp" /><div className="product-facts"><details open><summary>Komposisi</summary><p>{product.ingredients ?? PENDING_FACT}</p></details><details><summary>Isi & ukuran</summary><p>{product.pack ?? PENDING_FACT}</p></details><details><summary>Cara penyajian</summary><p>{product.preparation ?? PENDING_FACT}</p></details><details><summary>Informasi nilai gizi</summary><p className="pending-fact">Nilai gizi menunggu hasil laboratorium dan persetujuan label final. Yubie tidak mempublikasikan angka atau klaim kesehatan sebelum tahap tersebut selesai.</p></details><details><summary>Produsen</summary><p>{product.producer ?? PENDING_FACT}</p></details></div></div>
     </section>
-    {steps.length > 0 && <section className="usage-section section"><span className="eyebrow">HOW TO ENJOY</span><h2>{steps.map((step) => step.toUpperCase()).join(". ")}.</h2>{product.id === "shake" && <figure className="usage-visual"><Image src="/photography/context/shake-preparation.webp" alt="Yubie Shake disajikan sebagai minuman ubi ungu yang sedang diaduk" fill sizes="100vw" unoptimized /></figure>}<div>{steps.map((step, index) => <article key={step}><b>0{index + 1}</b><h3>{step}</h3><p>{(stepDescriptions[product.id] ?? [])[index] ?? "Ikuti petunjuk pada kemasan produk."}</p></article>)}</div></section>}
+    {steps.length > 0 && <section className="usage-section section"><span className="eyebrow">HOW TO ENJOY</span><h2>{steps.map((step) => step.toUpperCase()).join(". ")}.</h2>{product.id === "shake" && <figure className="usage-visual"><Image src="/photography/context/shake-preparation.webp" alt="Yubie Shake disajikan sebagai minuman ubi ungu yang sedang diaduk" fill sizes="100vw" unoptimized /></figure>}<div>{steps.map((step, index) => <article key={step}><b>0{index + 1}</b><h3>{step}</h3><p>{PENDING_FACT}</p></article>)}</div></section>}
   </>;
 }

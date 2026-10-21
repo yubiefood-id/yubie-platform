@@ -23,8 +23,8 @@ const SESSION_INPUT = {
   currency: "IDR",
   customerEmail: "customer@example.com",
   description: "Yubie order co_1",
-  successReturnUrl: "https://yubie.id/checkout/success",
-  cancelReturnUrl: "https://yubie.id/checkout/cancel",
+  successReturnUrl: "https://yubiefood.com/checkout/success",
+  cancelReturnUrl: "https://yubiefood.com/checkout/cancel",
   items: [{ referenceId: "flour-250g", name: "Yubie Flour 250 g", quantity: 2, netUnitAmount: 15000 }],
 };
 
@@ -60,8 +60,8 @@ test("create session sends the official /sessions contract (mode + category are 
   assert.equal(body.currency, "IDR");
   assert.equal(body.capture_method, "AUTOMATIC");
   assert.equal(body.locale, "id");
-  assert.equal(body.success_return_url, "https://yubie.id/checkout/success");
-  assert.equal(body.cancel_return_url, "https://yubie.id/checkout/cancel");
+  assert.equal(body.success_return_url, "https://yubiefood.com/checkout/success");
+  assert.equal(body.cancel_return_url, "https://yubiefood.com/checkout/cancel");
   assert.deepEqual(body.items[0], {
     reference_id: "flour-250g",
     name: "Yubie Flour 250 g",

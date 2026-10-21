@@ -7,10 +7,10 @@ Yubie's owned platform maximizes **trust, routing, conversation and learning**. 
 ## Customer journeys
 
 ### D2C direct
-Search/social -> yubie.id -> product discovery -> marketplace -> checkout.
+Search/social -> yubiefood.com -> product discovery -> marketplace -> checkout.
 
 ### D2C assisted
-yubie.id -> WhatsApp -> approved answer/recommendation -> marketplace links -> checkout.
+yubiefood.com -> WhatsApp -> approved answer/recommendation -> marketplace links -> checkout.
 
 ### B2B
 website/social/referral -> WhatsApp -> progressive qualification -> human/sales -> CRM -> sample/quote/product development.

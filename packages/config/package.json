@@ -8,6 +8,10 @@
       "types": "./src/index.ts",
       "default": "./dist/index.js"
     },
+    "./launch": {
+      "types": "./src/launch.ts",
+      "default": "./dist/launch.js"
+    },
     "./tsconfig.base.json": "./tsconfig.base.json"
   },
   "scripts": {

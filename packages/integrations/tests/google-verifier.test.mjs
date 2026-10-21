@@ -46,7 +46,7 @@ const VALID_PAYLOAD = {
   aud: CLIENT_ID,
   sub: "google-sub-42",
   exp: Math.floor(Date.now() / 1000) + 3600,
-  email: "hello@yubiefood.id",
+  email: "hello@yubiefood.com",
   email_verified: true,
   name: "Hello World",
   picture: "https://pictures.example/hello.png",
@@ -56,7 +56,7 @@ test("verifier accepts a correctly signed token and returns the identity", async
   const result = await makeVerifier().verify(makeToken({ payload: VALID_PAYLOAD }));
   assert.equal(result.ok, true);
   assert.equal(result.value.sub, "google-sub-42");
-  assert.equal(result.value.email, "hello@yubiefood.id");
+  assert.equal(result.value.email, "hello@yubiefood.com");
   assert.equal(result.value.emailVerified, true);
 });
 

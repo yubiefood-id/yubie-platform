@@ -15,7 +15,7 @@
 
 ## Not required
 
-- direct payment on yubie.id;
+- direct payment on yubiefood.com;
 - first-party order/reservation;
 - Medusa/Hyperswitch;
 - custom courier orchestration.

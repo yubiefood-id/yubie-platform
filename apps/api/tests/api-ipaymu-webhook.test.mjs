@@ -137,7 +137,7 @@ function post(fields, signature, contentType = "application/json") {
   const body = contentType === "application/x-www-form-urlencoded"
     ? new URLSearchParams(Object.entries(fields).map(([key, value]) => [key, String(value)])).toString()
     : JSON.stringify(fields);
-  return handleRequest(new Request("https://api.yubiefood.id/v1/webhooks/ipaymu", {
+  return handleRequest(new Request("https://api.yubiefood.com/v1/webhooks/ipaymu", {
     method: "POST",
     headers: { "content-type": contentType, "x-signature": signature },
     body,

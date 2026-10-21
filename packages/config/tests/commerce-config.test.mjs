@@ -14,7 +14,7 @@ const XENDIT_BASE = {
   XENDIT_SECRET_KEY: "xnd_test_secret",
   XENDIT_WEBHOOK_TOKEN: "callback-token",
   XENDIT_BUSINESS_ID: "biz-123",
-  APP_ORIGIN: "https://yubie.id",
+  APP_ORIGIN: "https://yubiefood.com",
 };
 
 test("unset commerce defaults to preview with static listings and no database", () => {
@@ -53,7 +53,7 @@ test("valid xendit configuration parses", () => {
   const config = parseCommerceRuntimeConfig(XENDIT_BASE);
   assert.equal(config.provider, "xendit");
   assert.equal(config.databaseConfigured, true);
-  assert.equal(config.appOrigin, "https://yubie.id");
+  assert.equal(config.appOrigin, "https://yubiefood.com");
 });
 
 test("xendit aggregates every missing required variable", () => {
@@ -73,7 +73,7 @@ test("xendit aggregates every missing required variable", () => {
 
 test("xendit rejects a non-https APP_ORIGIN (Xendit return URLs must be HTTPS)", () => {
   assert.throws(
-    () => parseCommerceRuntimeConfig({ ...XENDIT_BASE, APP_ORIGIN: "http://yubie.id" }),
+    () => parseCommerceRuntimeConfig({ ...XENDIT_BASE, APP_ORIGIN: "http://yubiefood.com" }),
     /APP_ORIGIN must be an https URL/,
   );
   assert.throws(

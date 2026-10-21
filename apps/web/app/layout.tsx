@@ -5,6 +5,7 @@ import { Header } from "@/components/layout/header";
 import { CartProvider } from "@/features/cart/cart-context";
 import { StorefrontWidgets } from "@/components/commerce/storefront-widgets";
 import { siteConfig } from "@/config/site";
+import { directCommerce } from "@/config/launch";
 import "./globals.css";
 
 const manrope = Manrope({ variable: "--font-sans", subsets: ["latin"] });
@@ -15,10 +16,10 @@ export const metadata: Metadata = {
   title: { default: "Yubie — Rooted here. Made for now.", template: "%s · Yubie" },
   description: "Yubie mengubah ubi Indonesia menjadi produk pangan modern untuk baking, breakfast, dan everyday creations.",
   openGraph: { title: "Yubie — Rooted here. Made for now.", description: "Modern Indonesian sweet-potato food, made for now.", images: ["/photography/context/lifestyle-breakfast.webp"] },
-  other: { "codex-preview": "development" },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const jsonLd = { "@context": "https://schema.org", "@type": "Organization", name: "Yubie", slogan: "Rooted here. Made for now.", address: { "@type": "PostalAddress", addressLocality: "Bogor", addressCountry: "ID" } };
-  return <html lang="id"><body className={`${manrope.variable} ${cormorant.variable}`}><CartProvider><Header />{children}<Footer /><StorefrontWidgets /></CartProvider><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} /></body></html>;
+  const content = <><Header />{children}<Footer />{directCommerce && <StorefrontWidgets />}</>;
+  return <html lang="id"><body className={`${manrope.variable} ${cormorant.variable}`}>{directCommerce ? <CartProvider>{content}</CartProvider> : content}<script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} /></body></html>;
 }

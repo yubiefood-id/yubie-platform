@@ -3,7 +3,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { foodApplications, productFamilies, rootVarieties } from "@yubie/domain";
+import { foodApplications, rootVarieties } from "@yubie/domain";
+import { products as productFamilies } from "@/config/products";
 import { trackEvent } from "@/lib/analytics";
 
 export function RootExplorer({ compact = false }: { compact?: boolean }) {

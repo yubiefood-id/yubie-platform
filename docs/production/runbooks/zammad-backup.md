@@ -1,6 +1,6 @@
 # Zammad backup runbook
 
-**Scope:** Dedicated Zammad VPS (`support-staging.yubie.id` / `support.yubie.id`)
+**Scope:** Dedicated Zammad VPS (`support-staging.yubiefood.com` / `support.yubiefood.com`)
 
 ## Prerequisites
 

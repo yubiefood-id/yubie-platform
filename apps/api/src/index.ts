@@ -21,6 +21,7 @@ import {
 } from "@yubie/application";
 import { b2bLeadSchema, checkoutRequestSchema, googleLoginSchema, newsletterSubmissionSchema, productWaitlistSchema } from "@yubie/validation";
 import { parseYubieEnvName } from "@yubie/config";
+import { customerRouteEnabled, parseLaunchProfile } from "@yubie/config/launch";
 import { paymentStatusFromProviderSession } from "@yubie/domain";
 import { parseIpaymuCallbackBody, verifyIpaymuCallback } from "@yubie/integrations";
 import { createDatabase, type Database } from "@yubie/persistence";
@@ -181,6 +182,10 @@ export async function handleRequest(request: Request): Promise<Response> {
 
 async function routeRequest(request: Request, requestId: string): Promise<Response> {
   const url = new URL(request.url);
+  const profile = parseLaunchProfile(process.env.YUBIE_LAUNCH_PROFILE);
+  if (!customerRouteEnabled(profile, url.pathname)) {
+    return json({ ok: false, code: "FEATURE_DISABLED" }, { status: 503, headers: { "cache-control": "no-store" } });
+  }
   const ctx = getContext();
 
   const gate = proxyTrustGate(request, url.pathname);

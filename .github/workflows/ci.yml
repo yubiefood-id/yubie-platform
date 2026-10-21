@@ -26,6 +26,16 @@ jobs:
       # check = lint + typecheck + secret:scan + test (DB-gated suites skip)
       - run: npm run check
       - run: npm run build
+      - name: Verify catalog static release artifact
+        run: npm run test:catalog
+      - name: Upload verified catalog deployment candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: catalog-candidate-${{ github.sha }}
+          path: .vercel/output/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
 
   persistence:
     runs-on: ubuntu-latest
@@ -136,6 +146,10 @@ jobs:
       # Browser requests to checkout/auth APIs are intercepted with synthetic,
       # non-PII fixtures. This job never receives PSP or production secrets.
       - run: npm run test:e2e
+        env:
+          E2E_BROWSER_MATRIX: full
+      - name: Verify real static catalog across the browser matrix
+        run: npm run test:e2e:catalog
         env:
           E2E_BROWSER_MATRIX: full
       - name: Upload sanitized browser evidence

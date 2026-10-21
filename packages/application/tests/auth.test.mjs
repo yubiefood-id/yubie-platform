@@ -11,7 +11,7 @@ import {
   SequentialIdGenerator,
 } from "../dist/index.js";
 
-const IDENTITY = { sub: "google-sub-1", email: "hello@yubiefood.id", name: "Hello World", picture: null, emailVerified: true };
+const IDENTITY = { sub: "google-sub-1", email: "hello@yubiefood.com", name: "Hello World", picture: null, emailVerified: true };
 
 function makeVerifier(override = {}) {
   return { async verify() { return { ok: true, value: { ...IDENTITY, ...override } }; } };

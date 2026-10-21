@@ -7,6 +7,8 @@ import { ProductComparison } from "@/components/commerce/product-comparison";
 import { RootExplorer } from "@/components/discovery/root-explorer";
 import { NewsletterForm } from "@/components/forms/newsletter-form";
 import { products } from "@/config/products";
+import { directCommerce } from "@/config/launch";
+import { siteConfig } from "@/config/site";
 
 export const metadata: Metadata = { alternates: { canonical: "/" } };
 
@@ -31,11 +33,11 @@ export default function Home() {
     />
 
     <section className="product-section section" id="products" data-home-section="products">
-      <header className="section-head"><div><span className="eyebrow">SHOP THE YUBIE FAMILY</span><h2>One root family.<br /><em>Four ways to enjoy.</em></h2></div><p>Pilih ukuran, tambahkan beberapa produk ke keranjang, lalu lanjutkan ke checkout aman dalam satu alur.</p></header>
+      <header className="section-head"><div><span className="eyebrow">SHOP THE YUBIE FAMILY</span><h2>One root family.<br /><em>Four ways to enjoy.</em></h2></div><p>{directCommerce ? "Pilih ukuran dan lihat pilihan transaksi pada lingkungan sandbox." : "Jelajahi empat keluarga produk, pilihan ukuran, dan harga katalog. Pembelian langsung belum tersedia di situs ini."}</p></header>
       <ProductCatalog products={products} />
     </section>
 
-    <ProductComparison />
+    {directCommerce && <ProductComparison />}
 
     <section className="story-section" data-home-section="our-roots-story">
       <div className="story-image"><Image src="/photography/context/root-harvest.webp" alt="Panen ubi ungu dari bedengan tanah dengan keranjang bambu di lahan Indonesia" fill sizes="(max-width: 800px) 100vw, 50vw" unoptimized /></div>
@@ -59,6 +61,6 @@ export default function Home() {
 
     <section className="b2b-section section reveal" data-home-section="b2b"><div><span className="eyebrow light-text">FOR BAKERIES · CAFÉS · FOOD MAKERS</span><h2>BUILD YOUR NEXT PRODUCT <em>WITH YUBIE.</em></h2></div><div><p>Mulai dari bulk ingredients dan product sampling hingga pembahasan product development sesuai kebutuhan bisnis Anda.</p><Link className="button gold" href="/b2b#enquiry">Request a B2B Sample <span>↗</span></Link></div></section>
 
-    <section className="newsletter-section section" data-home-section="community"><div><span className="eyebrow">YUBIE COMMUNITY</span><h2>DON’T MISS<br /><em>WHAT’S COOKING.</em></h2><p>Recipes, product drops, local food stories, and Yubie updates—sent occasionally. Newsletter consent terpisah dari product waitlist.</p></div><NewsletterForm /></section>
+    <section className="newsletter-section section" data-home-section="community"><div><span className="eyebrow">YUBIE COMMUNITY</span><h2>LET’S KEEP<br /><em>IN TOUCH.</em></h2><p>{directCommerce ? "Recipes, product drops, local food stories, and Yubie updates." : "Pertanyaan produk dan kebutuhan bisnis dapat disampaikan melalui kontak Yubie."}</p></div>{directCommerce ? <NewsletterForm /> : <a className="button gold" href={`mailto:${siteConfig.email}`}>Hubungi Yubie <span>→</span></a>}</section>
   </main>;
 }

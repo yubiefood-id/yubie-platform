@@ -4,14 +4,14 @@
 
 - Image: `chatwoot/chatwoot:v4.17.1`
 - Services: web, sidekiq, postgres, redis
-- DNS: `support.yubie.id`
+- DNS: `support.yubiefood.com`
 
 ## Initial setup
 
 1. `docker compose -f infrastructure/chatwoot/docker-compose.yml up -d`
 2. Create super-admin via Chatwoot setup wizard
 3. Configure WhatsApp Cloud inbox (Meta credentials — operator supplied)
-4. Create AgentBot **Yubie Assistant** with webhook `https://bot.yubie.id/webhooks/chatwoot-agentbot`
+4. Create AgentBot **Yubie Assistant** with webhook `https://bot.yubiefood.com/webhooks/chatwoot-agentbot`
 5. Store AgentBot signing secret in `CHATWOOT_AGENTBOT_SECRET`
 
 ## Backup

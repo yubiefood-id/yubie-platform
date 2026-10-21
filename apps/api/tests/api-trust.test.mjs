@@ -42,7 +42,7 @@ const stubProvider = {
 
 const stubVerifier = {
   async verify() {
-    return { ok: true, value: { sub: "trust-sub", email: "trust@yubiefood.id", name: "Trust", picture: null, emailVerified: true } };
+    return { ok: true, value: { sub: "trust-sub", email: "trust@yubiefood.com", name: "Trust", picture: null, emailVerified: true } };
   },
 };
 
@@ -74,7 +74,7 @@ function buildContext() {
     webhookToken: "webhook-secret",
     xenditBusinessId: "biz-1",
     inventoryMode: "lots",
-    appOrigin: "https://yubie.id",
+    appOrigin: "https://yubiefood.com",
     verifier: stubVerifier,
     googleClientId: "trust-client-id.apps.googleusercontent.com",
     tx: new InMemoryTransactionManager({
@@ -109,8 +109,8 @@ function withEnv(overrides, run) {
   });
 }
 
-const post = (path, body, headers = {}) => handleRequest(new Request(`https://api.yubiefood.id${path}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: typeof body === "string" ? body : JSON.stringify(body) }));
-const get = (path, headers = {}) => handleRequest(new Request(`https://api.yubiefood.id${path}`, { headers }));
+const post = (path, body, headers = {}) => handleRequest(new Request(`https://api.yubiefood.com${path}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: typeof body === "string" ? body : JSON.stringify(body) }));
+const get = (path, headers = {}) => handleRequest(new Request(`https://api.yubiefood.com${path}`, { headers }));
 
 const checkoutBody = { lines: [{ productId: "flour", sizeId: "250g", quantity: 1 }], customerEmail: "trust@example.com" };
 

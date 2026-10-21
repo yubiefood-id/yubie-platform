@@ -84,7 +84,7 @@ setAppContext({
 });
 
 test("health endpoint exposes service status", async () => {
-  const response = await handleRequest(new Request("https://api.yubiefood.id/healthz"));
+  const response = await handleRequest(new Request("https://api.yubiefood.com/healthz"));
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.ok, true);
@@ -92,12 +92,12 @@ test("health endpoint exposes service status", async () => {
 });
 
 test("readyz reports readiness", async () => {
-  const response = await handleRequest(new Request("https://api.yubiefood.id/readyz"));
+  const response = await handleRequest(new Request("https://api.yubiefood.com/readyz"));
   assert.equal(response.status, 200);
 });
 
 test("purchase options returns active marketplace options", async () => {
-  const response = await handleRequest(new Request("https://api.yubiefood.id/v1/products/yubie-flour/purchase-options"));
+  const response = await handleRequest(new Request("https://api.yubiefood.com/v1/products/yubie-flour/purchase-options"));
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.data.productId, "flour");
@@ -105,33 +105,33 @@ test("purchase options returns active marketplace options", async () => {
 });
 
 test("active marketplace redirect succeeds", async () => {
-  const response = await handleRequest(new Request("https://api.yubiefood.id/go/shopee/yubie-flour-250?source=product_detail"));
+  const response = await handleRequest(new Request("https://api.yubiefood.com/go/shopee/yubie-flour-250?source=product_detail"));
   assert.equal(response.status, 302);
   assert.equal(response.headers.get("location"), "https://shopee.co.id/yubie-flour-250");
 });
 
 test("paused listing redirect is rejected", async () => {
-  const response = await handleRequest(new Request("https://api.yubiefood.id/go/shopee/paused-listing"));
+  const response = await handleRequest(new Request("https://api.yubiefood.com/go/shopee/paused-listing"));
   assert.equal(response.status, 404);
 });
 
 test("invalid channel is rejected", async () => {
-  const response = await handleRequest(new Request("https://api.yubiefood.id/go/evil/yubie-flour-250"));
+  const response = await handleRequest(new Request("https://api.yubiefood.com/go/evil/yubie-flour-250"));
   assert.equal(response.status, 400);
 });
 
 test("open redirect via query url is not supported", async () => {
-  const response = await handleRequest(new Request("https://api.yubiefood.id/go?url=https://evil.com"));
+  const response = await handleRequest(new Request("https://api.yubiefood.com/go?url=https://evil.com"));
   assert.equal(response.status, 404);
 });
 
 test("whatsapp redirect unavailable without configured intent", async () => {
-  const response = await handleRequest(new Request("https://api.yubiefood.id/go/whatsapp/flour-b2c"));
+  const response = await handleRequest(new Request("https://api.yubiefood.com/go/whatsapp/flour-b2c"));
   assert.equal(response.status, 503);
 });
 
 test("catalog exposes the four approved commercial product families", async () => {
-  const response = await handleRequest(new Request("https://api.yubiefood.id/v1/catalog"));
+  const response = await handleRequest(new Request("https://api.yubiefood.com/v1/catalog"));
   const payload = await response.json();
   assert.equal(payload.meta.count, 4);
   assert.equal(payload.data.find((product) => product.id === "shake").status, "available");
@@ -141,7 +141,7 @@ test("catalog exposes the four approved commercial product families", async () =
 });
 
 test("invalid newsletter submissions are rejected", async () => {
-  const response = await handleRequest(new Request("https://api.yubiefood.id/v1/newsletter", {
+  const response = await handleRequest(new Request("https://api.yubiefood.com/v1/newsletter", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: "not-an-email", consent: true })
@@ -150,15 +150,15 @@ test("invalid newsletter submissions are rejected", async () => {
 });
 
 test("waitlist accepts only scoped coming-soon product interest", async () => {
-  const accepted = await handleRequest(new Request("https://api.yubiefood.id/v1/waitlist", {
+  const accepted = await handleRequest(new Request("https://api.yubiefood.com/v1/waitlist", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "hello@yubiefood.id", productId: "shake", consent: true })
+    body: JSON.stringify({ email: "hello@yubiefood.com", productId: "shake", consent: true })
   }));
-  const rejected = await handleRequest(new Request("https://api.yubiefood.id/v1/waitlist", {
+  const rejected = await handleRequest(new Request("https://api.yubiefood.com/v1/waitlist", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "hello@yubiefood.id", productId: "flour", consent: true })
+    body: JSON.stringify({ email: "hello@yubiefood.com", productId: "flour", consent: true })
   }));
   assert.equal(accepted.status, 201);
   assert.equal((await accepted.json()).data.outcome, "joined");

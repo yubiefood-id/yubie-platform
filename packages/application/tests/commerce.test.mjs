@@ -52,8 +52,8 @@ function makeDeps() {
 const BASE_INPUT = {
   lines: [{ productId: "flour", sizeId: "250g", quantity: 2 }],
   customerEmail: "customer@example.com",
-  successReturnUrl: "https://yubie.id/checkout/success",
-  cancelReturnUrl: "https://yubie.id/checkout/cancel",
+  successReturnUrl: "https://yubiefood.com/checkout/success",
+  cancelReturnUrl: "https://yubiefood.com/checkout/cancel",
   idempotencyPrincipal: `guest:${"0".repeat(64)}`,
 };
 
@@ -78,7 +78,7 @@ test("checkout re-prices from the catalog, applies the shipping policy, and igno
   assert.equal(deps.provider.created[0].referenceId, checkout.checkoutRef);
   assert.equal(deps.provider.created[0].amount, 70000);
   // The success URL carries the opaque token.
-  assert.equal(deps.provider.created[0].successReturnUrl, `https://yubie.id/checkout/success?checkout=${checkout.checkoutToken}`);
+  assert.equal(deps.provider.created[0].successReturnUrl, `https://yubiefood.com/checkout/success?checkout=${checkout.checkoutToken}`);
 });
 
 test("checkout saga persists draft+intent, then pending_payment with the attached session", async () => {
