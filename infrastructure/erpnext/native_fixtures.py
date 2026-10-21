@@ -25,6 +25,19 @@ def ensure(doctype, name, fields):
     return frappe.get_doc({"doctype": doctype, **fields}).insert()
 
 
+def write_private_json(path, value):
+    temporary = path.with_name(path.name + ".tmp-" + secrets.token_hex(8))
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w") as stream:
+            json.dump(value, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 ensure("Company", COMPANY, {"company_name": COMPANY, "abbr": "YTS", "default_currency": "IDR", "country": "Indonesia", "chart_of_accounts": "Standard"})
 year = today()[:4]
 ensure("Fiscal Year", f"SYNTHETIC-{year}", {"year": f"SYNTHETIC-{year}", "year_start_date": f"{year}-01-01", "year_end_date": f"{year}-12-31", "companies": [{"company": COMPANY}]})
@@ -46,8 +59,7 @@ for name, roles in role_map.items():
     if name not in credentials:
         credentials[name] = {"user": email, "password": secrets.token_urlsafe(32)}
     update_password(email, credentials[name]["password"])
-private_path.write_text(json.dumps(credentials))
-os.chmod(private_path, 0o600)
+write_private_json(private_path, credentials)
 
 # A separate API identity can read mapped resources and has no stock-write role.
 readonly_role = "Yubie Synthetic Readonly"
@@ -69,8 +81,7 @@ integration.api_secret = credentials["integration"]["apiSecret"]
 integration.save()
 if not frappe.db.exists("User Permission", {"user": "integration@yubie.test", "allow": "Warehouse", "for_value": "Released - YTS"}):
     frappe.get_doc({"doctype": "User Permission", "user": "integration@yubie.test", "allow": "Warehouse", "for_value": "Released - YTS", "apply_to_all_doctypes": 1}).insert()
-private_path.write_text(json.dumps(credentials))
-os.chmod(private_path, 0o600)
+write_private_json(private_path, credentials)
 frappe.clear_cache()
 for folder in ["public", "private"]:
     marker = Path(frappe.get_site_path(folder, "files", "yubie-local-restore-proof.txt"))

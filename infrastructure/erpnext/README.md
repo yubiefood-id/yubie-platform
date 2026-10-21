@@ -1,6 +1,6 @@
 # Isolated ERPNext acceptance contract
 
-PREPARED, NOT DEPLOYED. No host/resource/cost approval or credentials are present. Do not run on the shared RetroPick/Yubie VPS. No running container, completed workflow, security approval or accounting sign-off is implied.
+Production: **NOT_PROVISIONED**. No production URL, host/resource/cost approval or credentials are confirmed. Do not run on the shared RetroPick/Yubie VPS. An isolated loopback-only local acceptance instance now exercises synthetic native workflows; [LOCAL_ACCEPTANCE.md](LOCAL_ACCEPTANCE.md) records its scope and reproduction. This does not establish production security, accounting approval or ERP_OPERATOR_READY.
 
 Reuse the official MIT-licensed [frappe_docker](https://github.com/frappe/frappe_docker/tree/df2a3b72910634cf0e878b59eccf68a93736bf9d). The reviewed pattern uses backend, frontend, websocket, two workers, scheduler and configurator, with separate MariaDB and Redis. Image index digests were resolved read-only from Docker Hub; `images.lock.json` pins them. Upstream source is not vendored or modified. ERPNext and database component licenses require operator review for the intended use.
 
