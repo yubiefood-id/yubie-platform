@@ -50,14 +50,14 @@ test("payment exception read model is authenticated, bounded, and excludes custo
   }]);
 
   const unauthorized = await handleOpsPayments(
-    new Request("https://api.yubie.id/ops/payments/exceptions"),
+    new Request("https://api.yubiefood.com/ops/payments/exceptions"),
     database,
   );
   assert.equal(unauthorized.status, 401);
   assert.equal(calls.length, 0);
   let databaseCreated = false;
   const lazyUnauthorized = await handleOpsPayments(
-    new Request("https://api.yubie.id/ops/payments/exceptions"),
+    new Request("https://api.yubiefood.com/ops/payments/exceptions"),
     () => {
       databaseCreated = true;
       return database;
@@ -67,7 +67,7 @@ test("payment exception read model is authenticated, bounded, and excludes custo
   assert.equal(databaseCreated, false);
 
   const response = await handleOpsPayments(
-    new Request("https://api.yubie.id/ops/payments/exceptions?limit=999", {
+    new Request("https://api.yubiefood.com/ops/payments/exceptions?limit=999", {
       headers: { authorization: "Bearer ops-test-token" },
     }),
     database,
@@ -87,7 +87,7 @@ test("payment exception cursor is fail-closed and parameterized", async () => {
   const { database, calls } = fakeDatabase([]);
 
   const invalid = await handleOpsPayments(
-    new Request("https://api.yubie.id/ops/payments/exceptions?cursor=not-base64-json"),
+    new Request("https://api.yubiefood.com/ops/payments/exceptions?cursor=not-base64-json"),
     database,
   );
   assert.equal(invalid.status, 400);
@@ -98,7 +98,7 @@ test("payment exception cursor is fail-closed and parameterized", async () => {
     id: "pay_1",
   })).toString("base64url");
   const response = await handleOpsPayments(
-    new Request(`https://api.yubie.id/ops/payments/exceptions?cursor=${cursor}&limit=25`),
+    new Request(`https://api.yubiefood.com/ops/payments/exceptions?cursor=${cursor}&limit=25`),
     database,
   );
   assert.equal(response.status, 200);
@@ -109,7 +109,7 @@ test("payment exception read failures return a bounded unavailable response", as
   process.env.YUBIE_ENV = "test";
   process.env.NODE_ENV = "test";
   delete process.env.OPS_API_TOKEN;
-  const request = new Request("https://api.yubie.id/ops/payments/exceptions");
+  const request = new Request("https://api.yubiefood.com/ops/payments/exceptions");
 
   const missingDatabase = await handleOpsPayments(request, null);
   assert.equal(missingDatabase.status, 503);

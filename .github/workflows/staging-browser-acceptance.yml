@@ -10,6 +10,14 @@ on:
       expected_sha:
         description: Full reviewed current-main SHA
         required: true
+      launch_profile:
+        type: choice
+        options: [PUBLIC_CATALOG_NO_SALES, MARKETPLACE_MSP, DIRECT_COMMERCE_SANDBOX]
+        default: PUBLIC_CATALOG_NO_SALES
+        required: true
+      expected_catalog_digest:
+        description: Reviewed sha256 artifact digest; required for catalog acceptance
+        required: false
       base_url:
         description: Approved HTTPS storefront origin
         required: true
@@ -87,6 +95,8 @@ jobs:
       - name: Run real remote tier without localhost fallback
         env:
           YUBIE_E2E_TIER: ${{ inputs.tier }}
+          E2E_LAUNCH_PROFILE: ${{ inputs.launch_profile }}
+          EXPECTED_CATALOG_DIGEST: ${{ inputs.expected_catalog_digest }}
           EXPECTED_RELEASE_SHA: ${{ inputs.expected_sha }}
           BASE_URL: ${{ inputs.base_url }}
           API_BASE_URL: ${{ inputs.api_base_url }}

@@ -1,7 +1,7 @@
 > SUPERSESSION NOTE (2026-10): this document predates ADR-009 (Zammad as
 > production support authority — Chatwoot is rollback-only) and ADR-012
 > (first-party Xendit checkout). Where Chatwoot appears as the support
-> topology, read Zammad (dedicated VPS, support.yubie.id). The Core VPS
+> topology, read Zammad (dedicated VPS, support.yubiefood.com). The Core VPS
 > additionally runs the Yubie bot (Zammad webhook ingress) and an explicit
 > migration job; commerce env (XENDIT_*, INVENTORY_MODE, APP_ORIGIN,
 > API_PROXY_TOKEN) is defined in infrastructure/staging.env.example. The
@@ -109,11 +109,11 @@ PostgreSQL, API and worker networks are private; do not publish database port to
 Suggested:
 
 ~~~text
-www.yubie.id         -> edge web
-api.yubie.id         -> Core VPS via Cloudflare
-ops.yubie.id         -> restricted Core VPS
-support.yubie.id     -> Chatwoot host
-crm.yubie.id         -> restricted CRM host
+www.yubiefood.com         -> edge web
+api.yubiefood.com         -> Core VPS via Cloudflare
+ops.yubiefood.com         -> restricted Core VPS
+support.yubiefood.com     -> Chatwoot host
+crm.yubiefood.com         -> restricted CRM host
 ~~~
 
 Admin services should be protected by identity-aware proxy/VPN or IP policy in addition to application auth.

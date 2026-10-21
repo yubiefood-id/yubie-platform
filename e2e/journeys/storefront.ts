@@ -16,15 +16,8 @@ for (const path of publicRoutes) {
   });
 }
 
-// Literal, hand-checked catalog baseline, independent of the code computing
-// prices. This is software parity evidence, not finance/label approval.
-const variants = [
-  ["flour", "250g", "250 g", "35.000"], ["flour", "1kg", "1 kg", "120.000"],
-  ["shake", "sachet", "1 sachet · 45 g", "19.500"], ["shake", "pack-7", "Pack · 7 sachet", "129.000"],
-  ["ppang", "mini", "1 Mini Ppang · 35 g", "9.000"], ["ppang", "maxi", "1 Maxi Ppang", "19.000"], ["ppang", "mini-pack-5", "Pack · 5 Mini Ppang", "42.000"],
-  ["mie", "single", "1 bungkus · 75 g", "16.000"], ["mie", "pack-3", "Pack · 3 bungkus", "45.000"],
-] as const;
-const escapePattern = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+import { variants, escapePattern } from "../support/catalog-variants.js";
+
 for (const [productId, sizeId, label, price] of variants) {
   test(`variant ${productId}/${sizeId} keeps its price and selection through cart refresh`, async ({ page }) => {
     const response = await page.goto(`/products/yubie-${productId}`);

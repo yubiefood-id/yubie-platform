@@ -27,12 +27,12 @@ test("robots and sitemap are served by the Worker with the approved production d
   assert.doesNotMatch(xml, /yubie\.id|staging|\/checkout|\/account/);
 });
 
-test("renders development preview metadata", async () => {
+test("never renders development preview metadata in a built artifact", async () => {
   const { default: worker } = await makeWorker();
   const response = await worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), env, ctx);
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-  assert.match(await response.text(), developmentPreviewMeta);
+  assert.doesNotMatch(await response.text(), developmentPreviewMeta);
 });
 
 test("renders catalog, product, and supporting routes", async () => {
@@ -129,8 +129,10 @@ test("all approved product PDPs expose their exact verified variants", async () 
   assert.match(flourHtml, /CHOOSE YOUR ROOT/i);
   assert.match(flourHtml, /Add to Cart/);
   assert.match(flourHtml, /35\.000/);
-  assert.match(shakeHtml, /POUR[\s\S]*ADD WATER[\s\S]*MIX/);
-  assert.match(ppangHtml, /KEEP FROZEN[\s\S]*HEAT[\s\S]*ENJOY/);
+  for (const html of [flourHtml, shakeHtml, ppangHtml, mieHtml]) {
+    assert.match(html, /menunggu verifikasi final untuk SKU komersial/);
+    assert.doesNotMatch(html, /HOW TO ENJOY|KEEP FROZEN|ADD WATER|microwave 15|250–300 mL/);
+  }
   for (const html of [shakeHtml, ppangHtml, mieHtml]) assert.match(html, /Add to Cart/);
   assert.match(shakeHtml, /19\.500/);
   assert.match(ppangHtml, /9\.000/);

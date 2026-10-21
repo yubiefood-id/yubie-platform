@@ -14,7 +14,7 @@
     "dev": "npm run build && node dist/server.js",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test tests/*.test.mjs"
+    "test": "npm run build && YUBIE_LAUNCH_PROFILE=DIRECT_COMMERCE_SANDBOX node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@yubie/application": "*",

@@ -1,0 +1,11 @@
+# Controlled artifact deployment
+
+No production authorization has been granted. Git automatic deployment is disabled for all branches in vercel.json. Merging source is not deployment approval. No shared VPS, DNS, remote database migration or real payment activation is included.
+
+Build the exact reviewed commit in a clean tracked checkout using npm ci and npm run test:catalog. npm run verify:catalog recomputes the file digest and verifies policy/CSP. The public release-manifest records full source SHA, sourceDirty, profile, disabled payment mode and digest; approvalStatus remains REQUIRES_OWNER_APPROVAL. CI uploads only .vercel/output as catalog-candidate-SHA, never .vercel/project.json or environment files. Record the CI artifact archive digest as well as the inner catalog digest.
+
+After explicit staging approval, deploy the verified prebuilt output into the approved isolated staging target using its protected deployment credential. Test the actual URL through Access with the reviewed SHA/digest. Vercel routing/headers, RSC transitions, static robots/sitemap, canonical domain, all nine variants, accessibility and zero API dependency require deployed-artifact acceptance; the local route interpreter does not establish platform behavior.
+
+Before production require release-owner approval naming SHA, digest, target environment, PUBLIC_CATALOG_NO_SALES (or approved MARKETPLACE_MSP), payment mode disabled, UTC deployment window, operator/on-call and rollback target. Use the approved Vercel production staging procedure (prebuilt --prod --skip-domain), verify the deployment URL, then promote that same deployment. Promoting a preview can rebuild under production configuration, so it is not proof of the same artifact. Verify the release identity again after promotion on apex and www and record deployment ID, timestamp and owner reference.
+
+Abort for Access failure, identity drift, sales UI in catalog, unknown listing, specification leak, API dependence, header loss, missing assets, broken RSC navigation or unapproved contact/legal content. Roll back aliases to a previously approved safe catalog deployment; preserve audit evidence. If no safe prior catalog exists, use approved maintenance protection. Never restore an unsafe preview merely to restore HTTP 200.

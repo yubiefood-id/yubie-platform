@@ -34,7 +34,7 @@ export default class RedactedReporter implements Reporter {
       sourceSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
       workingTreeDirty = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).length > 0;
     } catch { /* Exported source cannot claim Git provenance. */ }
-    const metadata = { tier, expectedSha: this.config?.metadata.expectedSha || null, sourceSha, workingTreeDirty, recordedAt: new Date().toISOString(), acceptanceScope: "selected-browser-suite-only", fullPlatformAcceptance: false };
+    const metadata = { tier, launchProfile: this.config?.metadata.launchProfile || null, expectedDigest: this.config?.metadata.expectedDigest || null, mocked: tier === "mock", expectedSha: this.config?.metadata.expectedSha || null, sourceSha, workingTreeDirty, recordedAt: new Date().toISOString(), acceptanceScope: "selected-browser-suite-only", fullPlatformAcceptance: false };
     const escape = (value: string) => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[char]!);
     const write = (name: string, content: string) => writeFileSync(join(directory, name), content, { mode: 0o600 });
     write("report.json", JSON.stringify({ ...metadata, totals, tests }, null, 2));

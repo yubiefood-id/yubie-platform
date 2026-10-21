@@ -7,7 +7,7 @@ Dedicated VPS running official `zammad-docker-compose` with Yubie override. See 
 ## Health checks
 
 ~~~bash
-export ZAMMAD_BASE_URL=https://support-staging.yubie.id
+export ZAMMAD_BASE_URL=https://support-staging.yubiefood.com
 export ZAMMAD_API_TOKEN=...
 infrastructure/zammad/scripts/verify.sh
 ~~~
@@ -35,9 +35,9 @@ Structured logs: `support.reconcile` (`scanned`, `changed`, `errors`)
 ## Assistant runtime
 
 ~~~bash
-curl -s https://api.yubie.id/ops/assistant
+curl -s https://api.yubiefood.com/ops/assistant
 # emergency off without redeploy
-curl -X POST https://api.yubie.id/ops/assistant/emergency-off -H "Authorization: Bearer ..."
+curl -X POST https://api.yubiefood.com/ops/assistant/emergency-off -H "Authorization: Bearer ..."
 ~~~
 
 ## Deterministic concierge (M5-D)

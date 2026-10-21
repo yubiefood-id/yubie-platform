@@ -11,6 +11,9 @@
     "packages/*"
   ],
   "scripts": {
+    "build:catalog": "npm run build --workspace @yubie/config && npm run build --workspace @yubie/domain && npm run build --workspace @yubie/validation && npm run build --workspace @yubie/application && npm run build --workspace @yubie/integrations && node scripts/build-catalog.mjs",
+    "verify:catalog": "node scripts/verify-catalog.mjs",
+    "test:catalog": "npm run build:catalog && node --test apps/web/tests/catalog/*.test.mjs",
     "dev": "npm run dev:web",
     "dev:web": "npm run dev --workspace @yubie/web --",
     "dev:api": "npm run dev --workspace @yubie/api",
@@ -33,6 +36,7 @@
     "payment:scan": "node scripts/payment-rule-scan.mjs",
     "secret:scan": "node scripts/secret-scan.mjs",
     "test:e2e": "playwright test",
+    "test:e2e:catalog": "YUBIE_E2E_TIER=catalog playwright test",
     "test:e2e:staging": "YUBIE_E2E_TIER=staging playwright test",
     "test:e2e:sandbox": "YUBIE_E2E_TIER=sandbox playwright test",
     "test:e2e:production-smoke": "YUBIE_E2E_TIER=production-smoke playwright test",

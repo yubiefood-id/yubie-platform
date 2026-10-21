@@ -58,8 +58,8 @@ export YUBIE_RELEASE=<commit-sha>
 docker compose pull
 docker compose run --rm migrate
 docker compose up -d --remove-orphans
-curl -f https://api.yubie.id/healthz
-curl -f https://api.yubie.id/readyz
+curl -f https://api.yubiefood.com/healthz
+curl -f https://api.yubiefood.com/readyz
 ~~~
 
 Then synthetic channel checks and observation hold.

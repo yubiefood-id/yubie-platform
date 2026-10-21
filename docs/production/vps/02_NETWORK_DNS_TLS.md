@@ -17,11 +17,11 @@ Do not expose PostgreSQL, Redis or application-internal ports to the internet.
 Suggested:
 
 ~~~text
-www.yubie.id      edge public website
-api.yubie.id      Yubie Core
-ops.yubie.id      restricted internal ops
-support.yubie.id  Chatwoot
-crm.yubie.id      restricted CRM
+www.yubiefood.com      edge public website
+api.yubiefood.com      Yubie Core
+ops.yubiefood.com      restricted internal ops
+support.yubiefood.com  Chatwoot
+crm.yubiefood.com      restricted CRM
 ~~~
 
 Cloudflare can front public HTTP services for DNS/WAF/CDN.
@@ -33,12 +33,12 @@ Caddy is preferred initially because automatic HTTPS and reverse proxy configura
 Example shape:
 
 ~~~caddy
-api.yubie.id {
+api.yubiefood.com {
   encode zstd gzip
   reverse_proxy api:8787
 }
 
-ops.yubie.id {
+ops.yubiefood.com {
   reverse_proxy ops:3000
 }
 ~~~
@@ -108,7 +108,7 @@ Ops/CRM/Chatwoot super-admin require stronger control:
 ~~~bash
 ss -lntup
 docker ps
-curl -I https://api.yubie.id/healthz
+curl -I https://api.yubiefood.com/healthz
 ~~~
 
 Then verify from an external network.

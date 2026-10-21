@@ -1,3 +1,5 @@
+import { directCommerce } from "@/config/launch";
+import { CommerceUnavailable } from "@/components/commerce/unavailable";
 import type { Metadata } from "next";
 import { OrderDetailView } from "@/components/auth/order-detail-view";
 
@@ -13,5 +15,6 @@ export function generateStaticParams() {
 }
 
 export default function AccountOrderDetailPage() {
+  if (!directCommerce) return <CommerceUnavailable />;
   return <main id="main"><OrderDetailView /></main>;
 }

@@ -43,7 +43,7 @@ docker compose \
 ./infrastructure/zammad/scripts/verify.sh
 ~~~
 
-DNS: `support-staging.yubie.id` (staging), `support.yubie.id` (production later).
+DNS: `support-staging.yubiefood.com` (staging), `support.yubiefood.com` (production later).
 
 ## Yubie integration
 

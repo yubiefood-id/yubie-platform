@@ -71,10 +71,7 @@ export const productFamilies: Product[] = [
       { id: "1kg", label: "1 kg", price: 120000, available: true, sku: "YBF-1000" },
     ],
     verificationStatus: "verified",
-    ingredients: "Ubi jalar ungu varietas Ayamurasaki.",
-    producer: "PT Nutrihealth Karya Indonesia",
     pack: "Pouch 250 g atau 1 kg.",
-    shelfLife: "2 tahun sesuai dokumen informasi kemasan; tanggal kedaluwarsa pada kemasan tetap menjadi acuan.",
   },
   {
     id: "shake",
@@ -93,10 +90,6 @@ export const productFamilies: Product[] = [
       { id: "pack-7", label: "Pack · 7 sachet", price: 129000, available: true, sku: "YBS-7X45" },
     ],
     verificationStatus: "verified",
-    usageSteps: ["Pour", "Add Water", "Mix"],
-    ingredients: "Tepung ubi ungu, susu bubuk, kacang kenari, tepung putih telur, gula aren, dan Lactobacillus plantarum Dad-13.",
-    preparation: "Tuangkan 1 sachet ke gelas atau shaker, tambahkan 250–300 mL air suhu ruang, aduk atau kocok hingga rata, diamkan 1–2 menit, lalu aduk kembali.",
-    producer: "PT Nutrihealth Karya Indonesia",
     pack: "Sachet 45 g; tersedia satuan atau pack isi 7 sachet.",
   },
   {
@@ -110,17 +103,13 @@ export const productFamilies: Product[] = [
     image: "/products/yubie-ppang-concept.webp",
     imageAlt: "Studi visual Yubie Ppang berupa roti ubi one-bite dalam kotak ungu tanpa klaim kemasan",
     eyebrow: "FROZEN ONE-BITE",
-    story: "Ppang berbasis ubi Cilembu dalam pilihan mini dan maxi—hangatkan saat ingin menikmati tekstur dan filling-nya.",
+    story: "Yubie Ppang dalam pilihan Mini, Maxi, dan pack Mini untuk eksplorasi keluarga produk Yubie.",
     sizes: [
       { id: "mini", label: "1 Mini Ppang · 35 g", price: 9000, available: true, sku: "YBP-MINI-035" },
       { id: "maxi", label: "1 Maxi Ppang", price: 19000, available: true, sku: "YBP-MAXI" },
       { id: "mini-pack-5", label: "Pack · 5 Mini Ppang", price: 42000, available: true, sku: "YBP-MINI-5" },
     ],
     verificationStatus: "verified",
-    usageSteps: ["Keep Frozen", "Heat", "Enjoy"],
-    ingredients: "Ubi Cilembu, tepung tapioka, margarin, susu cair, gula pasir, telur, tepung beras, tepung terigu, susu bubuk, minyak kelapa sawit, gula palem, dark chocolate, white chocolate, keju oles, keju cheddar, whipping cream, butter, dan garam.",
-    preparation: "Hangatkan sebelum disajikan: microwave 15–20 detik, air fryer 150°C selama 3–5 menit, atau oven 150°C selama 5–7 menit.",
-    producer: "PT Nutrihealth Karya Indonesia",
     pack: "Mini Ppang 35 g per buah; pack mini berisi 5 buah.",
   },
   {
@@ -140,11 +129,7 @@ export const productFamilies: Product[] = [
       { id: "pack-3", label: "Pack · 3 bungkus", price: 45000, available: true, sku: "YBM-3X75" },
     ],
     verificationStatus: "verified",
-    ingredients: "Tepung ubi ungu, tepung tapioka, tepung terigu, garam, dan agar-agar.",
-    preparation: "Didihkan sekitar 400 mL air, masukkan mie dan masak 3–4 menit, tiriskan, lalu campurkan dengan bumbu hingga merata.",
-    producer: "PT Nutrihealth Karya Indonesia",
     pack: "75 g per bungkus; tersedia satuan atau pack isi 3.",
-    usageSteps: ["Boil", "Drain", "Mix"],
   },
 ];
 

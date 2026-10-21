@@ -84,8 +84,8 @@ test("migration 0009 creates the inventory core; checkout reserves FEFO atomical
     const input = {
       lines: [{ productId: "flour", sizeId: "250g", quantity: 7 }],
       customerEmail: "inv-pg@example.com",
-      successReturnUrl: "https://yubie.id/checkout/success",
-      cancelReturnUrl: "https://yubie.id/checkout/cancel",
+      successReturnUrl: "https://yubiefood.com/checkout/success",
+      cancelReturnUrl: "https://yubiefood.com/checkout/cancel",
       inventoryMode: "lots",
       idempotencyPrincipal: `guest:${"0".repeat(64)}`,
     };

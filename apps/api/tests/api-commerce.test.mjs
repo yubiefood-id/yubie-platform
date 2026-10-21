@@ -40,7 +40,7 @@ const stubProvider = {
 
 const stubVerifier = {
   async verify() {
-    return { ok: true, value: { sub: "google-sub-api", email: "hello@yubiefood.id", name: "Hello", picture: null, emailVerified: true } };
+    return { ok: true, value: { sub: "google-sub-api", email: "hello@yubiefood.com", name: "Hello", picture: null, emailVerified: true } };
   },
 };
 
@@ -71,7 +71,7 @@ const context = {
   webhookToken: "webhook-secret",
   xenditBusinessId: "biz-1",
   inventoryMode: "lots",
-  appOrigin: "https://yubie.id",
+  appOrigin: "https://yubiefood.com",
   verifier: stubVerifier,
   googleClientId: "test-client-id.apps.googleusercontent.com",
   tx: new InMemoryTransactionManager({
@@ -88,8 +88,8 @@ const context = {
 
 setAppContext(context);
 
-const post = (path, body, headers = {}) => handleRequest(new Request(`https://api.yubiefood.id${path}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) }));
-const get = (path, headers = {}) => handleRequest(new Request(`https://api.yubiefood.id${path}`, { headers }));
+const post = (path, body, headers = {}) => handleRequest(new Request(`https://api.yubiefood.com${path}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) }));
+const get = (path, headers = {}) => handleRequest(new Request(`https://api.yubiefood.com${path}`, { headers }));
 
 let idempotencyCounter = 0;
 

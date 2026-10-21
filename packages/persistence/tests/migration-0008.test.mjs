@@ -158,8 +158,8 @@ test("checkout saga and webhook are atomic and exactly-once on real PostgreSQL",
       lines: [{ productId: "flour", sizeId: "250g", quantity: 2 }],
       customerEmail: "pg@example.com",
       customerName: "PG Test",
-      successReturnUrl: "https://yubie.id/checkout/success",
-      cancelReturnUrl: "https://yubie.id/checkout/cancel",
+      successReturnUrl: "https://yubiefood.com/checkout/success",
+      cancelReturnUrl: "https://yubiefood.com/checkout/cancel",
       idempotencyPrincipal: `guest:${"0".repeat(64)}`,
     };
 

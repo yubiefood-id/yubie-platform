@@ -58,8 +58,8 @@ function makeDeps() {
 const LOTS_INPUT = {
   lines: [{ productId: "flour", sizeId: "250g", quantity: 7 }],
   customerEmail: "inv@example.com",
-  successReturnUrl: "https://yubie.id/checkout/success",
-  cancelReturnUrl: "https://yubie.id/checkout/cancel",
+  successReturnUrl: "https://yubiefood.com/checkout/success",
+  cancelReturnUrl: "https://yubiefood.com/checkout/cancel",
   inventoryMode: "lots",
   idempotencyPrincipal: `guest:${"0".repeat(64)}`,
 };

@@ -152,7 +152,7 @@ export class FakeZammadClient implements ZammadClient {
     const article: ZammadArticle = {
       id,
       ticket_id: Number(input.ticketId),
-      from: "bot@yubie.id",
+      from: "bot@yubiefood.com",
       to: "customer",
       subject: "Reply",
       body: input.body,
