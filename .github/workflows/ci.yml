@@ -138,6 +138,17 @@ jobs:
       - run: npm run test:e2e
         env:
           E2E_BROWSER_MATRIX: full
+      - name: Upload sanitized browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: browser-evidence-${{ github.sha }}
+          path: |
+            artifacts/qa/**/report.json
+            artifacts/qa/**/junit.xml
+            artifacts/qa/**/index.html
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
