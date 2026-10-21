@@ -25,6 +25,7 @@ export default defineConfig({
   fullyParallel: !remote,
   workers: remote ? 1 : process.env.CI ? 4 : undefined,
   forbidOnly: true,
+  failOnFlakyTests: true,
   retries: remote ? 0 : process.env.CI ? 1 : 0,
   globalTimeout: remote ? 30 * 60_000 : 10 * 60_000,
   timeout: 30_000,

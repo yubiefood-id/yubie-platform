@@ -18,7 +18,7 @@
 | Persistence + ops PG suites | Real unique constraints/locks, guest/auth2/10/100 concurrency, final-stock race, rollback/recovery, late/second-charge exception queue and metric, admin read-only queries/logout revocation, fresh/upgrade migration | REAL_LOCAL_POSTGRES, synthetic data/provider doubles |
 | Web built-worker tests | Real local HTTP upstream proxy cookies/cache control, canonical metadata/robots and rendered HTTP pages | LOCAL_ARTIFACT, not deployed Worker |
 
-Browsers: desktop Chromium1440×900, Pixel7 Chromium, desktop Firefox, iPhone13 WebKit. Remote uses one worker/no retries. Mock CI uses all four; local default uses two Chromium projects unless `E2E_BROWSER_MATRIX=full`. A retry marks the report flaky; it does not erase initial instability.
+Browsers: desktop Chromium1440×900, Pixel7 Chromium, desktop Firefox, iPhone13 WebKit. Remote uses one worker/no retries. Mock CI uses all four; local default uses two Chromium projects unless `E2E_BROWSER_MATRIX=full`. A retry marks the report flaky; `failOnFlakyTests: true` also fails the job, so a retry pass cannot satisfy release acceptance.
 
 ## Reproduction
 
