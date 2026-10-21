@@ -50,7 +50,8 @@
     "graph:setup-hooks": "bash scripts/graphify/setup-hooks.sh",
     "graph:semantic-bootstrap": "bash scripts/graphify/semantic-bootstrap.sh",
     "graph:llm-doctor": "bash scripts/graphify/llm-doctor.sh",
-    "graph:test": "node --test scripts/graphify/tests/*.test.mjs"
+    "graph:test": "node --test scripts/graphify/tests/*.test.mjs",
+    "test:erp:contracts": "node --test infrastructure/erpnext/*.test.mjs && python3 infrastructure/erpnext/private-files.test.py"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",

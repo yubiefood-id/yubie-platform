@@ -25,6 +25,8 @@ jobs:
       - run: npm ci
       # check = lint + typecheck + secret:scan + test (DB-gated suites skip)
       - run: npm run check
+      - name: Verify local ERP harness secret handling
+        run: npm run test:erp:contracts
       - run: npm run build
       - name: Verify catalog static release artifact
         run: npm run test:catalog
