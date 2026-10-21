@@ -1,5 +1,7 @@
 # Production go/no-go
 
+> Historical checkpoint. Current execution evidence and G0–G10 decision: [RELEASE_GO_NO_GO.md](RELEASE_GO_NO_GO.md). Do not treat older source/deployment or Refine status below as current.
+
 **Decision: NO-GO.** 2026-10-20T04:50Z, on `6a2f451`.
 
 First-party payments stay off. Production stays marketplace-first and staging stays on `COMMERCE_PROVIDER=preview`.

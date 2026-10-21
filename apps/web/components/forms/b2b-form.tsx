@@ -3,7 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
 const schema = z.object({
@@ -30,20 +30,28 @@ const intentLabels: Record<Data["intent"], string> = {
 
 export function B2BForm() {
   const [sent, setSent] = useState(false);
+  const [failed, setFailed] = useState(false);
   const searchParams = useSearchParams();
   const defaultIntent = (searchParams.get("intent") as Data["intent"] | null) ?? "general";
   const defaultInterest = searchParams.get("interest") ?? "";
-  const { register, handleSubmit, setValue, watch, formState: { errors, isSubmitting } } = useForm<Data>({
+  const { register, handleSubmit, setValue, control, formState: { errors, isSubmitting } } = useForm<Data>({
     resolver: zodResolver(schema),
     defaultValues: { intent: ["sample", "bulk", "product-development", "general"].includes(defaultIntent) ? defaultIntent : "general", interest: defaultInterest },
   });
-  const intent = watch("intent");
+  const intent = useWatch({ control, name: "intent" });
 
   useEffect(() => {
     if (defaultInterest) setValue("interest", defaultInterest === "flour" ? "Yubie Flour" : defaultInterest);
   }, [defaultInterest, setValue]);
 
-  const submit = async (data: Data) => { const response = await fetch("/api/b2b", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) }); if (response.ok) setSent(true); };
+  const submit = async (data: Data) => {
+    setFailed(false);
+    try {
+      const response = await fetch("/api/b2b", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+      if (!response.ok) throw new Error("Submission unavailable");
+      setSent(true);
+    } catch { setFailed(true); }
+  };
   if (sent) return <div className="b2b-success" role="status"><span>01</span><h2>Enquiry tervalidasi.</h2><p>Ini adalah prototype aman. Integrasi CRM/email belum diaktifkan, jadi belum ada pesan yang dikirim keluar.</p></div>;
   return <form className="b2b-form" onSubmit={handleSubmit(submit)} noValidate>
     <label>Nama<input {...register("name")} aria-invalid={!!errors.name} />{errors.name && <small>{errors.name.message}</small>}</label>
@@ -57,6 +65,7 @@ export function B2BForm() {
     <label>Produk yang diminati<select {...register("interest")} defaultValue="" aria-invalid={!!errors.interest}><option value="" disabled>Pilih</option><option>Yubie Flour</option><option>Yubie Shake</option><option>Yubie Ppang</option><option>Yubie Mie</option><option>Collaboration</option></select>{errors.interest && <small>{errors.interest.message}</small>}</label>
     <label className="wide">Pesan<textarea {...register("message")} rows={5} placeholder={intent === "sample" ? "Ceritakan use case sampel yang Anda butuhkan." : intent === "bulk" ? "Ceritakan volume dan jadwal kebutuhan bulk." : "Ceritakan kebutuhan Anda."} /></label>
     <label className="check wide"><input type="checkbox" {...register("consent")} /><span>Saya setuju data ini diproses untuk menindaklanjuti enquiry dan telah membaca <a href="/privacy">Privacy Policy</a>.</span></label>{errors.consent && <small className="wide">{errors.consent.message}</small>}
+    {failed && <p className="wide" role="alert">Enquiry belum terkonfirmasi. Data tetap tersimpan di formulir; coba lagi.</p>}
     <button className="button gold wide" disabled={isSubmitting}>{isSubmitting ? "Validating…" : intentLabels[intent]}<span>→</span></button>
   </form>;
 }

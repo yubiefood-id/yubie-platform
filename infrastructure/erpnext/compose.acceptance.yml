@@ -1,0 +1,28 @@
+# Layer ONLY on the pinned upstream compose.yaml + MariaDB + Redis overrides.
+# Separate approved host/project; no shared external networks or public ports.
+name: yubie-erp-acceptance
+services:
+  configurator:
+    image: frappe/erpnext:v16.51.1@sha256:85b63c68a1e7992179f5448f334916a49b2e47e5e7382fc346039d073bc7ca27
+  backend:
+    image: frappe/erpnext:v16.51.1@sha256:85b63c68a1e7992179f5448f334916a49b2e47e5e7382fc346039d073bc7ca27
+  frontend:
+    image: frappe/erpnext:v16.51.1@sha256:85b63c68a1e7992179f5448f334916a49b2e47e5e7382fc346039d073bc7ca27
+    ports: ["127.0.0.1:8088:8080"]
+  websocket:
+    image: frappe/erpnext:v16.51.1@sha256:85b63c68a1e7992179f5448f334916a49b2e47e5e7382fc346039d073bc7ca27
+  queue-short:
+    image: frappe/erpnext:v16.51.1@sha256:85b63c68a1e7992179f5448f334916a49b2e47e5e7382fc346039d073bc7ca27
+  queue-long:
+    image: frappe/erpnext:v16.51.1@sha256:85b63c68a1e7992179f5448f334916a49b2e47e5e7382fc346039d073bc7ca27
+  scheduler:
+    image: frappe/erpnext:v16.51.1@sha256:85b63c68a1e7992179f5448f334916a49b2e47e5e7382fc346039d073bc7ca27
+  db:
+    image: mariadb:11.8@sha256:f16d7a344413e519dff518f27bdb221388f84b0d274c97c4fb5f2cb0dc1b34fa
+    environment:
+      MYSQL_ROOT_PASSWORD: ${ERP_DB_ROOT_PASSWORD:?Use an operator-managed secret}
+      MARIADB_AUTO_UPGRADE: "0"
+  redis-cache:
+    image: redis:8.6-alpine@sha256:ac2da09bc822f325a9f68f533120b86fa39c1b8db46b3aa7c1bbea7fdfd4fcba
+  redis-queue:
+    image: redis:8.6-alpine@sha256:ac2da09bc822f325a9f68f533120b86fa39c1b8db46b3aa7c1bbea7fdfd4fcba

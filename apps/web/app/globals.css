@@ -215,7 +215,7 @@ h1, h2, h3, p { margin-top: 0; }
 .product-hero { min-height: 860px; display: grid; grid-template-columns: 1.08fr .92fr; }
 .product-detail-image { position: sticky; top: 88px; height: calc(100vh - 88px); min-height: 700px; background: radial-gradient(circle at 50% 38%, #fff 0 22%, #f4ecf8 68%, #eadcf2 100%); }
 .product-detail-image img { object-fit: contain; padding: clamp(1.5rem, 4vw, 4rem); }
-.product-detail-copy { padding: clamp(5rem, 8vw, 8rem) max(4vw, 2rem); align-self: center; }
+.product-detail-copy { min-width: 0; padding: clamp(5rem, 8vw, 8rem) max(4vw, 2rem); align-self: center; }
 .product-detail-copy h1 { font-size: clamp(4rem, 7vw, 7.5rem); line-height: .82; letter-spacing: -.06em; margin: 1.2rem 0 .8rem; }
 .product-detail-copy .descriptor { font-family: var(--font-serif); font-size: 1.5rem; color: var(--purple); }
 .product-story { max-width: 36rem; line-height: 1.75; margin: 2rem 0; }
@@ -378,7 +378,9 @@ h1, h2, h3, p { margin-top: 0; }
 .root-tabs button:last-child { border-right: 0; }
 .root-tabs button[aria-selected="true"] { background: var(--ink); color: var(--warm); }
 .root-tabs button > span { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255,255,255,.45); }
-.root-tabs button b { font-family: var(--font-serif); color: var(--gold); }
+.root-tabs button b { font-family: var(--font-serif); color: var(--purple); }
+.root-tabs button[aria-selected="true"] b { color: var(--gold); }
+.why-section .chapter { color: var(--purple); }
 .root-panel { display: grid; grid-template-columns: 1.08fr .92fr; min-height: 560px; background: var(--ink); color: var(--warm); }
 .root-visual { position: relative; min-height: 560px; overflow: hidden; }
 .root-visual img { object-fit: cover; filter: saturate(.86) contrast(1.03); }
@@ -392,7 +394,7 @@ h1, h2, h3, p { margin-top: 0; }
 .root-detail dt { color: var(--gold); font-size: .68rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .root-detail dd { margin: .45rem 0 0; line-height: 1.5; }
 
-.root-option-set { border: 0; padding: 0; margin: 2rem 0; }
+.root-option-set { min-inline-size: 0; border: 0; padding: 0; margin: 2rem 0; }
 .root-option-set legend { margin-bottom: .8rem; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .14em; }
 .root-option-set > div { display: grid; grid-template-columns: repeat(5, 1fr); gap: .35rem; }
 .root-option-set button { min-height: 68px; padding: .6rem .35rem; display: grid; justify-items: center; gap: .4rem; border: 1px solid var(--line); background: transparent; cursor: pointer; font-size: .68rem; }
@@ -416,7 +418,7 @@ h1, h2, h3, p { margin-top: 0; }
 .facts-accordion details p, .facts-accordion details ul { font-size: .88rem; line-height: 1.75; padding: 0 .2rem 1.4rem; max-width: 44rem; }
 .facts-accordion ul { margin: 0; padding-left: 1.2rem; }
 .pending-fact { opacity: .65; }
-.product-support-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1px; background: var(--line); padding-inline: max(3vw, 1.2rem); }
+.product-support-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); padding-inline: max(3vw, 1.2rem); }
 .product-support-grid article { min-height: 380px; padding: clamp(2rem, 4vw, 4rem); background: var(--warm); }
 .product-support-grid h2 { margin: 1.2rem 0; font-size: clamp(2.2rem, 3.5vw, 4rem); line-height: .95; }
 .product-support-grid p { line-height: 1.75; }
@@ -528,7 +530,7 @@ h1, h2, h3, p { margin-top: 0; }
   .lifestyle-section { min-height: 130vw; }
   .lifestyle-copy h2 { font-size: 3.2rem; }
   .story-image { min-height: 115vw; }
-  .story-copy { padding: 5rem 1.2rem; }
+  .story-copy { min-width: 0; padding: 5rem 1.2rem; overflow-wrap: anywhere; }
   .story-copy h2 { font-size: 3.6rem; }
   .b2b-section h2, .newsletter-section h2 { font-size: 3.8rem; }
   .newsletter-section { gap: 3rem; }
@@ -1037,3 +1039,6 @@ h1, h2, h3, p { margin-top: 0; }
   .story-hero-image, .story-scroll-cue b, .education-orbit:before, .orbit-two { animation: none !important; }
   .story-enhanced [data-story-reveal] { opacity: 1; transform: none; }
 }
+
+/* Grid children must shrink to the narrow viewport in Firefox and WebKit. */
+.product-support-grid > article { min-width: 0; overflow-wrap: anywhere; }

@@ -36,6 +36,9 @@ export async function proxyApi(request: Request, path: string): Promise<Response
   }
 
   const responseHeaders = new Headers();
+  // Sessions, account data and checkout responses must never be shared by an
+  // edge/browser cache. Preserve a stricter upstream policy as well.
+  responseHeaders.set("cache-control", "no-store");
   const contentType = upstream.headers.get("content-type");
   if (contentType) responseHeaders.set("content-type", contentType);
   const requestId = upstream.headers.get("x-request-id");

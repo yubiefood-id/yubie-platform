@@ -85,7 +85,7 @@ export class IpaymuPaymentProvider implements PaymentProviderPort {
         requestId: "ipaymu",
       });
     }
-    if (response.status >= 500 || response.status === 408 || response.status === 429) {
+    if (response.status >= 500 || response.status === 408 || response.status === 409 || response.status === 429) {
       return err({ code: response.status === 408 ? "timeout" : "unavailable", message: "iPaymu create outcome is unknown.", retryable: true, requestId: "ipaymu" });
     }
     if (!response.ok) {

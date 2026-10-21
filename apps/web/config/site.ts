@@ -1,4 +1,5 @@
 export const siteConfig = {
+  origin: "https://yubiefood.com",
   name: "Yubie",
   tagline: "Rooted here. Made for now.",
   descriptor: "Modern Indonesian sweet-potato food brand",

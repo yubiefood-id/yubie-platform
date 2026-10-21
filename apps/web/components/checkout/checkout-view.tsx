@@ -7,7 +7,7 @@ import { PurchaseOptions } from "@/components/commerce/purchase-options";
 import { useCart, useCartDisplayLines } from "@/features/cart/cart-context";
 import { trackEvent } from "@/lib/analytics";
 import { formatRupiah } from "@/lib/format";
-import { attemptKeyForCart, attemptOutcomeForHttpStatus, classifyCheckoutResponse, type HeldAttempt } from "@/lib/proxy-headers";
+import { CHECKOUT_ATTEMPT_STORAGE_KEY, storedAttemptForRequest, attemptOutcomeForHttpStatus, classifyCheckoutResponse, type HeldAttempt } from "@/lib/proxy-headers";
 
 type CheckoutPhase = "form" | "creating" | "redirecting" | "pending" | "error";
 
@@ -21,6 +21,14 @@ interface CheckoutFormState {
 }
 
 const EMPTY_FORM: CheckoutFormState = { email: "", name: "", phone: "", address: "", city: "", postalCode: "" };
+
+async function prepareCheckoutSession(): Promise<boolean> {
+  try {
+    const response = await fetch("/api/checkout/session", { cache: "no-store" });
+    const payload = await response.json();
+    return response.ok && payload?.ok === true && payload?.data?.ready === true;
+  } catch { return false; }
+}
 
 /**
  * Live checkout state machine: idle → validating → creating checkout →
@@ -41,11 +49,11 @@ export function CheckoutView() {
   const attemptRef = useRef<HeldAttempt | null>(null);
   // The guest checkout cookie is issued before the first submit so a lost
   // first response cannot leave the retry under a different guest identity.
-  const sessionReadyRef = useRef<Promise<unknown> | null>(null);
+  const sessionReadyRef = useRef<Promise<boolean> | null>(null);
 
   useEffect(() => { if (hydrated && count > 0) trackEvent("begin_checkout", { item_count: count }); }, [hydrated, count]);
   useEffect(() => {
-    sessionReadyRef.current = fetch("/api/checkout/session", { cache: "no-store" }).catch(() => null);
+    sessionReadyRef.current = prepareCheckoutSession();
   }, []);
 
   if (!hydrated) return <div className="checkout-page" aria-busy="true"><p className="cart-loading">Memuat checkout…</p></div>;
@@ -83,17 +91,33 @@ export function CheckoutView() {
       },
       ...(promoCode ? { promoCode } : {}),
     });
-    const attempt = attemptKeyForCart(attemptRef.current, body, crypto.randomUUID());
-    attemptRef.current = attempt;
     try {
-      await sessionReadyRef.current;
+      const ready = await (sessionReadyRef.current ??= prepareCheckoutSession());
+      if (!ready) {
+        sessionReadyRef.current = null;
+        setPhase("error");
+        setErrorMessage("Sesi checkout belum dapat disiapkan. Periksa koneksi lalu coba lagi. Pesanan belum dikirim.");
+        return;
+      }
+      let attempt: HeldAttempt;
+      try {
+        attempt = await storedAttemptForRequest(sessionStorage, body, crypto.randomUUID());
+        attemptRef.current = attempt;
+      } catch {
+        setPhase("error");
+        setErrorMessage("Percobaan checkout belum dapat disimpan dengan aman. Izinkan penyimpanan sesi browser atau hubungi kami sebelum mencoba lagi.");
+        return;
+      }
       const response = await fetch("/api/checkout", {
         method: "POST",
         headers: { "content-type": "application/json", "idempotency-key": attempt.key },
         body,
       });
       const payload = await response.json().catch(() => null);
-      if (attemptOutcomeForHttpStatus(response.status) === "definitive") attemptRef.current = null;
+      if (attemptOutcomeForHttpStatus(response.status) === "definitive") {
+        attemptRef.current = null;
+        try { sessionStorage.removeItem(CHECKOUT_ATTEMPT_STORAGE_KEY); } catch { /* Retaining an old key is safer than creating another payment. */ }
+      }
       const outcome = classifyCheckoutResponse(response.status, payload);
       if (outcome === "redirect") {
         trackEvent("add_payment_info", { item_count: count, value: payload.data.totalAmount });
@@ -137,7 +161,7 @@ export function CheckoutView() {
         </div>}
         {phase === "pending" && <div className="checkout-status" role="status">
           <strong>Pembayaran Anda sedang kami pastikan.</strong>
-          <p>Kami belum menerima kepastian dari penyedia pembayaran. Jangan membuat pesanan baru: tombol di bawah melanjutkan percobaan yang sama, dan Anda tidak akan ditagih dua kali.</p>
+          <p>Kami belum menerima kepastian dari penyedia pembayaran. Jangan membuat pesanan atau pembayaran kedua. Tombol di bawah melanjutkan percobaan yang sama.</p>
           <button className="button primary full" type="button" onClick={() => void submit()}>Cek status dan lanjutkan</button>
           <p>Butuh bantuan? Hubungi kami lewat WhatsApp.</p>
           <PurchaseOptions productSlug="yubie-flour" productId="flour" placement="checkout" />

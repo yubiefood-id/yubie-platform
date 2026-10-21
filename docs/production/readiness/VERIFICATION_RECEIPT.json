@@ -1,0 +1,105 @@
+{
+  "recordedAt": "2026-10-21T02:40:21.183877+00:00",
+  "decision": "NO-GO",
+  "testedBaseMainSha": "fabb8c2b0b7a495867372b89d60a2af547de69cd",
+  "testedWorkingTree": true,
+  "codeFingerprintSha256": "fce21dc28f3eb3bec728a61913861a6090d861c3617af94f81a2ee8c39a75f64",
+  "fingerprintMethod": "SHA256(sorted tracked code/config path + NUL + SHA256(file bytes)); excludes readiness documents and unrelated untracked uploads",
+  "localVerification": {
+    "npmCi": "PASS",
+    "npmCheck": "PASS (database-gated cases in ordinary check are skipped; separate real DB run below)",
+    "build": "PASS",
+    "playwrightMock": {
+      "passed": 176,
+      "failed": 0,
+      "blocked": 0,
+      "skipped": 0,
+      "retries": 0,
+      "report": "artifacts/qa/2026-10-21T02-29-35-258Z/mock/report.json",
+      "browsers": [
+        "desktop Chromium",
+        "Pixel7 Chromium",
+        "desktop Firefox",
+        "iPhone13 WebKit"
+      ]
+    },
+    "postgres": {
+      "passed": 28,
+      "failed": 0,
+      "skipped": 0,
+      "database": "dedicated disposable PostgreSQL17; synthetic provider doubles"
+    },
+    "apiWithPostgres": {
+      "passed": 43,
+      "failed": 0,
+      "skipped": 0
+    },
+    "returnedPaymentRepositoryErrorRegression": {
+      "passed": 25,
+      "failed": 0,
+      "skipped": 0,
+      "includesFiveNewFailureCases": true
+    },
+    "migrationUpgrade": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "accessRedirectRegression": {
+      "passed": 1,
+      "failed": 0,
+      "syntheticCredentialOnly": true
+    },
+    "security": {
+      "gitleaksHistory": "PASS,91 baseline commits",
+      "gitleaksStagedDiff": "PASS",
+      "repositorySecretScan": "PASS,911 tracked files",
+      "semgrep": "PASS,2 payment rules; not full ASVS",
+      "trivyFilesystemHighCritical": "PASS after Vite8.1.6 and npm10 lock repair",
+      "trivyAdminImageHighCritical": "PASS"
+    },
+    "containers": {
+      "admin": "built; runtime imports PASS; synthetic configured health200; absent config refused; nonroot uid100; Node22.23.3",
+      "api": "built; runtime imports PASS",
+      "worker": "built; runtime imports PASS",
+      "published": false
+    }
+  },
+  "stagingReal": {
+    "passed": 0,
+    "failed": 0,
+    "blocked": 2,
+    "codes": [
+      "BLOCKED_ACCESS",
+      "BLOCKED_NETWORK"
+    ],
+    "networkDiagnostic": "Playwright APIRequestContext read ECONNRESET",
+    "independentNativeRead": {
+      "status": 200,
+      "releaseSha": "aa00c53fe543f385eff4237ceeb1a27fdc878fd4",
+      "database": "connected",
+      "commerceProvider": "preview"
+    },
+    "report": "artifacts/qa/2026-10-21T02-31-17-919Z/staging/report.json"
+  },
+  "productionReadOnly": {
+    "passed": 31,
+    "failed": 3,
+    "blocked": 0,
+    "browser": "desktop Chromium",
+    "report": "artifacts/qa/2026-10-20T21-05-15-385Z/production-smoke/report.json",
+    "artifactIdentity": "not independently attested by HTTP"
+  },
+  "providerSandboxReal": {
+    "status": "BLOCKED_EXTERNAL",
+    "transactionsExecuted": 0,
+    "callbackRefundSettlementAccepted": false
+  },
+  "liveAdminErpSupport": "BLOCKED_EXTERNAL; missing staff features explicitly NOT_IMPLEMENTED in acceptance ledger",
+  "remoteMigrationsExecuted": false,
+  "offHostRecoveryReceiptVerified": false,
+  "productionReleased": false,
+  "g10Authorized": false,
+  "evidencePrivacy": "Raw synthetic logs remain in ignored private artifacts/qa/verification. Remote reports contain sanitized static identifiers/status only. No credentials/customer/provider payloads committed.",
+  "ciBoundary": "Local evidence only. PR CI/review and reviewed current-main release publication remain mandatory; see linked PR checks for the candidate SHA."
+}

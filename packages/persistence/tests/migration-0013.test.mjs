@@ -89,3 +89,23 @@ test("0012 to 0013 upgrade preserves existing payment rows", { skip }, async () 
     await sql.end();
   });
 });
+
+test("0013 to 0014 preserves commerce and adds hash-only staff revocations", { skip }, async () => {
+  await withDatabase(async (url) => {
+    const sql = await migrate(url, "0013_payment_observability.sql");
+    try {
+      const before = await sql`SELECT count(*)::int AS n FROM orders`;
+      await sql.begin(async (tx) => {
+        await tx.unsafe(readFileSync(join(migrationsDir, "0014_admin_session_revocations.sql"), "utf8"));
+        await tx`INSERT INTO schema_migrations (version) VALUES ('0014_admin_session_revocations.sql')`;
+      });
+      assert.deepEqual(await sql`SELECT count(*)::int AS n FROM orders`, before);
+      const columns = await sql`SELECT column_name FROM information_schema.columns WHERE table_name = 'admin_session_revocations' ORDER BY ordinal_position`;
+      assert.ok(columns.some((row) => row.column_name === "token_hash"));
+      assert.equal(columns.some((row) => /secret|token$|credential|email/.test(row.column_name)), false);
+      await assert.rejects(sql`INSERT INTO admin_session_revocations (token_hash, expires_at) VALUES ('raw-session-token', NOW())`, (error) => error.code === "23514");
+      await sql`INSERT INTO admin_session_revocations (token_hash, expires_at) VALUES (${'a'.repeat(64)}, NOW() + INTERVAL '15 minutes')`;
+      assert.equal((await sql`SELECT count(*)::int AS n FROM admin_session_revocations`)[0].n, 1);
+    } finally { await sql.end(); }
+  });
+});

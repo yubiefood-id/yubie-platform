@@ -29,7 +29,7 @@ function makeDeps() {
   const clock = new FixedClock(NOW);
   const ids = new SequentialIdGenerator();
   const tx = new InMemoryTransactionManager({ orders, payments, paymentEvents, audit, outbox, idempotency, inbox, inventory });
-  return { orders, payments, paymentEvents, inbox, inventory, clock, ids, tx };
+  return { orders, payments, paymentEvents, inbox, inventory, audit, outbox, clock, ids, tx };
 }
 
 async function seed(deps) {
@@ -103,9 +103,57 @@ test("a second succeeded transaction for an already-paid order does not consume 
     authoritativeStatus: "succeeded",
   }, deps);
   assert.equal(first.result, "applied");
-  assert.equal(second.result, "applied");
+  assert.equal(second.result, "exception");
+  assert.equal(second.reason, "multiple_successful_transactions");
+  assert.equal(deps.payments.items.get("pay_1").providerPaymentId, "99", "retain the first captured transaction");
   assert.equal(deps.orders.items.get("ord_1").status, "paid");
   assert.equal([...deps.inventory.reservations.values()].filter((row) => row.status === "consumed").length, 1);
+});
+
+for (const terminal of ["expired", "cancelled", "failed"]) {
+  test(`authoritative success after ${terminal} creates a durable exception without reviving fulfillment`, async () => {
+    const deps = makeDeps();
+    await seed(deps);
+    await applyIpaymuCallback({ ...base, authoritativeStatus: terminal, dedupeKey: `terminal:${terminal}` }, deps);
+    const beforeStock = deps.inventory.lots.get("lot_1").quantityOnHand;
+    const input = { ...base, authoritativeStatus: "succeeded", dedupeKey: `late:${terminal}` };
+    const result = await applyIpaymuCallback(input, deps);
+    assert.deepEqual(result, { persisted: true, result: "exception", reason: "late_success_after_terminal" });
+    const payment = deps.payments.items.get("pay_1");
+    assert.equal(payment.status, terminal);
+    assert.equal(payment.reconciliationState, "late_success_after_terminal");
+    assert.equal(payment.providerPaymentId, "99");
+    assert.equal(deps.orders.items.get("ord_1").status, "cancelled");
+    assert.equal(deps.inventory.lots.get("lot_1").quantityOnHand, beforeStock);
+    assert.equal(deps.audit.events.filter((event) => event.action === "payment.exception").length, 1);
+    const exceptions = deps.outbox.events.filter((event) => event.eventType === "payment.exception");
+    assert.equal(exceptions.length, 1);
+    assert.equal(JSON.parse(exceptions[0].payloadJson).providerPaymentId, "99");
+    assert.equal((await applyIpaymuCallback(input, deps)).result, "duplicate");
+    assert.equal(deps.outbox.events.filter((event) => event.eventType === "payment.exception").length, 1);
+  });
+}
+
+test("a delayed pending callback never overwrites confirmed transaction identity or adds a pending hold", async () => {
+  const deps = makeDeps();
+  await seed(deps);
+  await applyIpaymuCallback({ ...base, authoritativeStatus: "succeeded" }, deps);
+  const before = structuredClone(deps.payments.items.get("pay_1"));
+  const result = await applyIpaymuCallback({ ...base, authoritativeStatus: null, trxId: "100", dedupeKey: "delayed-pending" }, deps);
+  assert.equal(result.result, "stale");
+  assert.deepEqual(deps.payments.items.get("pay_1"), before);
+});
+
+test("a payment-event repository error rolls back the inbox so provider redelivery is not lost", async () => {
+  const deps = makeDeps();
+  await seed(deps);
+  const record = deps.paymentEvents.recordOnce.bind(deps.paymentEvents);
+  deps.paymentEvents.recordOnce = async () => ({ ok: false, error: { code: "unavailable", message: "test failure", retryable: true, requestId: "test" } });
+  const input = { ...base, authoritativeStatus: "succeeded" };
+  assert.equal((await applyIpaymuCallback(input, deps)).persisted, false);
+  deps.paymentEvents.recordOnce = record;
+  assert.equal((await applyIpaymuCallback(input, deps)).result, "applied");
+  assert.equal(deps.orders.items.get("ord_1").status, "paid");
 });
 
 test("an authoritative refund keeps the order paid and never releases consumed stock", async () => {
@@ -216,5 +264,16 @@ for (const [name, patch, expectedReason] of [
       assert.equal(result.result, "rejected");
       assert.equal(result.reason, expectedReason);
     }
+  });
+}
+
+for (const [repository, method] of [["payments", "save"], ["orders", "save"], ["audit", "append"], ["outbox", "enqueue"], ["inventory", "consumeForOrder"]]) {
+  test(`a returned ${repository}.${method} failure cannot acknowledge a successful payment`, async () => {
+    const deps = makeDeps();
+    await seed(deps);
+    deps[repository][method] = async () => ({ ok: false, error: { code: "unavailable", message: "injected failure", retryable: true, requestId: "test" } });
+    const result = await applyIpaymuCallback({ ...base, authoritativeStatus: "succeeded" }, deps);
+    assert.equal(result.persisted, false);
+    assert.equal(result.result, "unavailable");
   });
 }

@@ -1,0 +1,17 @@
+# Only application source and manifests enter build contexts.
+*
+!package.json
+!package-lock.json
+!packages/
+!packages/**
+!apps/
+!apps/**
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.log
+**/test-results
+**/playwright-report

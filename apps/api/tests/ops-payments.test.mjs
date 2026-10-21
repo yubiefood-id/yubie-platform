@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync, readdirSync } from "node:fs";
+import postgres from "postgres";
+import { createDatabase, closeDatabase } from "@yubie/persistence";
 import { handleOpsPayments } from "../dist/ops-payments.js";
 
 const ORIGINAL = {
@@ -121,4 +124,46 @@ test("payment exception read failures return a bounded unavailable response", as
   const failed = await handleOpsPayments(request, failingDatabase, "req_ops_failure");
   assert.equal(failed.status, 503);
   assert.deepEqual(await failed.json(), { error: "payment_exceptions_unavailable" });
+});
+
+test("real PostgreSQL exposes late captures and multiple charges in the queue and settlement metrics", { skip: !process.env.DATABASE_URL }, async () => {
+  const admin = postgres(process.env.DATABASE_URL, { max: 1 });
+  const name = `yubie_ops_qa_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+  await admin`CREATE DATABASE ${admin(name)}`;
+  const testUrl = new URL(process.env.DATABASE_URL);
+  testUrl.pathname = `/${name}`;
+  const database = createDatabase(testUrl.toString());
+  try {
+    const migrations = new URL("../../../packages/persistence/migrations/", import.meta.url);
+    for (const file of readdirSync(migrations).filter((file) => file.endsWith(".sql")).sort()) {
+      await database.client.unsafe(readFileSync(new URL(file, migrations), "utf8"));
+    }
+    for (const [id, paymentStatus, orderStatus, reason] of [
+      ["late", "expired", "cancelled", "late_success_after_terminal"],
+      ["multiple", "succeeded", "paid", "multiple_successful_transactions"],
+    ]) {
+      await database.client`INSERT INTO orders (id, checkout_ref, checkout_public_token, status, customer_email, currency, subtotal_amount, grand_total_amount, total_amount, created_at, updated_at)
+        VALUES (${id}, ${`co_${id}`}, ${id.repeat(16)}, ${orderStatus}, 'synthetic@example.invalid', 'IDR', 35000, 35000, 35000, NOW(), NOW())`;
+      await database.client`INSERT INTO order_payments (id, order_id, provider, status, amount, currency, reconciliation_state, created_at, updated_at)
+        VALUES (${`pay_${id}`}, ${id}, 'ipaymu', ${paymentStatus}, 35000, 'IDR', ${reason}, NOW(), NOW())`;
+    }
+    process.env.YUBIE_ENV = "test";
+    process.env.NODE_ENV = "test";
+    delete process.env.OPS_API_TOKEN;
+    const response = await handleOpsPayments(new Request("https://api.example.invalid/ops/payments/exceptions?limit=1"), database);
+    const first = await response.json();
+    assert.equal(first.items.length, 1);
+    assert.ok(first.nextCursor);
+    const secondResponse = await handleOpsPayments(new Request(`https://api.example.invalid/ops/payments/exceptions?limit=1&cursor=${first.nextCursor}`), database);
+    const second = await secondResponse.json();
+    assert.deepEqual([...first.items, ...second.items].map((row) => row.reconciliationState).sort(), ["late_success_after_terminal", "multiple_successful_transactions"]);
+    const { collectPaymentExceptionMetrics } = await import("../../worker/dist/payment-reconcile-handler.js");
+    const { snapshotMetrics } = await import("../../worker/dist/metrics.js");
+    await collectPaymentExceptionMetrics(database);
+    assert.equal(snapshotMetrics().payment_settlement_exception_count, 2);
+  } finally {
+    await closeDatabase(database);
+    await admin`DROP DATABASE ${admin(name)} WITH (FORCE)`;
+    await admin.end();
+  }
 });

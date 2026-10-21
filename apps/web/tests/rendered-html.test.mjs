@@ -13,6 +13,20 @@ function makeWorker() {
 const env = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } };
 const ctx = { waitUntil() {}, passThroughOnException() {} };
 
+test("robots and sitemap are served by the Worker with the approved production domain", async () => {
+  const { default: worker } = await makeWorker();
+  const robots = await worker.fetch(new Request("https://yubiefood.com/robots.txt"), env, ctx);
+  assert.equal(robots.status, 200);
+  assert.match(await robots.text(), /Sitemap: https:\/\/yubiefood\.com\/sitemap\.xml/);
+  const staging = await worker.fetch(new Request("https://staging.yubiefood.com/robots.txt"), env, ctx);
+  assert.match(await staging.text(), /Disallow: \//);
+  const sitemap = await worker.fetch(new Request("https://yubiefood.com/sitemap.xml"), env, ctx);
+  assert.equal(sitemap.status, 200);
+  const xml = await sitemap.text();
+  assert.match(xml, /https:\/\/yubiefood\.com\/products\/yubie-mie/);
+  assert.doesNotMatch(xml, /yubie\.id|staging|\/checkout|\/account/);
+});
+
 test("renders development preview metadata", async () => {
   const { default: worker } = await makeWorker();
   const response = await worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), env, ctx);

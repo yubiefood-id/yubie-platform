@@ -90,7 +90,8 @@ export async function handleOpsPayments(
         JOIN orders ON orders.id = order_payments.order_id
         WHERE (
           order_payments.reconciliation_state IN (
-            'ambiguous', 'ambiguous_create', 'pending_reconciliation', 'attach_failed'
+            'ambiguous', 'ambiguous_create', 'pending_reconciliation', 'attach_failed',
+            'late_success_after_terminal', 'multiple_successful_transactions'
           )
           OR (
             order_payments.amount <> orders.grand_total_amount
@@ -122,7 +123,8 @@ export async function handleOpsPayments(
         JOIN orders ON orders.id = order_payments.order_id
         WHERE (
           order_payments.reconciliation_state IN (
-            'ambiguous', 'ambiguous_create', 'pending_reconciliation', 'attach_failed'
+            'ambiguous', 'ambiguous_create', 'pending_reconciliation', 'attach_failed',
+            'late_success_after_terminal', 'multiple_successful_transactions'
           )
           OR (
             order_payments.amount <> orders.grand_total_amount

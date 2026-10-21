@@ -132,9 +132,12 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run test:e2e:install
+      - run: node --test scripts/browser-tests/*.test.mjs
       # Browser requests to checkout/auth APIs are intercepted with synthetic,
       # non-PII fixtures. This job never receives PSP or production secrets.
       - run: npm run test:e2e
+        env:
+          E2E_BROWSER_MATRIX: full
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -155,9 +158,15 @@ jobs:
       - run: docker build -f infrastructure/docker/Dockerfile.api -t yubie-api:ci .
       - run: docker build -f infrastructure/docker/Dockerfile.worker -t yubie-worker:ci .
       - run: docker build -f infrastructure/docker/Dockerfile.bot -t yubie-bot:ci .
+      - run: docker build -f infrastructure/docker/Dockerfile.admin -t yubie-admin:ci .
+      - name: Verify runtime dependency closure without credentials
+        run: |
+          for image in yubie-api:ci yubie-worker:ci yubie-bot:ci yubie-admin:ci; do
+            docker run --rm --entrypoint node "$image" --input-type=module -e "await import('@yubie/integrations'); await import('@yubie/persistence');"
+          done
       - name: Trivy image scans
         run: |
-          for image in yubie-api:ci yubie-worker:ci yubie-bot:ci; do
+          for image in yubie-api:ci yubie-worker:ci yubie-bot:ci yubie-admin:ci; do
             archive="/tmp/${image/:/-}.tar"
             docker save "$image" --output "$archive"
             docker run --rm \

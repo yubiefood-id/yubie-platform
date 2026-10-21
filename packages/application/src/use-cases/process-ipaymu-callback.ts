@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { PaymentStatus } from "@yubie/domain";
+import type { PaymentStatus, UseCaseResult } from "@yubie/domain";
 import type { Clock, IdGenerator, TransactionManager } from "../ports.js";
 import { applyPaymentStatus } from "./process-payment-webhook.js";
 
@@ -22,7 +22,8 @@ export interface IpaymuCallbackInput {
 }
 
 export type IpaymuCallbackResult =
-  | { persisted: true; result: "applied" | "duplicate" | "pending" }
+  | { persisted: true; result: "applied" | "duplicate" | "pending" | "stale" }
+  | { persisted: true; result: "exception"; reason: "late_success_after_terminal" | "multiple_successful_transactions" }
   | {
       persisted: true;
       result: "rejected";
@@ -56,10 +57,16 @@ export async function applyIpaymuCallback(
       const order = orderResult.value;
       const payments = await repos.payments.findByOrderId(order.id);
       if (!payments.ok) return { persisted: false, result: "unavailable" as const };
-      const payment = payments.value[0] ?? null;
-      if (!payment || payment.currency !== "IDR") {
+      const candidate = payments.value.find((payment) => payment.provider === "ipaymu");
+      if (!candidate) {
         return { persisted: false, result: "unavailable" as const };
       }
+      // Every callback, including pending deliveries, serializes on the same
+      // row. Never merge a pre-lock snapshot over a concurrent paid result.
+      const payment = requireResult(await repos.payments.lockById(candidate.id));
+      if (!payment || payment.currency !== "IDR") throw new Error("Payment unavailable");
+      const currentOrder = requireResult(await repos.orders.findById(order.id));
+      if (!currentOrder) throw new Error("Order unavailable");
       if (payment.amount !== input.amount) {
         return { persisted: true, result: "rejected" as const, reason: "payment_amount_mismatch" as const };
       }
@@ -73,29 +80,39 @@ export async function applyIpaymuCallback(
       const inboxAppend = await repos.inbox.recordProcessed({
         provider: "ipaymu",
         deliveryId: input.dedupeKey,
-        payloadHash: input.payloadHash ?? createHash("sha256").update(JSON.stringify([
+        // Inbox identity includes the authoritative lookup outcome: unchanged
+        // signed callback bytes may be redelivered after a failed lookup.
+        payloadHash: createHash("sha256").update(JSON.stringify([
+          input.payloadHash ?? null,
           input.referenceId,
           input.merchant,
           input.amount,
           input.currency ?? null,
           input.trxId,
           input.sessionId,
+          input.authoritativeStatus,
         ])).digest("hex"),
         eventType: "ipaymu.callback",
         receivedAt: deps.clock.now(),
       });
-      if (!inboxAppend.ok) return { persisted: false, result: "unavailable" as const };
-      if (inboxAppend.value === "duplicate") return { persisted: true, result: "duplicate" as const };
+      if (requireResult(inboxAppend) === "duplicate") return { persisted: true, result: "duplicate" as const };
+
+      const lateSuccess = input.authoritativeStatus === "succeeded"
+        && ["expired", "failed", "cancelled", "refunded"].includes(payment.status);
+      const secondTransaction = input.authoritativeStatus === "succeeded"
+        && payment.status === "succeeded"
+        && Boolean(payment.providerPaymentId && input.trxId && payment.providerPaymentId !== input.trxId);
+      const exceptionReason = lateSuccess ? "late_success_after_terminal" as const
+        : secondTransaction ? "multiple_successful_transactions" as const : null;
       const recorded = await repos.paymentEvents.recordOnce({
         id: `pev_${deps.ids.nextId()}`,
         paymentId: payment.id,
         dedupeKey: input.dedupeKey,
         event: "ipaymu.callback",
-        outcome: input.authoritativeStatus ?? "pending",
+        outcome: exceptionReason ?? input.authoritativeStatus ?? "pending",
         receivedAt: deps.clock.now(),
       });
-      if (!recorded.ok) return { persisted: false, result: "unavailable" as const };
-      if (recorded.value === "duplicate") return { persisted: true, result: "duplicate" as const };
+      if (requireResult(recorded) === "duplicate") return { persisted: true, result: "duplicate" as const };
 
       const nextPayment = {
         ...payment,
@@ -103,21 +120,44 @@ export async function applyIpaymuCallback(
         ...(input.trxId ? { providerPaymentId: input.trxId } : {}),
         updatedAt: deps.clock.now(),
       };
+      if (exceptionReason) {
+        const now = deps.clock.now();
+        requireResult(await repos.payments.save({
+          ...payment,
+          providerPaymentId: payment.providerPaymentId ?? input.trxId,
+          reconciliationState: exceptionReason,
+          updatedAt: now,
+        }));
+        requireResult(await repos.audit.append({ action: "payment.exception", resourceType: "payment", resourceId: payment.id, actor: "payment-webhook", occurredAt: now }));
+        requireResult(await repos.outbox.enqueue({
+          eventType: "payment.exception", aggregateType: "payment", aggregateId: payment.id,
+          dedupeKey: `payment:exception:${payment.id}:${exceptionReason}:${input.trxId ?? "unknown"}`,
+          payloadJson: JSON.stringify({ reason: exceptionReason, orderId: order.id, paymentId: payment.id, providerPaymentId: input.trxId, recordedProviderPaymentId: payment.providerPaymentId ?? null }),
+          availableAt: now,
+        }));
+        return { persisted: true, result: "exception" as const, reason: exceptionReason };
+      }
       if (!input.authoritativeStatus || input.authoritativeStatus === "pending") {
-        await repos.payments.save({ ...nextPayment, reconciliationState: "pending_reconciliation" });
+        if (payment.status !== "pending") return { persisted: true, result: "stale" as const };
+        requireResult(await repos.payments.save({ ...nextPayment, reconciliationState: "pending_reconciliation" }));
         return { persisted: true, result: "pending" as const };
       }
-      const locked = await repos.payments.lockById(payment.id);
-      if (!locked.ok || !locked.value) return { persisted: false, result: "unavailable" as const };
-      await applyPaymentStatus(
+      const effect = await applyPaymentStatus(
         { ...repos, clock: deps.clock, ids: deps.ids },
-        { ...locked.value, ...nextPayment, status: locked.value.status },
-        order,
+        nextPayment,
+        currentOrder,
         input.authoritativeStatus,
       );
+      if (effect === "stale") return { persisted: true, result: "stale" as const };
       return { persisted: true, result: "applied" as const };
     });
   } catch {
     return { persisted: false, result: "unavailable" };
   }
+}
+
+/** Returning an error from inside run() would COMMIT an already-appended inbox. */
+function requireResult<T>(result: UseCaseResult<T>): T {
+  if (!result.ok) throw new Error("Payment callback persistence unavailable");
+  return result.value;
 }

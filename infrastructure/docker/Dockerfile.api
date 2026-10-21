@@ -4,7 +4,8 @@ COPY package.json package-lock.json ./
 COPY packages ./packages
 COPY apps/api ./apps/api
 RUN npm ci
-RUN npm run build --workspace @yubie/domain \
+RUN npm run build --workspace @yubie/config \
+  && npm run build --workspace @yubie/domain \
   && npm run build --workspace @yubie/validation \
   && npm run build --workspace @yubie/application \
   && npm run build --workspace @yubie/integrations \

@@ -11,6 +11,7 @@ import {
   type PaymentProviderKind,
   type PaymentRecord,
   type PaymentStatus,
+  type UseCaseResult,
 } from "@yubie/domain";
 import type { AuditRepository, Clock, IdGenerator, InventoryRepository, OrderRepository, OutboxRepository, PaymentEventRepository, PaymentRepository, TransactionManager, TransactionalRepositories } from "../ports.js";
 
@@ -22,6 +23,10 @@ export function tokensMatch(a: string, b: string): boolean {
 
 /** What a verified-but-out-of-order event did to durable state. */
 export type PaymentTransitionEffect = "applied" | "already_applied" | "stale";
+
+function requireWrite(result: UseCaseResult<unknown>): void {
+  if (!result.ok) throw new Error("Payment transition persistence unavailable");
+}
 
 /**
  * Applies a verified payment status to the payment + order records under an
@@ -42,23 +47,23 @@ export async function applyPaymentStatus(
   if (payment.status === status) return "already_applied";
   if (!canTransitionPayment(payment.status, status)) return "stale";
 
-  await deps.payments.save({ ...payment, status, updatedAt: now });
+  requireWrite(await deps.payments.save({ ...payment, status, updatedAt: now }));
 
   const targetOrderStatus = orderStatusForPayment(status);
   if (targetOrderStatus !== null && order.status !== targetOrderStatus && canTransitionOrder(order.status, targetOrderStatus)) {
-    await deps.orders.save({ ...order, status: targetOrderStatus, updatedAt: now });
+    requireWrite(await deps.orders.save({ ...order, status: targetOrderStatus, updatedAt: now }));
     if (deps.audit) {
-      await deps.audit.append({ action: `order.${targetOrderStatus}`, resourceType: "order", resourceId: order.id, actor: "payment-webhook", occurredAt: now });
+      requireWrite(await deps.audit.append({ action: `order.${targetOrderStatus}`, resourceType: "order", resourceId: order.id, actor: "payment-webhook", occurredAt: now }));
     }
     if (deps.outbox) {
-      await deps.outbox.enqueue({
+      requireWrite(await deps.outbox.enqueue({
         eventType: `order.${targetOrderStatus}`,
         aggregateType: "order",
         aggregateId: order.id,
         dedupeKey: `order:${targetOrderStatus}:${order.id}`,
         payloadJson: JSON.stringify({ orderId: order.id, paymentId: payment.id, paymentStatus: status }),
         availableAt: now,
-      });
+      }));
     }
   }
 
@@ -66,9 +71,9 @@ export async function applyPaymentStatus(
     if (status === "succeeded" || status === "refunded") {
       // Confirmed payment consumes the reservation lifecycle; quantity was
       // already deducted at reserve time and is never touched again.
-      await deps.inventory.consumeForOrder(order.id, now);
+      requireWrite(await deps.inventory.consumeForOrder(order.id, now));
     } else if (targetOrderStatus === "cancelled") {
-      await deps.inventory.releaseForOrder(order.id, `payment_${status}`, now);
+      requireWrite(await deps.inventory.releaseForOrder(order.id, `payment_${status}`, now));
     }
   }
   return "applied";

@@ -28,11 +28,15 @@
     "typecheck": "npm run typecheck --workspaces --if-present && npm run typecheck:e2e",
     "typecheck:e2e": "tsc --noEmit -p tsconfig.e2e.json",
     "test": "npm run test --workspace @yubie/config && npm run test --workspace @yubie/domain && npm run test --workspace @yubie/validation && npm run test --workspace @yubie/integrations && npm run test --workspace @yubie/application && npm run test --workspace @yubie/assistant && npm run test --workspace @yubie/persistence && npm run test --workspace @yubie/commerce && npm run test --workspace @yubie/api && npm run test --workspace @yubie/worker && npm run test --workspace @yubie/bot && npm run test --workspace @yubie/admin && npm run test --workspace @yubie/web",
-    "check": "npm run lint && npm run typecheck && npm run secret:scan && npm run payment:scan && npm run test",
+    "check": "npm run lint && npm run typecheck && npm run secret:scan && npm run payment:scan && npm run test:release && npm run test",
+    "test:release": "node --test scripts/tests/*.test.mjs",
     "payment:scan": "node scripts/payment-rule-scan.mjs",
     "secret:scan": "node scripts/secret-scan.mjs",
     "test:e2e": "playwright test",
-    "test:e2e:install": "playwright install --with-deps chromium",
+    "test:e2e:staging": "YUBIE_E2E_TIER=staging playwright test",
+    "test:e2e:sandbox": "YUBIE_E2E_TIER=sandbox playwright test",
+    "test:e2e:production-smoke": "YUBIE_E2E_TIER=production-smoke playwright test",
+    "test:e2e:install": "playwright install --with-deps chromium firefox webkit",
     "graph:bootstrap": "bash scripts/graphify/bootstrap.sh",
     "graph:update": "bash scripts/graphify/update.sh",
     "graph:doctor": "bash scripts/graphify/doctor.sh",
@@ -58,7 +62,7 @@
     "source-map-js": "1.2.2",
     "typescript": "5.9.3",
     "undici": "7.29.1",
-    "vite": "8.0.16",
+    "vite": "8.1.6",
     "ws": "8.21.0"
   },
   "overrides": {
@@ -75,7 +79,7 @@
     "sharp": "0.35.5",
     "source-map-js": "1.2.2",
     "undici": "7.29.1",
-    "vite": "8.0.16",
+    "vite": "8.1.6",
     "ws": "8.21.0"
   }
 }
