@@ -129,8 +129,10 @@ test("all approved product PDPs expose their exact verified variants", async () 
   assert.match(flourHtml, /CHOOSE YOUR ROOT/i);
   assert.match(flourHtml, /Add to Cart/);
   assert.match(flourHtml, /35\.000/);
-  assert.match(shakeHtml, /POUR[\s\S]*ADD WATER[\s\S]*MIX/);
-  assert.match(ppangHtml, /KEEP FROZEN[\s\S]*HEAT[\s\S]*ENJOY/);
+  for (const html of [flourHtml, shakeHtml, ppangHtml, mieHtml]) {
+    assert.match(html, /menunggu verifikasi final untuk SKU komersial/);
+    assert.doesNotMatch(html, /HOW TO ENJOY|KEEP FROZEN|ADD WATER|microwave 15|250–300 mL/);
+  }
   for (const html of [shakeHtml, ppangHtml, mieHtml]) assert.match(html, /Add to Cart/);
   assert.match(shakeHtml, /19\.500/);
   assert.match(ppangHtml, /9\.000/);
