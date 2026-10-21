@@ -131,6 +131,7 @@ jobs:
           retention-days: 30
 
   browser:
+    needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -150,10 +151,18 @@ jobs:
       - run: npm run test:e2e
         env:
           E2E_BROWSER_MATRIX: full
-      - name: Verify real static catalog across the browser matrix
+      - name: Download the verified catalog candidate from this workflow
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: catalog-candidate-${{ github.sha }}
+          path: .vercel/output/
+      - name: Verify the candidate digest before browser acceptance
+        run: npm run verify:catalog
+      - name: Verify the exact static candidate across the browser matrix
         run: npm run test:e2e:catalog
         env:
           E2E_BROWSER_MATRIX: full
+          E2E_CATALOG_PREBUILT: "1"
       - name: Upload sanitized browser evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

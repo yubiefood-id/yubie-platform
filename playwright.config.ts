@@ -6,6 +6,8 @@ import { statSync } from "node:fs";
 const port = 4173;
 const environment = testEnvironment();
 const remote = environment.remote;
+const prebuiltCatalog = process.env.E2E_CATALOG_PREBUILT;
+if (prebuiltCatalog && (prebuiltCatalog !== "1" || remote || environment.tier !== "catalog")) throw new Error("E2E_CONFIG: prebuilt artifacts require the local catalog tier and value 1");
 const authState = remote && process.env.E2E_AUTH_STATE ? resolve(process.env.E2E_AUTH_STATE) : undefined;
 if (authState && (!authState.startsWith(resolve("playwright/.auth") + sep) || (statSync(authState).mode & 0o077) !== 0)) throw new Error("E2E_CONFIG: auth state must be a private file under playwright/.auth (mode 600)");
 const fullMatrix = process.env.E2E_BROWSER_MATRIX === "full" || remote;
@@ -52,7 +54,7 @@ export default defineConfig({
     })),
   ],
   webServer: remote ? undefined : environment.catalog ? [{
-    command: "npm run build:catalog && node scripts/serve-catalog.mjs",
+    command: prebuiltCatalog ? "node scripts/serve-catalog.mjs" : "npm run build:catalog && node scripts/serve-catalog.mjs",
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: false,
     timeout: 300_000,
