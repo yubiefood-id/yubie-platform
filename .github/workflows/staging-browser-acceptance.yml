@@ -1,0 +1,118 @@
+name: Remote browser acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      tier:
+        type: choice
+        options: [staging, sandbox, production-smoke]
+        required: true
+      expected_sha:
+        description: Full reviewed current-main SHA
+        required: true
+      base_url:
+        description: Approved HTTPS storefront origin
+        required: true
+      api_base_url:
+        description: Approved API origin; unused by production read-only smoke
+        required: false
+      sandbox_confirmation:
+        description: Type sandbox only for an approved isolated provider test
+        required: false
+      provider_contract_ref:
+        description: Written provider-contract approval reference
+        required: false
+      window_start:
+        description: Approved sandbox UTC window start (ISO 8601)
+        required: false
+      window_end:
+        description: Approved sandbox UTC window end (maximum four hours)
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remote-browser-${{ inputs.tier }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    permissions:
+      contents: read
+      checks: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require reviewed current main and complete CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          test "$REF" = refs/heads/main
+          printf '%s' "$EXPECTED_SHA" | grep -Eq '^[a-f0-9]{40}$'
+          test "$EXPECTED_SHA" = "$ACTUAL_SHA"
+          test "$EXPECTED_SHA" = "$(gh api "repos/$REPO/commits/main" --jq .sha)"
+          gh api "repos/$REPO/commits/$EXPECTED_SHA/check-runs" --jq '
+            [.check_runs[] | select(.name == "quality" or .name == "persistence" or .name == "security" or .name == "browser" or .name == "containers")]
+            | group_by(.name) | map(max_by(.started_at))
+            | length == 5 and all(.conclusion == "success")' | grep -qx true
+
+  browser:
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: ${{ inputs.tier == 'production-smoke' && 'Production' || inputs.tier }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.23.3
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - name: Prepare private approved browser state
+        env:
+          AUTH_STATE: ${{ secrets.E2E_AUTH_STATE_BASE64 }}
+        run: |
+          umask 077
+          mkdir -p playwright/.auth
+          if [ -n "$AUTH_STATE" ]; then
+            printf '%s' "$AUTH_STATE" | base64 --decode > playwright/.auth/remote.json
+          fi
+      - name: Run real remote tier without localhost fallback
+        env:
+          YUBIE_E2E_TIER: ${{ inputs.tier }}
+          EXPECTED_RELEASE_SHA: ${{ inputs.expected_sha }}
+          BASE_URL: ${{ inputs.base_url }}
+          API_BASE_URL: ${{ inputs.api_base_url }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          YUBIE_SANDBOX_ACCEPTANCE_APPROVED: ${{ inputs.sandbox_confirmation }}
+          SANDBOX_PROVIDER_CONTRACT_REF: ${{ inputs.provider_contract_ref }}
+          SANDBOX_WINDOW_START: ${{ inputs.window_start }}
+          SANDBOX_WINDOW_END: ${{ inputs.window_end }}
+          IPAYMU_ENV: sandbox
+        run: |
+          if [ -f playwright/.auth/remote.json ]; then
+            export E2E_AUTH_STATE=playwright/.auth/remote.json
+          fi
+          npm run test:e2e
+      - name: Upload sanitized reports only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: qa-${{ inputs.tier }}-${{ github.sha }}
+          path: |
+            artifacts/qa/**/report.json
+            artifacts/qa/**/junit.xml
+            artifacts/qa/**/index.html
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Discard authentication state
+        if: always()
+        run: rm -f playwright/.auth/remote.json

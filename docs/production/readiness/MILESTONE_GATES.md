@@ -1,5 +1,7 @@
 # Milestone gates after payment P0
 
+> Historical checkpoint. Current execution evidence and G0–G10 decision: [RELEASE_GO_NO_GO.md](RELEASE_GO_NO_GO.md). Do not treat older source/deployment or Refine status below as current.
+
 **Production decision: NO-GO.** First-party payments stay off. Staging stays on `COMMERCE_PROVIDER=preview`. Main `77a36c1` (CI green, 2026-10-20) is not deployed. Current blocker ownership and the acceptance matrix: `docs/development/execution/BLOCKER_REGISTER_POST_PR11.md`.
 
 Recorded 2026-10-20. PR #11 merged at `84b66033cc53ee3a3180a0658f5923cb0ba83f5b` (2026-10-20T05:20:48Z). Nothing here enables a live provider.

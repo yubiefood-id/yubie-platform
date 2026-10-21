@@ -52,7 +52,7 @@ test("one logical checkout attempt keeps ONE key across ambiguous retries", () =
 
 test("gateway and conflict HTTP statuses keep the same attempt key", () => {
   const key = "attempt-gateway";
-  for (const status of [408, 409, 429, 502, 503, 504]) {
+  for (const status of [408, 409, 429, 500, 502, 503, 504]) {
     assert.equal(attemptOutcomeForHttpStatus(status), "ambiguous");
     assert.equal(nextAttemptKey(key, attemptOutcomeForHttpStatus(status), "fresh"), key);
   }
@@ -74,10 +74,15 @@ test("checkout responses map to UI outcomes; errors never fall back to preview",
   for (const code of ["PENDING_RECONCILIATION", "PROVIDER_UNAVAILABLE", "API_TIMEOUT", "IDEMPOTENCY_KEY_REUSED"]) {
     assert.equal(classifyCheckoutResponse(503, { code }), "pending", code);
   }
-  for (const status of [408, 429, 502, 504]) assert.equal(classifyCheckoutResponse(status, null), "pending", String(status));
+  for (const status of [408, 429, 500, 502, 504]) assert.equal(classifyCheckoutResponse(status, null), "pending", String(status));
   assert.equal(classifyCheckoutResponse(409, { code: "INSUFFICIENT_INVENTORY" }), "sold_out");
   assert.equal(classifyCheckoutResponse(409, { code: "UNAVAILABLE_LINE" }), "sold_out");
   assert.equal(classifyCheckoutResponse(400, { code: "INVALID_REQUEST" }), "invalid");
-  assert.equal(classifyCheckoutResponse(500, null), "failed");
   assert.equal(classifyCheckoutResponse(201, { data: { mode: "live" } }), "failed", "a 201 without a redirect is not a success");
+});
+
+test("login return path cannot become an external or script navigation", async () => {
+  const { safeLoginReturnPath } = await import("../lib/login-return.ts");
+  for (const value of ["https://evil.example", "//evil.example/path", "/\\evil.example", "/\n/evil.example", "javascript:alert(1)", "", null]) assert.equal(safeLoginReturnPath(value), "/account");
+  assert.equal(safeLoginReturnPath("/account/orders?status=paid#latest"), "/account/orders?status=paid#latest");
 });

@@ -1,5 +1,21 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
+
+async function fillGuestCheckout(page: Page) {
+  await page.getByLabel("Email").fill("browser-test@example.invalid");
+  await page.getByLabel("No. WhatsApp").fill("080000000000");
+  await page.getByLabel("Alamat lengkap").fill("Alamat pengujian lokal");
+  await page.getByLabel("Kota").fill("Bogor");
+}
+
+async function openGuestCheckout(page: Page) {
+  await page.goto("/products");
+  await page.getByRole("button", { name: "Tutup promo", exact: true }).click();
+  await page.getByRole("button", { name: "Tambah", exact: true }).first().click();
+  await page.goto("/checkout");
+  await fillGuestCheckout(page);
+}
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/checkout/session", async (route) => {
@@ -25,6 +41,7 @@ test("cart and guest checkout stay first-party and preview-only", async ({ page 
   });
 
   await page.goto("/products");
+  await page.getByRole("button", { name: "Tutup promo", exact: true }).click();
   await page.getByRole("button", { name: "Tambah", exact: true }).first().click();
   await expect.poll(async () => {
     const cart = await page.evaluate(() => localStorage.getItem("yubie.cart.v1"));
@@ -65,9 +82,45 @@ test("login fails safely when staff has not configured Google locally", async ({
   await expect(page.getByRole("link", { name: /Lanjut belanja/ })).toBeVisible();
 });
 
+test("guest bootstrap failure blocks checkout before any order submission", async ({ page }) => {
+  let submissions = 0;
+  await page.route("**/api/checkout/session", (route) => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ ok: false }) }));
+  await page.route("**/api/checkout", (route) => {
+    submissions++;
+    return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ ok: true, data: { status: "preview" } }) });
+  });
+  await openGuestCheckout(page);
+  await page.getByRole("button", { name: /^Bayar/ }).click();
+  await expect(page.getByRole("alert")).toContainText(/sesi checkout/i);
+  expect(submissions).toBe(0);
+});
+
+test("an ambiguous checkout survives reload with the same attempt key and no stored personal data", async ({ page }) => {
+  const keys: string[] = [];
+  await page.route("**/api/checkout", (route) => {
+    keys.push(route.request().headers()["idempotency-key"] ?? "");
+    if (keys.length === 1) return route.abort("connectionfailed");
+    return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ ok: true, data: { status: "preview" } }) });
+  });
+  await openGuestCheckout(page);
+  await page.getByRole("button", { name: /^Bayar/ }).click();
+  await expect(page.getByText("Pembayaran Anda sedang kami pastikan.")).toBeVisible();
+  await page.reload();
+  await fillGuestCheckout(page);
+  await page.getByRole("button", { name: /^Bayar/ }).click();
+  await expect(page.getByText("Mode pembayaran demo sedang aktif.")).toBeVisible();
+  expect(keys).toHaveLength(2);
+  expect(keys[1]).toBe(keys[0]);
+  const stored = await page.evaluate(() => JSON.stringify(sessionStorage));
+  expect(stored).not.toContain("browser-test@example.invalid");
+  expect(stored).not.toContain("Alamat pengujian");
+});
+
 for (const path of ["/", "/products"]) {
   test(`${path} has no serious or critical automated accessibility violations`, async ({ page }) => {
     await page.goto(path);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await page.getByRole("button", { name: "Tutup promo", exact: true }).click();
     const results = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
       .analyze();

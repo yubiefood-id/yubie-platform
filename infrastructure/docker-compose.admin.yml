@@ -1,0 +1,20 @@
+# Separate opt-in project. Never add this to an active shared production stack.
+name: yubie-ops-staging
+services:
+  admin:
+    image: ${ADMIN_IMAGE:?Use the reviewed immutable image digest}
+    profiles: [ops]
+    restart: unless-stopped
+    init: true
+    env_file: ${ADMIN_ENV_FILE:?Path to private operator-managed environment file}
+    ports:
+      - "127.0.0.1:4174:4174"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}

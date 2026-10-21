@@ -1,0 +1,9 @@
+{
+  "recordedAt": "2026-10-20T21:40:00Z",
+  "upstream": "https://github.com/frappe/frappe_docker",
+  "commit": "df2a3b72910634cf0e878b59eccf68a93736bf9d",
+  "erpnext": "frappe/erpnext:v16.51.1@sha256:85b63c68a1e7992179f5448f334916a49b2e47e5e7382fc346039d073bc7ca27",
+  "mariadb": "mariadb:11.8@sha256:f16d7a344413e519dff518f27bdb221388f84b0d274c97c4fb5f2cb0dc1b34fa",
+  "redis": "redis:8.6-alpine@sha256:ac2da09bc822f325a9f68f533120b86fa39c1b8db46b3aa7c1bbea7fdfd4fcba",
+  "status": "PREPARED_NOT_DEPLOYED_NOT_SECURITY_ACCEPTED"
+}

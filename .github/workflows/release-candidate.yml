@@ -23,10 +23,12 @@ permissions:
 
 jobs:
   publish:
+    environment: staging
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
+      checks: read
       packages: write
     env:
       TARGET_SHA: ${{ github.event.inputs.sha || github.sha }}
@@ -79,10 +81,17 @@ jobs:
           docker build -f infrastructure/docker/Dockerfile.api -t yubie-api:rc .
           docker build -f infrastructure/docker/Dockerfile.worker -t yubie-worker:rc .
           docker build -f infrastructure/docker/Dockerfile.bot -t yubie-bot:rc .
+          docker build -f infrastructure/docker/Dockerfile.admin -t yubie-admin:rc .
+
+      - name: Verify runtime dependency closure before publication
+        run: |
+          for image in yubie-api:rc yubie-worker:rc yubie-bot:rc yubie-admin:rc; do
+            docker run --rm --entrypoint node "$image" --input-type=module -e "await import('@yubie/integrations'); await import('@yubie/persistence');"
+          done
 
       - name: Block publication on image vulnerabilities
         run: |
-          for image in yubie-api:rc yubie-worker:rc yubie-bot:rc; do
+          for image in yubie-api:rc yubie-worker:rc yubie-bot:rc yubie-admin:rc; do
             archive="/tmp/${image/:/-}.tar"
             docker save "$image" --output "$archive"
             docker run --rm \
@@ -133,12 +142,25 @@ jobs:
           provenance: mode=max
           sbom: true
 
+      - name: Build and publish yubie-admin @ SHA
+        id: build-admin
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: infrastructure/docker/Dockerfile.admin
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/yubie-admin:${{ env.TARGET_SHA }}
+          labels: org.opencontainers.image.revision=${{ env.TARGET_SHA }}
+          provenance: mode=max
+          sbom: true
+
       - name: Export published images for digest verification
         run: |
           for image in \
             "ghcr.io/${{ github.repository_owner }}/yubie-api@${{ steps.build-api.outputs.digest }}" \
             "ghcr.io/${{ github.repository_owner }}/yubie-worker@${{ steps.build-worker.outputs.digest }}" \
-            "ghcr.io/${{ github.repository_owner }}/yubie-bot@${{ steps.build-bot.outputs.digest }}"; do
+            "ghcr.io/${{ github.repository_owner }}/yubie-bot@${{ steps.build-bot.outputs.digest }}" \
+            "ghcr.io/${{ github.repository_owner }}/yubie-admin@${{ steps.build-admin.outputs.digest }}"; do
             archive="/tmp/$(echo "$image" | cut -d/ -f3 | cut -d@ -f1)-published.tar"
             docker pull "$image"
             docker save "$image" --output "$archive"
@@ -146,7 +168,7 @@ jobs:
 
       - name: Verify published images with Trivy
         run: |
-          for archive in /tmp/yubie-api-published.tar /tmp/yubie-worker-published.tar /tmp/yubie-bot-published.tar; do
+          for archive in /tmp/yubie-api-published.tar /tmp/yubie-worker-published.tar /tmp/yubie-bot-published.tar /tmp/yubie-admin-published.tar; do
             docker run --rm \
               -v "$HOME/.cache/trivy:/root/.cache/" \
               -v "$archive:/image.tar:ro" \
@@ -178,6 +200,14 @@ jobs:
           output-file: yubie-bot.cdx.json
           upload-artifact: false
 
+      - name: Generate admin SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/yubie-admin@${{ steps.build-admin.outputs.digest }}
+          format: cyclonedx-json
+          output-file: yubie-admin.cdx.json
+          upload-artifact: false
+
       - name: Upload release SBOMs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -198,4 +228,5 @@ jobs:
             echo "| \`ghcr.io/${{ github.repository_owner }}/yubie-api:${TARGET_SHA}\` | \`${{ steps.build-api.outputs.digest }}\` |"
             echo "| \`ghcr.io/${{ github.repository_owner }}/yubie-worker:${TARGET_SHA}\` | \`${{ steps.build-worker.outputs.digest }}\` |"
             echo "| \`ghcr.io/${{ github.repository_owner }}/yubie-bot:${TARGET_SHA}\` | \`${{ steps.build-bot.outputs.digest }}\` |"
+            echo "| \`ghcr.io/${{ github.repository_owner }}/yubie-admin:${TARGET_SHA}\` | \`${{ steps.build-admin.outputs.digest }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"

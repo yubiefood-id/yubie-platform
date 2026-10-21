@@ -4,13 +4,14 @@ import { Footer } from "@/components/layout/footer";
 import { Header } from "@/components/layout/header";
 import { CartProvider } from "@/features/cart/cart-context";
 import { StorefrontWidgets } from "@/components/commerce/storefront-widgets";
+import { siteConfig } from "@/config/site";
 import "./globals.css";
 
 const manrope = Manrope({ variable: "--font-sans", subsets: ["latin"] });
 const cormorant = Cormorant_Garamond({ variable: "--font-serif", subsets: ["latin"], weight: ["400", "500", "600"] });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://yubie.id"),
+  metadataBase: new URL(siteConfig.origin),
   title: { default: "Yubie — Rooted here. Made for now.", template: "%s · Yubie" },
   description: "Yubie mengubah ubi Indonesia menjadi produk pangan modern untuk baking, breakfast, dan everyday creations.",
   openGraph: { title: "Yubie — Rooted here. Made for now.", description: "Modern Indonesian sweet-potato food, made for now.", images: ["/photography/context/lifestyle-breakfast.webp"] },

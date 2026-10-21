@@ -67,6 +67,21 @@ test("a provider 500 is ambiguous and is not retried", async () => {
   assert.equal(calls, 1);
 });
 
+for (const status of [408, 409, 429, 500, 502, 503, 504]) {
+  test(`provider HTTP ${status} never proves that no payable session exists`, async () => {
+    let calls = 0;
+    const session = provider(async () => {
+      calls++;
+      return { ok: false, status, async json() { return {}; } };
+    });
+    const result = await session.createPaymentSession(input);
+    assert.equal(result.ok, false);
+    assert.equal(result.error.retryable, true);
+    assert.notEqual(result.error.code, "validation");
+    assert.equal(calls, 1);
+  });
+}
+
 test("a non-sandbox redirect is not returned as a payable URL", async () => {
   const session = provider(async () => ({
     ok: true,

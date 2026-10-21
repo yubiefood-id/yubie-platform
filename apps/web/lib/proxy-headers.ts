@@ -46,13 +46,31 @@ export function nextAttemptKey(previous: string | null, outcome: "ambiguous" | "
  * statuses close it.
  */
 export function attemptOutcomeForHttpStatus(status: number): "ambiguous" | "definitive" {
-  if (status === 408 || status === 409 || status === 429 || status === 502 || status === 503 || status === 504) return "ambiguous";
+  if (status === 408 || status === 409 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504) return "ambiguous";
   return "definitive";
 }
 
 export interface HeldAttempt {
   key: string;
   fingerprint: string;
+}
+
+export const CHECKOUT_ATTEMPT_STORAGE_KEY = "yubie.checkout-attempt.v1";
+
+/** Only an opaque key and a SHA-256 fingerprint enter storage, never the
+ * checkout body (which contains contact/address data). No time-based reset:
+ * an unknown provider outcome remains the same attempt after a reload. */
+export async function storedAttemptForRequest(storage: Pick<Storage, "getItem" | "setItem">, body: string, freshKey: string): Promise<HeldAttempt> {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
+  const fingerprint = Array.from(new Uint8Array(bytes), (value) => value.toString(16).padStart(2, "0")).join("");
+  let previous: HeldAttempt | null = null;
+  try {
+    const parsed = JSON.parse(storage.getItem(CHECKOUT_ATTEMPT_STORAGE_KEY) ?? "null");
+    if (parsed && typeof parsed.key === "string" && /^[a-f0-9-]{36}$/.test(parsed.key) && typeof parsed.fingerprint === "string" && /^[a-f0-9]{64}$/.test(parsed.fingerprint)) previous = parsed;
+  } catch { /* A corrupt value is replaced; blocked storage fails on setItem. */ }
+  const attempt = attemptKeyForCart(previous, fingerprint, freshKey);
+  storage.setItem(CHECKOUT_ATTEMPT_STORAGE_KEY, JSON.stringify(attempt));
+  return attempt;
 }
 
 /**
@@ -75,7 +93,7 @@ export function classifyCheckoutResponse(status: number, payload: { code?: unkno
   if (status >= 200 && status < 300 && data?.status === "preview") return "preview";
   const code = typeof payload?.code === "string" ? payload.code : null;
   if (code === "INSUFFICIENT_INVENTORY" || code === "UNAVAILABLE_LINE") return "sold_out";
-  if ((code && PENDING_CODES.has(code)) || status === 408 || status === 429 || status === 502 || status === 503 || status === 504) return "pending";
+  if ((code && PENDING_CODES.has(code)) || status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504) return "pending";
   if (status === 400) return "invalid";
   return "failed";
 }

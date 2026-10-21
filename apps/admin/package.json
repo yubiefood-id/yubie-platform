@@ -4,9 +4,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "lint": "tsc -p tsconfig.json --noEmit",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json && vite build --config vite.config.ts",
+    "lint": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json",
+    "start": "node dist/runtime.js",
     "test": "npm run build && node --test tests/*.test.mjs"
-  }
+  },
+  "dependencies": {
+    "@yubie/application": "*",
+    "@yubie/domain": "*",
+    "@yubie/integrations": "*",
+    "@yubie/persistence": "*",
+    "@yubie/ui": "*",
+    "@refinedev/core": "5.0.12",
+    "@tanstack/react-query": "5.90.21",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": { "@vitejs/plugin-react": "6.0.2", "vite": "8.1.6" }
 }

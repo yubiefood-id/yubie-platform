@@ -104,8 +104,9 @@ export async function collectPaymentExceptionMetrics(database: Database): Promis
         SELECT COUNT(*)
         FROM order_payments
         JOIN orders ON orders.id = order_payments.order_id
-        WHERE order_payments.status = 'succeeded'
-          AND orders.status NOT IN ('paid', 'processing', 'shipped', 'completed')
+        WHERE (order_payments.status = 'succeeded'
+          AND orders.status NOT IN ('paid', 'processing', 'shipped', 'completed'))
+          OR order_payments.reconciliation_state IN ('late_success_after_terminal', 'multiple_successful_transactions')
         ), 0) AS settlement_exception_count
     `;
   });

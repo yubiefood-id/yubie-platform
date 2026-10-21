@@ -185,9 +185,10 @@ test("Postgres invariants A, B, C, and E", { skip: !databaseUrl }, async () => {
       authoritativeStatus: null,
       authoritativeReferenceId: null,
       authoritativeAmount: null,
-      trxId: "6",
+      trxId: "100",
       sessionId,
       dedupeKey: "status-6",
+      payloadHash: "a".repeat(64),
     }, deps);
     assert.equal(unsettled.result, "pending", "status 6 stays unsettled");
     assert.equal(await orderStatus(), "pending_payment");
@@ -203,6 +204,7 @@ test("Postgres invariants A, B, C, and E", { skip: !databaseUrl }, async () => {
       trxId: "100",
       sessionId,
       dedupeKey: "paid-after-crash",
+      payloadHash: "a".repeat(64),
     };
     const crashTx = {
       run(operation, work) {
@@ -224,6 +226,18 @@ test("Postgres invariants A, B, C, and E", { skip: !databaseUrl }, async () => {
     const rolledBackEvent = await database.client`SELECT count(*)::int AS n FROM payment_events WHERE dedupe_key = ${paidInput.dedupeKey}`;
     assert.equal(rolledBackEvent[0].n, 0, "the payment event rolls back with a failed transition");
 
+    const returnedErrorTx = {
+      run(operation, work) {
+        return tx.run(operation, async (repos) => {
+          repos.audit.append = async () => ({ ok: false, error: { code: "unavailable", message: "injected returned failure", retryable: true, requestId: "test" } });
+          return work(repos);
+        });
+      },
+    };
+    assert.equal((await applyIpaymuCallback(paidInput, { ...deps, tx: returnedErrorTx })).result, "unavailable");
+    assert.equal(await orderStatus(), "pending_payment", "returned audit error rolls back payment and order writes");
+    assert.equal((await database.client`SELECT count(*)::int AS n FROM webhook_inbox WHERE provider = 'ipaymu' AND delivery_id = ${paidInput.dedupeKey}`)[0].n, 0);
+
     const paid = await applyIpaymuCallback(paidInput, deps);
     assert.equal(paid.result, "applied");
     assert.equal(await orderStatus(), "paid");
@@ -232,6 +246,46 @@ test("Postgres invariants A, B, C, and E", { skip: !databaseUrl }, async () => {
     assert.equal(replay.result, "duplicate");
     const consumed = await database.client`SELECT count(*)::int AS n FROM inventory_reservations r JOIN orders o ON o.id = r.order_id WHERE o.checkout_ref = ${ref} AND r.status = 'consumed'`;
     assert.equal(consumed[0].n, 1, "replay does not consume stock again");
+
+    // A real late capture must be visible to finance, without reviving an
+    // order whose stock may already have been sold to somebody else.
+    const lateOrder = await createFirstPartyCheckout({ ...CART, idempotencyPrincipal: guest(5), idempotencyKey: "late-1" }, deps);
+    assert.equal(lateOrder.ok, true);
+    const lateInput = { ...paidInput, referenceId: lateOrder.value.checkoutRef, sessionId: `sess-${lateOrder.value.checkoutRef}`, trxId: "201", dedupeKey: "late-expired" };
+    await applyIpaymuCallback({ ...lateInput, authoritativeReferenceId: lateInput.referenceId, authoritativeStatus: "expired" }, deps);
+    lateInput.authoritativeReferenceId = lateInput.referenceId;
+    lateInput.dedupeKey = "late-captured";
+    const beforeLateStock = (await database.client`SELECT quantity_on_hand FROM inventory_lots WHERE id = 'lot_inv'`)[0].quantity_on_hand;
+    const failedExceptionTx = {
+      run(operation, work) {
+        return tx.run(operation, async (repos) => {
+          const enqueue = repos.outbox.enqueue.bind(repos.outbox);
+          repos.outbox.enqueue = async (event) => {
+            if (event.eventType === "payment.exception") throw new Error("simulated outbox failure");
+            return enqueue(event);
+          };
+          return work(repos);
+        });
+      },
+    };
+    assert.equal((await applyIpaymuCallback(lateInput, { ...deps, tx: failedExceptionTx })).result, "unavailable");
+    const failedRows = await database.client`SELECT reconciliation_state FROM order_payments p JOIN orders o ON p.order_id = o.id WHERE o.checkout_ref = ${lateInput.referenceId}`;
+    assert.notEqual(failedRows[0].reconciliation_state, "late_success_after_terminal");
+    const rolledBackExceptionInbox = await database.client`SELECT count(*)::int AS n FROM webhook_inbox WHERE provider = 'ipaymu' AND delivery_id = ${lateInput.dedupeKey}`;
+    assert.equal(rolledBackExceptionInbox[0].n, 0);
+    const late = await applyIpaymuCallback(lateInput, deps);
+    assert.equal(late.result, "exception");
+    const exceptionRows = await database.client`SELECT p.id, p.status, p.reconciliation_state, o.status AS order_status FROM order_payments p JOIN orders o ON p.order_id = o.id WHERE o.checkout_ref = ${lateInput.referenceId}`;
+    assert.equal(exceptionRows[0].status, "expired");
+    assert.equal(exceptionRows[0].order_status, "cancelled");
+    assert.equal(exceptionRows[0].reconciliation_state, "late_success_after_terminal");
+    const outcomes = await Promise.all(Array.from({ length: 10 }, () => applyIpaymuCallback(lateInput, deps)));
+    assert.equal(outcomes.every((result) => result.result === "duplicate"), true);
+    const exceptionOutbox = await database.client`SELECT count(*)::int AS n FROM outbox_events WHERE event_type = 'payment.exception' AND aggregate_id = ${exceptionRows[0].id}`;
+    const exceptionAudit = await database.client`SELECT count(*)::int AS n FROM audit_events WHERE action = 'payment.exception' AND resource_id = ${exceptionRows[0].id}`;
+    assert.equal(exceptionOutbox[0].n, 1);
+    assert.equal(exceptionAudit[0].n, 1, "failed transaction audit rolled back too");
+    assert.equal((await database.client`SELECT quantity_on_hand FROM inventory_lots WHERE id = 'lot_inv'`)[0].quantity_on_hand, beforeLateStock);
   } finally {
     await closeDatabase(database);
     await dropIsolatedDatabase(dbName);

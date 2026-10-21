@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import Script from "next/script";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { safeLoginReturnPath } from "@/lib/login-return";
 import { trackEvent } from "@/lib/analytics";
 
 type LoginPhase = "loading" | "ready" | "unconfigured" | "authenticated" | "submitting" | "failed";
@@ -58,7 +59,7 @@ export function LoginView() {
         return;
       }
       trackEvent("login_success", { provider: "google" });
-      router.replace(next.startsWith("/") ? next : "/account");
+      router.replace(safeLoginReturnPath(next));
     } catch {
       trackEvent("login_failed", { provider: "google" });
       setPhase("failed");
