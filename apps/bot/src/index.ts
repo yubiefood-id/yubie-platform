@@ -26,7 +26,7 @@ function zammadBearerToken() {
 }
 
 let bossInstance: PgBoss | null = null;
-const databaseInstances = new Set<Database>();
+let databaseInstance: Database | null = null;
 
 async function getBoss(): Promise<PgBoss> {
   if (!databaseUrl) throw new Error("DATABASE_URL required");
@@ -64,11 +64,12 @@ async function acceptInboxEvent(input: {
     return Response.json({ error: "database_unavailable" }, { status: 503 });
   }
 
-  const database = createDatabase(databaseUrl);
-  databaseInstances.add(database);
+  const database = databaseInstance ??= createDatabase(databaseUrl);
   const inbox = new PostgresWebhookInboxRepository(database);
   const receivedAt = new Date().toISOString();
-  const insert = await inbox.insert({
+  let insert: Awaited<ReturnType<PostgresWebhookInboxRepository["insert"]>>;
+  try {
+    insert = await inbox.insert({
     provider: input.provider,
     ...(input.deliveryId ? { deliveryId: input.deliveryId, dedupeKey: input.deliveryId } : {}),
     eventType: input.eventType,
@@ -81,7 +82,11 @@ async function acceptInboxEvent(input: {
     ...(input.inboxRef ? { inboxRef: input.inboxRef } : {}),
     ...(input.providerTimestamp ? { providerTimestamp: input.providerTimestamp } : {}),
     receivedAt,
-  });
+    });
+  } catch {
+    increment("bot_database_unavailable_total");
+    return Response.json({ error: "database_unavailable" }, { status: 503 });
+  }
 
   if (insert.ok && insert.value.status === "duplicate") {
     increment("bot_webhook_duplicate_total");
@@ -247,8 +252,8 @@ export async function shutdownBotRuntime() {
     await bossInstance.stop({ graceful: true, timeout: 5000 });
     bossInstance = null;
   }
-  for (const database of databaseInstances) {
-    await closeDatabase(database);
+  if (databaseInstance) {
+    await closeDatabase(databaseInstance);
+    databaseInstance = null;
   }
-  databaseInstances.clear();
 }

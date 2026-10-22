@@ -8,12 +8,12 @@ import {deliverSupportOutbox,reconcileOutbound,processPendingOutbox} from '../di
 import {processAssistantInbox} from '../dist/assistant-handler.js';
 
 const enabled=!!process.env.DATABASE_URL;
-let db,admin,config,name;
+let db,admin,config,name,testDbUrl;
 before(async()=>{
   if(!enabled)return;
   name='yubi_qa_'+randomUUID().replaceAll('-','');
   admin=createDatabase(process.env.DATABASE_URL);await admin.client.unsafe(`CREATE DATABASE "${name}"`);
-  const url=new URL(process.env.DATABASE_URL);url.pathname='/'+name;db=createDatabase(url.toString());
+  const url=new URL(process.env.DATABASE_URL);url.pathname='/'+name;testDbUrl=url.toString();db=createDatabase(testDbUrl);
   const dir=new URL('../../../packages/persistence/migrations/',import.meta.url);
   for(const file of (await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())await db.client.begin(async sql=>{await sql.unsafe(await readFile(new URL(file,dir),'utf8'));});
   config=new PostgresRuntimeConfigRepository(db);
@@ -224,4 +224,26 @@ test('definitive rejected media enqueues exactly one text fallback; replay canno
  await deliverSupportOutbox(db,support,id);await deliverSupportOutbox(db,support,id);
  const rows=await db.client`SELECT id FROM assistant_outbox WHERE conversation_ref='22' AND action_type='reply'`;assert.equal(rows.length,1);
  await deliverSupportOutbox(db,support,rows[0].id);assert.equal(client.articles.size,1);assert.match([...client.articles.values()][0].body,/https:\/\/yubiefood.com\/products\/yubie-shake/);
+});
+
+
+test('pg-boss restart retains a durable wakeup and replay still processes one logical turn',{skip:!enabled},async()=>{
+ await config.set('mode','auto','test',new Date().toISOString());
+ const {default:PgBoss}=await import('pg-boss');
+ const queue='yubi-restart-test',first=new PgBoss({connectionString:testDbUrl});
+ const client=new FakeZammadClient(),now=new Date().toISOString();
+ client.tickets.set('23',{id:23,number:'23',title:'synthetic',group_id:1,state_id:1,priority_id:1,owner_id:1,customer_id:5,created_at:now,updated_at:now,yubie_bot_mode:'AUTO'});
+ client.articles.set('2301',{id:2301,ticket_id:23,sender:'Customer',type:'whatsapp message',internal:false,body:'menu',created_at:now,created_by_id:5});
+ const r=await new PostgresWebhookInboxRepository(db).insert({provider:'zammad',deliveryId:'restart-test',payloadHash:'restart-test',eventType:'article_created',conversationRef:'23',messageRef:'2301',receivedAt:now});
+ await first.start();await first.createQueue(queue);await first.send(queue,{inboxId:r.value.id});await first.stop({graceful:true});
+ const restarted=new PgBoss({connectionString:testDbUrl});
+ try {
+  await restarted.start();
+  await new Promise(async(resolve,reject)=>{
+   const timer=setTimeout(()=>reject(Error('queue_restart_timeout')),15000);
+   try{await restarted.work(queue,{pollingIntervalSeconds:0.5},async jobs=>{try{for(const job of jobs)await processAssistantInbox(db,job.data.inboxId,new ZammadSupportProvider(client,'whatsapp message'));clearTimeout(timer);resolve();}catch(error){clearTimeout(timer);reject(error);throw error;}});}catch(error){clearTimeout(timer);reject(error);}
+  });
+  await processAssistantInbox(db,r.value.id,new ZammadSupportProvider(client,'whatsapp message'));
+  const rows=await db.client`SELECT id FROM assistant_outbox WHERE conversation_ref='23'`;assert.equal(rows.length,1);
+ }finally{await restarted.stop({graceful:true});}
 });
