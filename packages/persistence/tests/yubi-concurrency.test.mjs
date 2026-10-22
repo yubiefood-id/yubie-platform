@@ -1,9 +1,20 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test,{before,after} from 'node:test';
+import {readdir,readFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {createDatabase,closeDatabase,PostgresWebhookInboxRepository,PostgresAssistantOutboxRepository,PostgresConversationSessionRepository} from '../dist/index.js';
+let testUrl,admin,dbName;
+before(async()=>{
+ if(!process.env.DATABASE_URL)return;
+ admin=createDatabase(process.env.DATABASE_URL);dbName='yubi_concurrency_'+randomUUID().replaceAll('-','');
+ await admin.client.unsafe(`CREATE DATABASE "${dbName}"`);
+ const url=new URL(process.env.DATABASE_URL);url.pathname='/'+dbName;testUrl=url.toString();
+ const db=createDatabase(testUrl),dir=new URL('../migrations/',import.meta.url);
+ try{for(const file of (await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())await db.client.begin(async sql=>{await sql.unsafe(await readFile(new URL(file,dir),'utf8'));});}finally{await closeDatabase(db);}
+});
+after(async()=>{if(admin){await admin.client.unsafe(`DROP DATABASE "${dbName}" WITH (FORCE)`);await closeDatabase(admin);}});
 test('concurrent repeated inbox deliveries create exactly one durable event without errors',{skip:!process.env.DATABASE_URL},async()=>{
-  const db=createDatabase(process.env.DATABASE_URL);
+  const db=createDatabase(testUrl);
   try {
     const repo=new PostgresWebhookInboxRepository(db),key=randomUUID();
     const input={provider:'zammad',deliveryId:key,dedupeKey:key,payloadHash:key,eventType:'article_created',receivedAt:new Date().toISOString()};
@@ -14,7 +25,7 @@ test('concurrent repeated inbox deliveries create exactly one durable event with
 });
 
 test('operator reentry release requires a resolved case and cooldown; closure alone does not release',{skip:!process.env.DATABASE_URL},async()=>{
- const db=createDatabase(process.env.DATABASE_URL);
+ const db=createDatabase(testUrl);
  try {
   const repo=new PostgresConversationSessionRepository(db),thread=randomUUID(),now=new Date().toISOString();
   await repo.upsert({provider:'fake',providerThreadId:thread,providerCustomerId:'synthetic',providerInboxOrChannelId:'1',inboxId:'1',state:'HUMAN_ACTIVE',lastActivityAt:now,createdAt:now,updatedAt:now});
@@ -27,7 +38,7 @@ test('operator reentry release requires a resolved case and cooldown; closure al
  }finally{await closeDatabase(db);}
 });
 test('outbox concurrent claims exclude already leased rows',{skip:!process.env.DATABASE_URL},async()=>{
-  const db=createDatabase(process.env.DATABASE_URL);
+  const db=createDatabase(testUrl);
   try {
     const repo=new PostgresAssistantOutboxRepository(db),key=randomUUID();
     await repo.enqueue({provider:'fake',conversationRef:key,payloadFingerprint:key,actionType:'reply',payloadJson:'{"content":"hello"}',createdAt:new Date().toISOString()});
