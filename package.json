@@ -71,6 +71,9 @@
     "ws": "8.21.0"
   },
   "overrides": {
+    "vinext": {
+      "image-size": "2.0.4"
+    },
     "brace-expansion": "5.0.12",
     "minimatch@3.1.5": {
       "brace-expansion": "1.1.20"
@@ -85,9 +88,6 @@
     "source-map-js": "1.2.2",
     "undici": "7.29.1",
     "vite": "8.1.6",
-    "ws": "8.21.0",
-    "@esbuild-kit/core-utils": {
-      "esbuild": "0.28.2"
-    }
+    "ws": "8.21.0"
   }
 }
