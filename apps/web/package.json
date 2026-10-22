@@ -17,8 +17,8 @@
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"
   },
   "dependencies": {
-    "@yubie/config": "*",
     "@hookform/resolvers": "^5.7.1",
+    "@yubie/config": "*",
     "@yubie/domain": "*",
     "@yubie/ui": "*",
     "@yubie/validation": "*",
@@ -30,13 +30,13 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.37.1",
+    "@cloudflare/vite-plugin": "1.64.0",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
-    "@vitejs/plugin-rsc": "0.5.26",
+    "@vitejs/plugin-rsc": "0.5.34",
     "drizzle-kit": "0.31.10",
     "eslint": "9.39.4",
     "eslint-config-next": "16.3.8",
@@ -45,7 +45,7 @@
     "typescript": "5.9.3",
     "vinext": "0.0.50",
     "vite": "8.1.6",
-    "wrangler": "4.92.0"
+    "wrangler": "4.151.0"
   },
   "type": "module",
   "displayName": "Yubie — Nourish Naturally"
