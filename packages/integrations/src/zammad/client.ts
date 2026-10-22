@@ -1,16 +1,10 @@
-import type { ZammadArticle, ZammadGroup, ZammadTicket, ZammadTicketState } from "./types.js";
+import type { ZammadArticle, ZammadArticleInput, ZammadGroup, ZammadTicket, ZammadTicketState } from "./types.js";
 
 export interface ZammadClient {
   getTicket(ticketId: string): Promise<ZammadTicket>;
   getArticle(articleId: string): Promise<ZammadArticle>;
   getTicketArticles(ticketId: string): Promise<ZammadArticle[]>;
-  createArticle(input: {
-    ticketId: string;
-    body: string;
-    contentType?: string;
-    type?: string;
-    internal?: boolean;
-  }): Promise<ZammadArticle>;
+  createArticle(input: ZammadArticleInput): Promise<ZammadArticle>;
   updateTicket(ticketId: string, patch: Record<string, unknown>): Promise<ZammadTicket>;
   searchTicketsUpdatedSince(sinceIso: string): Promise<Array<{ id: string; updatedAt: string }>>;
   getGroups(): Promise<ZammadGroup[]>;
@@ -67,13 +61,7 @@ export class HttpZammadClient implements ZammadClient {
     return this.request<ZammadArticle[]>(`/api/v1/ticket_articles/by_ticket/${ticketId}`);
   }
 
-  async createArticle(input: {
-    ticketId: string;
-    body: string;
-    contentType?: string;
-    type?: string;
-    internal?: boolean;
-  }) {
+  async createArticle(input: ZammadArticleInput) {
     return this.request<ZammadArticle>("/api/v1/ticket_articles", {
       method: "POST",
       body: JSON.stringify({
@@ -82,6 +70,9 @@ export class HttpZammadClient implements ZammadClient {
         content_type: input.contentType ?? "text/plain",
         type: input.type ?? "web",
         internal: input.internal ?? false,
+        sender: "Agent",
+        preferences: input.preferences ?? {},
+        attachments: input.attachments ?? [],
         subject: "Reply",
         to: "",
       }),
@@ -141,13 +132,7 @@ export class FakeZammadClient implements ZammadClient {
     return this.articlesByTicket.get(ticketId) ?? [];
   }
 
-  async createArticle(input: {
-    ticketId: string;
-    body: string;
-    contentType?: string;
-    type?: string;
-    internal?: boolean;
-  }) {
+  async createArticle(input: ZammadArticleInput) {
     const id = this.articles.size + 1;
     const article: ZammadArticle = {
       id,
@@ -163,6 +148,8 @@ export class FakeZammadClient implements ZammadClient {
       type_id: 1,
       created_at: new Date().toISOString(),
       created_by_id: 1,
+      preferences: input.preferences ?? {},
+      attachments: input.attachments ?? [],
     };
     this.articles.set(String(id), article);
     const list = this.articlesByTicket.get(input.ticketId) ?? [];

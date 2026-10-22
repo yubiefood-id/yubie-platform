@@ -126,3 +126,4 @@ export * from "./orders.js";
 export * from "./inventory.js";
 export * from "./identity.js";
 export * from "./promotions.js";
+export * from "./yubi-discovery.js";

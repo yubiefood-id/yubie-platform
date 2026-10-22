@@ -43,6 +43,20 @@ export interface SendReplyCommand {
   idempotencyKey: string;
 }
 
+export interface SendProductMediaCommand {
+  threadRef: SupportThreadRef;
+  productId: string;
+  assetId: string;
+  caption: string;
+  websiteUrl: string;
+  idempotencyKey: string;
+  correlationId: string;
+}
+export interface OutboundDeliveryStatus {
+  state: "accepted" | "sent" | "delivered" | "failed" | "unknown";
+  providerMessageId?: string;
+}
+
 export interface HandoffCommand {
   threadRef: SupportThreadRef;
   labels: string[];
@@ -61,6 +75,8 @@ export interface SupportConversationProvider {
   getThread(ref: SupportThreadRef): Promise<SupportThread>;
   getRecentMessages(ref: SupportThreadRef, options?: { limit?: number }): Promise<SupportMessage[]>;
   sendReply(command: SendReplyCommand): Promise<ProviderSendResult>;
+  sendProductMedia?(command: SendProductMediaCommand): Promise<ProviderSendResult>;
+  getOutboundStatus?(ref: SupportThreadRef, deliveryKey: string): Promise<OutboundDeliveryStatus>;
   getCurrentHumanState(ref: SupportThreadRef): Promise<HumanControlState>;
   handoff(command: HandoffCommand): Promise<ProviderSendResult>;
   listThreadsUpdatedSince(sinceIso: string): Promise<Array<{ threadId: string; updatedAt: string }>>;

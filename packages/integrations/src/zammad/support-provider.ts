@@ -3,6 +3,8 @@ import type {
   HumanControlState,
   ProviderSendResult,
   SendReplyCommand,
+  SendProductMediaCommand,
+  OutboundDeliveryStatus,
   SupportConversationProvider,
   SupportMessage,
   SupportThread,
@@ -10,6 +12,7 @@ import type {
 } from "@yubie/application";
 import type { ZammadClient } from "./client.js";
 import { mapArticle, mapTicket } from "./mapper.js";
+import { defaultProductMediaStore,loadProductPhoto,type ProductMediaStore } from "../media/product-media.js";
 
 function toErrorResult(error: unknown): ProviderSendResult {
   const message = error instanceof Error ? error.message : String(error);
@@ -28,6 +31,7 @@ export class ZammadSupportProvider implements SupportConversationProvider {
   constructor(
     private readonly client: ZammadClient,
     private readonly whatsappArticleType: string,
+    private readonly mediaStore: ProductMediaStore = defaultProductMediaStore,
   ) {}
 
   private ref(threadId: string): SupportThreadRef {
@@ -63,16 +67,41 @@ export class ZammadSupportProvider implements SupportConversationProvider {
 
   async sendReply(command: SendReplyCommand): Promise<ProviderSendResult> {
     try {
+      const existing=await this.getOutboundStatus(command.threadRef,command.idempotencyKey);
+      if(existing.providerMessageId)return {ok:true,code:"SUCCESS",providerMessageId:existing.providerMessageId};
       const article = await this.client.createArticle({
         ticketId: command.threadRef.threadId,
         body: command.content,
         type: this.whatsappArticleType,
         internal: false,
+        preferences: {yubie_delivery_key:command.idempotencyKey},
       });
       return { ok: true, code: "SUCCESS", providerMessageId: String(article.id) };
     } catch (error) {
       return toErrorResult(error);
     }
+  }
+
+  async sendProductMedia(command: SendProductMediaCommand): Promise<ProviderSendResult> {
+    try {
+      if(command.threadRef.provider!=="zammad" || !/^[1-9]\d*$/.test(command.threadRef.threadId) || command.caption.length>1024 || command.websiteUrl!==`https://yubiefood.com/products/yubie-${command.productId}` || !/^(flour|shake|ppang|mie)$/.test(command.productId))return {ok:false,code:"VALIDATION_ERROR",message:"invalid_media_command"};
+      const {bytes,asset}=await loadProductPhoto(this.mediaStore,command.productId,command.assetId);
+      const existing=await this.getOutboundStatus(command.threadRef,command.idempotencyKey);
+      if(existing.providerMessageId)return {ok:true,code:"SUCCESS",providerMessageId:existing.providerMessageId};
+      const article=await this.client.createArticle({ticketId:command.threadRef.threadId,body:command.caption,type:this.whatsappArticleType,internal:false,preferences:{yubie_delivery_key:command.idempotencyKey},attachments:[{filename:`${command.productId}.${asset.mimeType==="image/png"?"png":"jpg"}`,data:bytes.toString("base64"),"mime-type":asset.mimeType}]});
+      return {ok:true,code:"SUCCESS",providerMessageId:String(article.id)};
+    } catch(error) {
+      if(error instanceof Error && /media_|ENOENT/.test(error.message))return {ok:false,code:"VALIDATION_ERROR",message:"approved_media_unavailable"};
+      return toErrorResult(error);
+    }
+  }
+
+  async getOutboundStatus(ref: SupportThreadRef, deliveryKey: string): Promise<OutboundDeliveryStatus> {
+    const articles=await this.client.getTicketArticles(ref.threadId);
+    const matches=articles.filter(a=>a.preferences?.yubie_delivery_key===deliveryKey);
+    if(matches.length!==1)return {state:"unknown"};
+    const a=matches[0]!;const w=a.preferences?.whatsapp as Record<string,unknown>|undefined;
+    return {providerMessageId:String(a.id),state:w?.timestamp_delivered||w?.timestamp_read?"delivered":w?.delivery_status==="fail"?"failed":w?.timestamp_sent?"sent":"accepted"};
   }
 
   async getCurrentHumanState(ref: SupportThreadRef): Promise<HumanControlState> {
