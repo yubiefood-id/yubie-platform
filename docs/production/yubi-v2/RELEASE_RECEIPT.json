@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "release": "yubi-v2-engineering-candidate",
+  "observedDate": "2026-10-22",
+  "baselineMainSha": "2563d8af616043047fba065600eb8b995764267e",
+  "implementationSha": "b8138e90c3c1999ba3fc6e953ad07554090cc01a",
+  "implementationShaScope": "Source implementation before documentation-only PR E; not an authorized deployed artifact",
+  "yubiProductionVerdict": "NO_GO",
+  "websiteTransactionalCommerceVerdict": "NO_GO_SEPARATE_GATE",
+  "productionProfile": "PUBLIC_CATALOG_NO_SALES",
+  "productionPaymentActivated": false,
+  "productionChangesPerformed": false,
+  "stages": {
+    "R0": "AUDITED_WITH_EXTERNAL_UNKNOWN_STATUS",
+    "R1": "LOCAL_PASS_REVIEW_AND_CANDIDATE_CI_REQUIRED",
+    "R2": "BLOCKED_EXTERNAL_FINAL_APPROVED_PHOTOS",
+    "R3": "BLOCKED_EXTERNAL_REAL_ZAMMAD_WHATSAPP",
+    "R4": "LOCAL_RECOVERY_TESTED_OPERATOR_ACCEPTANCE_REQUIRED",
+    "R5": "BLOCKED_EXTERNAL_EXACT_ARTIFACT_APPROVAL"
+  },
+  "localVerification": {
+    "npmCi": "PASS",
+    "npmCheck": { "status": "PASS", "tests": 421, "passed": 365, "failed": 0, "skipped": 56, "skipReason": "DATABASE_URL absent; DB-gated suites also executed separately with disposable PostgreSQL" },
+    "botDatabaseSuite": { "status": "PASS", "passed": 8, "skipped": 0 },
+    "workerDatabaseSuite": { "status": "PASS", "passed": 26, "skipped": 0 },
+    "build": "PASS",
+    "catalogSuite": { "status": "PASS", "passed": 12, "skipped": 0 },
+    "erpContracts": "PASS_NODE_AND_PYTHON",
+    "queueRestartStandalone": "PASS_REAL_PG_BOSS_SIMULATED_PROVIDER",
+    "isolatedBackupRestore": "PASS_LOCAL_SYNTHETIC_ONLY",
+    "providerContract": "SIMULATED_NOT_LIVE",
+    "localTrivy": "BLOCKED_DOCKER_DNS_USE_UNCHANGED_CI_SECURITY_GATE"
+  },
+  "ci": {
+    "requiredGates": ["quality", "persistence", "security", "browser", "containers"],
+    "baselineRun": { "id": 39644015374, "status": "PASS_BASELINE_ONLY" },
+    "flowPrRun": { "id": 39788309723, "status": "PASS_FIVE_GATES_PR_A_ONLY" },
+    "mediaCandidateRun": { "id": 39814882738, "status": "QUEUED_NOT_ACCEPTED" },
+    "navigationCandidateRun": { "id": 39814889919, "status": "QUEUED_NOT_ACCEPTED" },
+    "reliabilityCandidateRun": { "id": 39815166596, "status": "QUEUED_NOT_ACCEPTED" },
+    "documentationCandidateRun": null,
+    "verifiedCandidateArtifactDigest": null,
+    "signedReleaseArtifact": null
+  },
+  "productMedia": {
+    "families": 4,
+    "catalogVariants": 9,
+    "approvedFinalPhotographs": 0,
+    "conceptImageryPermitted": false,
+    "nativeAttachmentFixtureTest": "PASS_SIMULATED_ZAMMAD",
+    "actualWhatsAppDelivery": "NOT_VERIFIED"
+  },
+  "liveEvidence": {
+    "websiteDeployment": "dpl_9GSJiRbcwEgMmMJutiNRv4YuNcQs",
+    "websiteSourceSha": "fabb8c2b0b7a495867372b89d60a2af547de69cd",
+    "pdpReachability": "FOUR_HTTP_200_BASELINE_ONLY",
+    "approvedWebsiteArtifact": null,
+    "actualZammadVersionAndDigest": null,
+    "metaChannelOwnership": null,
+    "recipientDeliveryReceipt": null,
+    "supportUat": null,
+    "productionAlertAndRestoreAcceptance": null,
+    "releaseOwnerAuthorization": null
+  },
+  "pullRequests": {
+    "A": "https://github.com/yubiefood-id/yubie-platform/pull/24",
+    "B": "https://github.com/yubiefood-id/yubie-platform/pull/25",
+    "C": "https://github.com/yubiefood-id/yubie-platform/pull/26",
+    "D": "https://github.com/yubiefood-id/yubie-platform/pull/27"
+  },
+  "operatorBlockers": [
+    "Four exact-product final photos and Product/Brand sign-off",
+    "Running Zammad image/version, real channel, protected secrets and trigger contract",
+    "Approved test identities and service window with actual recipient delivery evidence",
+    "Named CS, Sales and Food Safety groups/operators and after-hours acceptance",
+    "Exact accepted website artifact capabilities",
+    "Real alerts, authorized backup/restore, privacy and named UAT",
+    "All candidate CI gates, signed artifact, release owner, window and rollback approval"
+  ]
+}
