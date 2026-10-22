@@ -1,8 +1,10 @@
 import type { AssistantIntent } from "@yubie/domain";
+import { quotePromotion } from "@yubie/domain";
 import type { KnowledgeLookup } from "../knowledge-tools.js";
-import { isHumanAlias, matchesFoodSafety, matchesHealthEscalation } from "./aliases.js";
+import { isHumanAlias, matchesFoodSafety, matchesHealthEscalation, matchSupportEscalation } from "./aliases.js";
 import { normalizeInput } from "./normalizer.js";
-import { B2B_COPY, B2B_FIELDS, navigationFooter, V2_COPY, V2_NODES, V2_VERSION } from "./v2-flow.js";
+import { isWithinBusinessHours } from "./business-hours.js";
+import { B2B_COPY, B2B_FIELDS, navigationFooter, V2_COPY, V2_NODES, V2_VERSION, V2_ALIASES } from "./v2-flow.js";
 import type { DeterministicAction, DeterministicTurnInput, DeterministicTurnResult, HandoffDestination } from "./types.js";
 
 export interface WebsiteCapabilities {
@@ -46,7 +48,10 @@ export async function processV2(input: DeterministicTurnInput, deps: V2Deps): Pr
   const finish=(action: DeterministicAction): DeterministicTurnResult => {validateV2Effects(effects);return {action,nextState:s,metrics,effects};};
   const handoff=(destination: HandoffDestination,reason: string,intent: AssistantIntent): DeterministicTurnResult => {
     effects.push({kind:"CREATE_HANDOFF",destination,reason,intent,...(destination==="SALES_PARTNERSHIP" && s.context.consent===true ? {summary:{...s.context}}:{})});
-    const text=owned?"":V2_COPY[destination==="FOOD_SAFETY"?"safety":destination==="SALES_PARTNERSHIP"?"sales":"handoff"]!;
+    let text=owned?"":V2_COPY[destination==="FOOD_SAFETY"?"safety":destination==="SALES_PARTNERSHIP"?"sales":"handoff"]!;
+    if(text) {
+      try {if(!isWithinBusinessHours())text+="\n\n"+V2_COPY.after_hours;}catch { /* Keep the accurate queue receipt if the schedule is unavailable. */ }
+    }
     s={...s,nodeId:destination==="FOOD_SAFETY"?"FOOD_SAFETY_HANDOFF":destination==="SALES_PARTNERSHIP"?"SALES_HANDOFF":"HUMAN_HANDOFF",fallbackCount:0};
     metrics.push("deterministic_handoff_total");
     return finish({kind:"handoff",destination,reason,intent,risk:destination==="SALES_PARTNERSHIP"?"AMBER":"RED",nodeId:s.nodeId,text});
@@ -55,13 +60,14 @@ export async function processV2(input: DeterministicTurnInput, deps: V2Deps): Pr
   if(owned) {effects.push({kind:"SUPPRESS_REPLY",reason:"human_ownership"});return finish({kind:"noop",nodeId:s.nodeId,intent:"OTHER",risk:"GREEN"});}
   if(isHumanAlias(n)) return handoff("CUSTOMER_SUPPORT","human_request","HUMAN_REQUEST");
   if(matchesHealthEscalation(n)) return handoff("CUSTOMER_SUPPORT","health_escalation","ALLERGEN_OR_HEALTH");
+  const supportEscalation=matchSupportEscalation(n);
+  if(supportEscalation)return handoff("CUSTOMER_SUPPORT",supportEscalation.reason,supportEscalation.intent);
   let prefix="";
   let target: string|undefined;
-  const aliases: Record<string,string>={menu:"HOME",start:"HOME",mulai:"HOME",halo:"HOME",hai:"HOME",beli:"PRODUCT_MENU",produk:"PRODUCT_MENU",belanja:"PRODUCT_MENU",pesanan:"ORDER_MENU",pengiriman:"ORDER_MENU",resi:"ORDER_MENU","cek pesanan":"ORDER_MENU","pesanan saya":"ORDER_MENU","alamat pengiriman":"ADDRESS_GUIDANCE",promo:"PROMO_MENU",diskon:"PROMO_MENU",bantuan:"SUPPORT_MENU",komplain:"SUPPORT_MENU",bisnis:"B2B_MENU",reseller:"B2B_MENU",partnership:"B2B_MENU","tentang yubie":"ABOUT_MENU"};
   if(s.flowVersion!==V2_VERSION || !V2_NODES[s.nodeId]) {
     s={nodeId:"HOME",flowVersion:V2_VERSION,context:{},fallbackCount:0};
     effects.push({kind:"RESET_NAVIGATION",reason:"flow_version"});prefix=V2_COPY.migration+"\n\n";target="HOME";
-  } else if(aliases[n]) target=aliases[n];
+  } else if(V2_ALIASES[n]) target=V2_ALIASES[n];
   else if(["9","kembali","back"].includes(n)) target=V2_NODES[s.nodeId]!.parent;
   else if(s.nodeId==="B2B_COLLECT") {
     const index=Number(s.context.collectIndex??0);
@@ -82,7 +88,7 @@ export async function processV2(input: DeterministicTurnInput, deps: V2Deps): Pr
     effects.push({kind:"REPLY_TEXT",text,messageId:`v2.fallback.${s.fallbackCount}`});
     return finish({kind:"reply",nodeId:s.nodeId,text});
   }
-  if(s.nodeId==="PRODUCT_MENU" && target==="PRODUCT_DETAIL")s.context.productId=["flour","shake","ppang","mie"][Number(n)-1];
+  if(s.nodeId==="PRODUCT_MENU" && target==="PRODUCT_DETAIL" && /^[1-4]$/.test(n))s.context.productId=["flour","shake","ppang","mie"][Number(n)-1];
   if(s.nodeId==="B2B_MENU" && target==="B2B_CONSENT")s.context={category:["bulk","reseller","sample-development","partnership"][Number(n)-1]};
   if(s.nodeId==="B2B_CONSENT" && target==="B2B_COLLECT")s.context={...s.context,consent:true,collectIndex:0};
   if(target==="HOME" || target==="B2B_MENU")s.context={};
@@ -98,13 +104,15 @@ export async function processV2(input: DeterministicTurnInput, deps: V2Deps): Pr
     const fact=await deps.knowledge.getEffectivePublicKnowledge(category,scope);
     const data=fact?.data;
     text=typeof data==="string"?data:(data && typeof data==="object" && "summary" in data && typeof data.summary==="string"?data.summary:V2_COPY.unavailable!);
+    if(text.length>3900)text=V2_COPY.unavailable!;
     if(text===V2_COPY.unavailable)metrics.push(`unsupported_information_${category}_total`);
     s.context.factCategory=category;target=productFact?"PRODUCT_INFO":"ABOUT_DETAIL";
     messageId=`v2.fact.${category}`;
   }
   s={...s,nodeId:target,flowVersion:V2_VERSION,fallbackCount:0};
   if(!text)text=V2_COPY[V2_NODES[target]!.copy]??"";
-  const product=deps.resolveProduct?.(String(s.context.productId??""));
+  const candidate=deps.resolveProduct?.(String(s.context.productId??""));
+  const product=candidate && validWebsiteUrl(candidate.websiteUrl)?candidate:null;
   if(target==="PRODUCT_DETAIL") {
     metrics.push("product_selected_total");
     text=product?`${product.name}\n\n${product.description}\n\nVarian:\n${product.variantRows.join("\n")}\n\n${caps.catalog_available?product.websiteUrl+"\n\n":""}1. ${caps.checkout_available?"Beli":"Lihat"} di Website\n2. Info Produk\n3. Lihat Produk Lain`:V2_COPY.product_unavailable!;
@@ -114,7 +122,13 @@ export async function processV2(input: DeterministicTurnInput, deps: V2Deps): Pr
   if(target==="WEBSITE_HANDOFF")text=caps.catalog_available && product && validWebsiteUrl(product.websiteUrl)?`Siap! 💜\n\n${caps.checkout_available?"Kamu bisa memilih varian, jumlah, dan melanjutkan pembelian melalui website resmi Yubie.":"Kamu bisa melihat detail produk melalui katalog resmi Yubie. Checkout website belum tersedia untuk layanan ini."}\n\n${product.websiteUrl}`:V2_COPY.product_unavailable!;
   if(target==="ORDER_PORTAL")text=V2_COPY[caps.account_available&&caps.order_portal_available?"order_available":"order_unavailable"]!;
   if(target==="PAYMENT_GUIDANCE")text=V2_COPY[caps.checkout_available?"payment_available":"payment_unavailable"]!;
-  if(target==="PROMO_MENU" && caps.catalog_available)text+="\nhttps://yubiefood.com/products";
+  if(target==="PROMO_MENU") {
+    const approved=await deps.knowledge.getEffectivePublicKnowledge("promotion","brand:yubie");
+    const promo=approved?.data as {code?:string;percentage?:number;startsAt?:string;endsAt?:string;eligibility?:string}|undefined;
+    const quote=promo && typeof promo.code==="string"?quotePromotion(promo.code,100):null;
+    if(quote && promo?.percentage===quote.percentage && Date.parse(promo?.startsAt??"")<=Date.now() && Date.parse(promo?.endsAt??"")>Date.now() && typeof promo?.eligibility==="string" && promo.eligibility.length>0 && promo.eligibility.length<=800)text=`Promo ${quote.code}: diskon ${promo.percentage}%.\n${promo.eligibility}\nKonfirmasi ketentuan melalui website resmi atau tim Yubie.`;
+    if(caps.catalog_available)text+="\nhttps://yubiefood.com/products";
+  }
   if(target==="B2B_COLLECT")text=B2B_COPY[Number(s.context.collectIndex)]??V2_COPY.unavailable!;
   text=prefix+text+navigationFooter;
   if(!effects.some(e=>e.kind==="SEND_PRODUCT_MEDIA"))effects.push({kind:target.endsWith("MENU")||target==="HOME"?"SHOW_MENU":"REPLY_TEXT",text,messageId});

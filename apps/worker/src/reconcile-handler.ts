@@ -56,7 +56,7 @@ export async function reconcileSupport(
         await sessions.updateState(provider,thread.threadId,"RESOLVED",new Date().toISOString());changed+=1;continue;
       }
 
-      if (humanState.humanActive && localState !== "HUMAN_ACTIVE") {
+      if (humanState.humanActive && localState !== "HUMAN_ACTIVE" && localState !== "RESOLVED") {
         await sessions.updateState(provider, thread.threadId, "HUMAN_ACTIVE", new Date().toISOString());
         changed += 1;
       }

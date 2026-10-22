@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { withAssistantTransaction } from "../assistant-work.js";
 import { ok } from "@yubie/domain";
 import type { Database } from "../client.js";
 import { assistantRuntimeConfig, assistantRuntimeConfigAudit } from "../schema/index.js";
@@ -58,6 +59,18 @@ export class PostgresRuntimeConfigRepository {
   }
 
   async set(key: string, value: unknown, changedBy: string, changedAt: string) {
+    return this.setMany([{key,value}],changedBy,changedAt);
+  }
+
+  async setMany(entries: Array<{key:string;value:unknown}>, changedBy: string, changedAt: string) {
+    return withAssistantTransaction(this.database,async bound=>{
+      const repo=new PostgresRuntimeConfigRepository(bound);
+      for(const entry of entries)await repo.setLocked(entry.key,entry.value,changedBy,changedAt);
+      return ok(undefined);
+    },"yubi:runtime-config");
+  }
+
+  private async setLocked(key: string, value: unknown, changedBy: string, changedAt: string) {
     const valueJson = JSON.stringify(value);
     const existing = await this.database.db
       .select()

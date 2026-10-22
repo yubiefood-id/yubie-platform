@@ -1,8 +1,7 @@
-import { eq, sql } from "drizzle-orm";
 import type { SupportConversationProvider, SupportThreadRef, ProviderSendResult } from "@yubie/application";
 import { buildHandoffCommand } from "@yubie/integrations";
 import { deriveYubiCapabilities, parseLaunchProfile } from "@yubie/config";
-import { assistantOutbox, PostgresAssistantOutboxRepository, PostgresConversationSessionRepository, PostgresRuntimeConfigRepository, type Database } from "@yubie/persistence";
+import { assistantOutbox, withAssistantTransaction, PostgresAssistantWorkRepository, PostgresAssistantOutboxRepository, PostgresConversationSessionRepository, PostgresRuntimeConfigRepository, type Database } from "@yubie/persistence";
 import { increment, setGauge } from "./metrics.js";
 
 function threadRefFromRow(row: {provider:string;providerThreadId:string|null;conversationRef:string}): SupportThreadRef {
@@ -12,8 +11,7 @@ const RETRY_DELAYS=[30_000,120_000,600_000,1_800_000];
 
 async function mediaFallback(database: Database,row: typeof assistantOutbox.$inferSelect,payload: Record<string,unknown>) {
   if(typeof payload.fallbackText!=="string")return;
-  await database.db.transaction(async tx=>{
-    const bound={db:tx,client:database.client} as unknown as Database;
+  await withAssistantTransaction(database,async bound=>{
     const repo=new PostgresAssistantOutboxRepository(bound);
     await repo.updateStatus(row.id,"failed",{lastError:"media_rejected"},new Date().toISOString());
     await repo.enqueue({provider:row.provider,providerThreadId:row.providerThreadId??row.conversationRef,conversationRef:row.conversationRef,actionType:"reply",payloadFingerprint:row.payloadFingerprint+":fallback",payloadJson:JSON.stringify({content:payload.fallbackText,customerReceivedAt:payload.customerReceivedAt,requires:payload.requires}),createdAt:new Date().toISOString()});
@@ -24,7 +22,7 @@ async function mediaFallback(database: Database,row: typeof assistantOutbox.$inf
 
 export async function deliverSupportOutbox(database: Database,support: SupportConversationProvider,outboxId: string,alreadyClaimed=false) {
   const repo=new PostgresAssistantOutboxRepository(database);
-  const rows=alreadyClaimed?await database.db.select().from(assistantOutbox).where(eq(assistantOutbox.id,outboxId)).limit(1):await repo.claimPending(1,outboxId);
+  const rows=alreadyClaimed?[await repo.get(outboxId)]:await repo.claimPending(1,outboxId);
   const row=rows[0];if(!row || row.status!=="delivering")return;
   const now=new Date().toISOString();
   const ref=threadRefFromRow(row);
@@ -40,11 +38,18 @@ export async function deliverSupportOutbox(database: Database,support: SupportCo
       const command=buildHandoffCommand(ref,(payload.intent??"HUMAN_REQUEST") as import("@yubie/domain").AssistantIntent,typeof payload.handoffReason==="string"?payload.handoffReason:undefined,{...(payload.flowVersion==="deterministic-v2"?{flowVersion:"deterministic-v2" as const}:{}),...(typeof payload.productId==="string"?{productId:payload.productId}:{})});
       if(payload.summary && typeof payload.summary==="object")command.summary=payload.summary as Record<string,unknown>;
       command.idempotencyKey=row.payloadFingerprint;
+      if(payload.intent!=="FOOD_SAFETY") {
+        command.authorizeDispatch=async()=>{
+          const fresh=await new PostgresRuntimeConfigRepository(database).getSnapshot();
+          const session=await new PostgresConversationSessionRepository(database).getByProviderThreadId(ref.provider,ref.threadId);
+          return fresh.assistantEnabled && fresh.mode!=="off" && !(session.ok && session.value && ["HUMAN_ACTIVE","RESOLVED","QUEUED"].includes(session.value.state));
+        };
+        if(!await command.authorizeDispatch() || (await support.getCurrentHumanState(ref)).humanActive){await terminal("cancelled","human_takeover");return;}
+      }
       result=await support.handoff(command);
       if(result.ok) {
-        await repo.updateStatus(row.id,"delivered",{deliveredAt:now},now);
-        await database.db.execute(sql`UPDATE assistant_outbox SET payload_json=(payload_json::jsonb - 'summary')::text WHERE id=${row.id}`);
-        await database.db.execute(sql`UPDATE conversation_sessions SET state='QUEUED',updated_at=${now} WHERE provider=${ref.provider} AND provider_thread_id=${ref.threadId} AND state='HANDOFF_REQUESTED'`);
+        await new PostgresAssistantWorkRepository(database).completeHandoff(row.id,ref.provider,ref.threadId,now);
+        increment(payload.intent==="FOOD_SAFETY"?"food_safety_routed_total":"human_handoff_completed_total");
         return;
       }
     } else {
@@ -66,7 +71,7 @@ export async function deliverSupportOutbox(database: Database,support: SupportCo
         const fresh=await new PostgresRuntimeConfigRepository(database).getSnapshot();
         const current=await sessions.getByProviderThreadId(ref.provider,ref.threadId);
         const currentState=current.ok?current.value?.state:undefined;
-        if(!fresh.assistantEnabled || fresh.mode!=="auto" || currentState==="HUMAN_ACTIVE" || currentState==="RESOLVED")return false;
+        if(!fresh.assistantEnabled || fresh.mode!=="auto" || (currentState && ["HUMAN_ACTIVE","RESOLVED","QUEUED","HANDOFF_REQUESTED"].includes(currentState) && !(payload.handoffReceipt && ["QUEUED","HANDOFF_REQUESTED"].includes(currentState))))return false;
         const latestCaps=deriveYubiCapabilities(parseLaunchProfile(process.env.YUBIE_LAUNCH_PROFILE),fresh.websiteRelease,process.env.YUBIE_ENV??"development");
         return !Array.isArray(payload.requires) || !payload.requires.some(k=>!latestCaps[k as keyof typeof latestCaps]);
       };
@@ -76,7 +81,7 @@ export async function deliverSupportOutbox(database: Database,support: SupportCo
       } else if(row.actionType==="reply" && typeof payload.content==="string" && payload.content.length>0 && payload.content.length<=4096) {
         result=await support.sendReply({threadRef:ref,content:payload.content,idempotencyKey:row.payloadFingerprint,authorizeDispatch,handoffReceipt:payload.handoffReceipt===true});
       } else {await terminal("failed","invalid_action");return;}
-      if(result.ok){await repo.updateStatus(row.id,ref.provider==="fake"?"delivered":"accepted",{...(result.providerMessageId?{providerMessageId:result.providerMessageId}:{}),nextAttemptAt:new Date(Date.now()+30_000).toISOString()},now);return;}
+      if(result.ok){if(row.actionType==="product_media")increment("product_media_accepted_total");await repo.updateStatus(row.id,ref.provider==="fake"?"delivered":"accepted",{...(result.providerMessageId?{providerMessageId:result.providerMessageId}:{}),nextAttemptAt:new Date(Date.now()+30_000).toISOString()},now);return;}
     }
     if(!result.ok) {
       increment("support_provider_error_total");
@@ -92,18 +97,27 @@ export async function deliverSupportOutbox(database: Database,support: SupportCo
 }
 
 export async function reconcileOutbound(database: Database,support: SupportConversationProvider) {
-  if(!support.getOutboundStatus)return;
   const repo=new PostgresAssistantOutboxRepository(database);
-  const rows=await database.db.select().from(assistantOutbox).where(sql`${assistantOutbox.provider}=${support.provider} AND ${assistantOutbox.status} IN ('accepted','sent','ambiguous') AND (${assistantOutbox.nextAttemptAt} IS NULL OR ${assistantOutbox.nextAttemptAt}<=now())`).limit(20);
+  const rows=await repo.reconciliationCandidates(support.provider);
   for(const row of rows) {
-    if(row.actionType==="handoff")continue; // Operator reconciles an uncertain multi-step routing change.
+    if(row.actionType==="handoff") {
+      const payload=JSON.parse(row.payloadJson) as Record<string,unknown>;
+      // Safety routing contains only convergent group/priority/tag writes, no customer article.
+      // Retry its desired state after uncertain acknowledgment; routine multi-step writes stay held.
+      if(payload.intent==="FOOD_SAFETY" && row.attemptCount<5) {
+        if(await repo.retrySafetyHandoff(row.id))await deliverSupportOutbox(database,support,row.id);
+      } else if(row.attemptCount>=5 || Date.now()-Date.parse(row.createdAt)>24*60*60*1000)await repo.updateStatus(row.id,"failed",{lastError:"HANDOFF_RECONCILIATION_REQUIRED"},new Date().toISOString());
+      else await repo.updateStatus(row.id,"ambiguous",{nextAttemptAt:new Date(Date.now()+300_000).toISOString()},new Date().toISOString());
+      continue;
+    }
+    if(!support.getOutboundStatus)continue;
     try {
       const status=await support.getOutboundStatus(threadRefFromRow(row),row.payloadFingerprint);
       const now=new Date().toISOString();
       if(status.state==="failed") {
         if(row.actionType==="product_media")await mediaFallback(database,row,JSON.parse(row.payloadJson));
         else await repo.updateStatus(row.id,"failed",{lastError:"PROVIDER_DELIVERY_FAILED"},now);
-      } else if(status.state==="delivered")await repo.updateStatus(row.id,"delivered",{deliveredAt:now,...(status.providerMessageId?{providerMessageId:status.providerMessageId}:{})},now);
+      } else if(status.state==="delivered"){await repo.updateStatus(row.id,"delivered",{deliveredAt:now,...(status.providerMessageId?{providerMessageId:status.providerMessageId}:{})},now);if(row.actionType==="product_media")increment("product_media_delivered_total");}
       else if(Date.now()-Date.parse(row.createdAt)>24*60*60*1000)await repo.updateStatus(row.id,"failed",{lastError:"DELIVERY_UNRESOLVED"},now);
       else await repo.updateStatus(row.id,status.state==="unknown"?"ambiguous":status.state,{nextAttemptAt:new Date(Date.now()+30_000).toISOString(),...(status.providerMessageId?{providerMessageId:status.providerMessageId}:{})},now);
     }catch{increment("support_provider_error_total");}
@@ -111,13 +125,7 @@ export async function reconcileOutbound(database: Database,support: SupportConve
 }
 
 async function refreshOutboxGauges(database: Database) {
-  const rows = await database.db
-    .select({
-      status: assistantOutbox.status,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(assistantOutbox)
-    .groupBy(assistantOutbox.status);
+  const rows = await new PostgresAssistantOutboxRepository(database).counts();
 
   let pending = 0;
   let ambiguous = 0;
@@ -136,9 +144,11 @@ export async function processPendingOutbox(database: Database, support: SupportC
   const outboxRepo = new PostgresAssistantOutboxRepository(database);
   await outboxRepo.recoverExpiredClaims();
   await reconcileOutbound(database,support);
-  const pending = await outboxRepo.claimPending(20,undefined,support.provider);
-  for (const row of pending) {
-    await deliverSupportOutbox(database, support, row.id,true);
+  for(let i=0;i<20;i++) {
+    // A lease starts at dispatch, never while waiting behind a batch of network calls.
+    const [row]=await outboxRepo.claimPending(1,undefined,support.provider);
+    if(!row)break;
+    await deliverSupportOutbox(database,support,row.id,true);
   }
   await refreshOutboxGauges(database);
 }

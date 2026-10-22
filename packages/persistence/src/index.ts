@@ -1,4 +1,5 @@
 export * from "./client.js";
+export * from "./assistant-work.js";
 export * from "./health-probe.js";
 export * from "./tx-manager.js";
 export * from "./worker-repos.js";

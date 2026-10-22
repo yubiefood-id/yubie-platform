@@ -126,22 +126,34 @@ export class ZammadSupportProvider implements SupportConversationProvider {
   }
 
   async getCurrentHumanState(ref: SupportThreadRef): Promise<HumanControlState> {
-    const thread = await this.getThread(ref);
-    const [ticket,articles]=await Promise.all([this.client.getTicket(ref.threadId),this.client.getTicketArticles(ref.threadId)]);
+    const [ticket,states,articles,botId]=await Promise.all([this.client.getTicket(ref.threadId),this.client.getStates(),this.client.getTicketArticles(ref.threadId),this.botId()]);
+    const thread=mapTicket(ref,ticket,states,botId);
+    const closed=["closed","merged","removed"].includes(thread.stateLabel.toLowerCase());
     const customers=articles.filter(a=>a.sender==="Customer" && !a.internal && a.type===this.whatsappArticleType).sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at));
     const lastCustomerAt=customers[0]?.created_at;
     const mode=ticket.yubie_bot_mode?.toUpperCase();
     return {
+      lifecycle:closed?"closed":"open",
       humanActive: thread.humanActive,
-      automationDisabled: mode ? mode!=="AUTO" : ["production","staging"].includes(process.env.YUBIE_ENV??""),
+      automationDisabled: closed || (mode ? mode!=="AUTO" : ["production","staging"].includes(process.env.YUBIE_ENV??"")),
       ...(lastCustomerAt?{lastCustomerAt}:{}),
-      serviceWindowOpen: !!lastCustomerAt && Date.now()-Date.parse(lastCustomerAt)<24*60*60*1000,
+      serviceWindowOpen: !closed && !!lastCustomerAt && Date.parse(lastCustomerAt)<=Date.now()+60_000 && Date.now()-Date.parse(lastCustomerAt)<24*60*60*1000,
       ...(thread.humanActive ? { reason: `zammad_state_${thread.stateLabel}` } : {}),
     };
   }
 
+  async resolveLifecycleState(stateRef: string) {
+    const state=(await this.client.getStates()).find(s=>String(s.id)===stateRef);
+    if(!state)return "unknown" as const;
+    return ["closed","merged","removed"].includes(state.name.toLowerCase())?"closed" as const:"open" as const;
+  }
+
   async handoff(command: HandoffCommand): Promise<ProviderSendResult> {
     try {
+      const safety=command.labels.includes("handoff:food-safety");
+      const allowed=async()=>safety || (!(await this.getCurrentHumanState(command.threadRef)).humanActive && (!command.authorizeDispatch || await command.authorizeDispatch()));
+      if(!safety && ["production","staging"].includes(process.env.YUBIE_ENV??"") && !command.authorizeDispatch)return {ok:false,code:"FORBIDDEN"};
+      if(!await allowed())return {ok:false,code:"FORBIDDEN"};
       const patch: Record<string, unknown> = {};
       if (command.groupId) patch.group_id = Number(command.groupId);
       if (command.priorityId) patch.priority_id = Number(command.priorityId);
@@ -150,13 +162,16 @@ export class ZammadSupportProvider implements SupportConversationProvider {
       }
       const ticket=await this.client.updateTicket(command.threadRef.threadId, patch);
       if(command.groupId && ticket.group_id!==Number(command.groupId))return {ok:false,code:"AMBIGUOUS"};
+      if(command.priorityId && ticket.priority_id!==Number(command.priorityId))return {ok:false,code:"AMBIGUOUS"};
       for (const label of command.labels) {
+        if(!await allowed())return {ok:false,code:"FORBIDDEN"};
         await this.client.addTag(command.threadRef.threadId, label);
       }
       if(command.summary?.consent===true && command.idempotencyKey) {
         const key=command.idempotencyKey+":summary";
         const exists=await this.getOutboundStatus(command.threadRef,key);
         if(!exists.providerMessageId) {
+          if(!await allowed())return {ok:false,code:"FORBIDDEN"};
           const summary=Object.fromEntries(["category","company","need","product","city","volume"].filter(k=>k in command.summary!).map(k=>[k,String(command.summary![k]??"").slice(0,256)]));
           await this.client.createArticle({ticketId:command.threadRef.threadId,type:"note",internal:true,body:JSON.stringify(summary),preferences:{yubie_delivery_key:key}});
         }

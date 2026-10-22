@@ -62,6 +62,8 @@ export interface OutboundDeliveryStatus {
 }
 
 export interface HandoffCommand {
+  /** Worker authorization, checked before each routine remote mutation. Safety routing is internal. */
+  authorizeDispatch?: () => Promise<boolean>;
   summary?: Record<string,unknown>;
   idempotencyKey?: string;
   threadRef: SupportThreadRef;
@@ -72,6 +74,7 @@ export interface HandoffCommand {
 }
 
 export interface HumanControlState {
+  lifecycle?: "open" | "closed" | "unknown";
   humanActive: boolean;
   automationDisabled?: boolean;
   lastCustomerAt?: string;
@@ -87,6 +90,8 @@ export interface SupportConversationProvider {
   sendProductMedia?(command: SendProductMediaCommand): Promise<ProviderSendResult>;
   getOutboundStatus?(ref: SupportThreadRef, deliveryKey: string): Promise<OutboundDeliveryStatus>;
   getCurrentHumanState(ref: SupportThreadRef): Promise<HumanControlState>;
+  /** Resolves an opaque signed event state reference using the provider's state catalog. */
+  resolveLifecycleState?(stateRef: string): Promise<"open" | "closed" | "unknown">;
   handoff(command: HandoffCommand): Promise<ProviderSendResult>;
   listThreadsUpdatedSince(sinceIso: string): Promise<Array<{ threadId: string; updatedAt: string }>>;
   getArticle?(ref: SupportThreadRef, articleId: string): Promise<SupportMessage | null>;

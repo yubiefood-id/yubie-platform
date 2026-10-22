@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
-import { ok } from "@yubie/domain";
+import { ok, BOT_REENTRY_COOLDOWN_MS } from "@yubie/domain";
 import type { ConversationState } from "@yubie/domain";
 import type { Database } from "../client.js";
 import { conversationSessions } from "../schema/index.js";
@@ -118,7 +118,8 @@ export class PostgresConversationSessionRepository {
   }
 
   async releaseForReentry(provider: string,threadId: string,at: string): Promise<boolean> {
-    const rows=await this.database.db.update(conversationSessions).set({botReleasedAt:at}).where(and(eq(conversationSessions.provider,provider),eq(conversationSessions.providerThreadId,threadId),eq(conversationSessions.state,"RESOLVED"),sql`${conversationSessions.resolvedAt} <= ${at}::timestamptz - interval '30 minutes'`)).returning({id:conversationSessions.id});
+    const threshold=new Date(Date.parse(at)-BOT_REENTRY_COOLDOWN_MS).toISOString();
+    const rows=await this.database.db.update(conversationSessions).set({botReleasedAt:at}).where(and(eq(conversationSessions.provider,provider),eq(conversationSessions.providerThreadId,threadId),eq(conversationSessions.state,"RESOLVED"),sql`${conversationSessions.resolvedAt} <= ${threshold}::timestamptz`)).returning({id:conversationSessions.id});
     return rows.length===1;
   }
 

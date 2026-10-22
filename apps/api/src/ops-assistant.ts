@@ -4,7 +4,7 @@ import {deriveYubiCapabilities,parseLaunchProfile} from "@yubie/config";
 import {approvedYubiPhotos} from "@yubie/domain";
 import {yubiReentrySchema,yubiFlowVersionSchema} from "@yubie/validation";
 import {
-  createDatabase,
+  withAssistantTransaction,
   PostgresAssistantOutboxRepository,
   PostgresRuntimeConfigRepository,
   PostgresConversationSessionRepository,
@@ -27,6 +27,12 @@ export function authorizeOps(request: Request): boolean {
 }
 
 export async function handleOpsAssistant(request: Request, database: Database): Promise<Response | null> {
+  if(!new URL(request.url).pathname.startsWith("/ops/assistant"))return null;
+  if(!authorizeOps(request))return Response.json({error:"unauthorized"},{status:401});
+  return withAssistantTransaction(database,bound=>handleOpsAssistantLocked(request,bound),"yubi:runtime-config");
+}
+
+async function handleOpsAssistantLocked(request: Request, database: Database): Promise<Response | null> {
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/ops/assistant")) return null;
 
@@ -42,8 +48,7 @@ export async function handleOpsAssistant(request: Request, database: Database): 
     if(!parsed.success)return Response.json({error:"invalid_reentry"},{status:400});
     const body=parsed.data;
     const now=new Date().toISOString();
-    const released=await database.db.transaction(async tx=>{
-      const bound={db:tx,client:database.client} as unknown as Database;
+    const released=await withAssistantTransaction(database,async bound=>{
       const ok=await new PostgresConversationSessionRepository(bound).releaseForReentry(body.provider!,body.threadId!,now);
       if(ok)await new PostgresRuntimeConfigRepository(bound).set("last_bot_reentry",{provider:body.provider,threadId:body.threadId},body.changedBy!,now);
       return ok;
@@ -56,14 +61,15 @@ export async function handleOpsAssistant(request: Request, database: Database): 
     if(!parsed.success)return Response.json({error:"invalid_flow_selection"},{status:400});
     const body=parsed.data;
     if(body.releaseSha!==process.env.RELEASE_SHA)return Response.json({error:"release_identity_mismatch"},{status:409});
-    await runtime.set("deterministic_flow_version",body.flowVersion,body.changedBy,new Date().toISOString());
-    await runtime.set("flow_selection_approval",{releaseSha:body.releaseSha,approvalRef:body.approvalRef},body.changedBy,new Date().toISOString());
-    return Response.json({ok:true,flowVersion:body.flowVersion,automationUnchanged:true});
+    const config=await runtime.getSnapshot();
+    const mode=config.mode==="auto"?"shadow":config.mode;
+    await runtime.setMany([{key:"deterministic_flow_version",value:body.flowVersion},{key:"flow_selection_approval",value:{releaseSha:body.releaseSha,approvalRef:body.approvalRef}},{key:"mode",value:mode}],body.changedBy,new Date().toISOString());
+    return Response.json({ok:true,flowVersion:body.flowVersion,mode,requiresSeparateActivation:true});
   }
 
   if (request.method === "GET" && url.pathname === "/ops/assistant") {
     const config = await runtime.getSnapshot();
-    const counts=await database.client`SELECT status,count(*)::int AS count FROM assistant_outbox GROUP BY status`;
+    const counts=await outbox.counts();
     const queueLag=counts.filter(r=>['pending','retry','delivering'].includes(r.status)).reduce((n,r)=>n+r.count,0);
     const deadLetters=counts.filter(r=>['failed','ambiguous'].includes(r.status)).reduce((n,r)=>n+r.count,0);
 
@@ -95,10 +101,9 @@ export async function handleOpsAssistant(request: Request, database: Database): 
         if(!acceptance?.approvalRef || acceptance.releaseSha!==process.env.RELEASE_SHA || acceptance.operationsAccepted!==true || !caps.catalog_available || new Set(approvedYubiPhotos.map(a=>a.productId)).size!==4)return Response.json({error:"yubi_v2_acceptance_required"},{status:409});
       }
     }
-    await runtime.set("mode", body.mode, body.changedBy ?? "operator", new Date().toISOString());
-    if (body.mode === "off") {
-      await runtime.set("assistant_enabled", false, body.changedBy ?? "operator", new Date().toISOString());
-    }
+    const now=new Date().toISOString();
+    await runtime.setMany([{key:"mode",value:body.mode},{key:"assistant_enabled",value:body.mode!=="off"}],body.changedBy??"operator",now);
+    if(body.mode==="off")await outbox.cancelPendingCustomer(now);
     return Response.json({ ok: true, mode: body.mode });
   }
 
@@ -106,8 +111,8 @@ export async function handleOpsAssistant(request: Request, database: Database): 
     const body = (await request.json()) as { changedBy?: string };
     const changedBy = body.changedBy ?? "operator";
     const now = new Date().toISOString();
-    await runtime.set("assistant_enabled", false, changedBy, now);
-    await runtime.set("mode", "off", changedBy, now);
+    await runtime.setMany([{key:"assistant_enabled",value:false},{key:"mode",value:"off"}],changedBy,now);
+    await outbox.cancelPendingCustomer(now);
     return Response.json({ ok: true, assistantEnabled: false });
   }
 

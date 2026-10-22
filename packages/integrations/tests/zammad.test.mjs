@@ -96,6 +96,19 @@ test('real agent articles are distinct from the bot and an unowned open ticket d
   assert.equal(isHumanActiveTicket({owner_id:1,state_id:2},[{id:2,name:'open',state_type_id:2}]),false);
 });
 
+test('latest ownership snapshot and closed ticket state forbid article dispatch',async()=>{
+ for(const scenario of ['takeover','closed']) {
+  const client=new FakeZammadClient(),now=new Date().toISOString();let reads=0;
+  const ticket={id:1,number:'1',title:'synthetic',group_id:1,state_id:1,priority_id:1,owner_id:1,customer_id:5,created_at:now,updated_at:now,yubie_bot_mode:'AUTO'};
+  client.getTicket=async()=>({...ticket,owner_id:scenario==='takeover' && ++reads>1?9:1,state_id:scenario==='closed'?4:1});
+  client.articlesByTicket.set('1',[{id:0,ticket_id:1,sender:'Customer',type:'whatsapp message',internal:false,body:'halo',created_at:now}]);
+  const p=new ZammadSupportProvider(client,'whatsapp message');
+  if(scenario==='takeover')await p.getCurrentHumanState({provider:'zammad',threadId:'1'});
+  const result=await p.sendReply({threadRef:{provider:'zammad',threadId:'1'},content:'must stop',idempotencyKey:'race',authorizeDispatch:async()=>true});
+  assert.equal(result.ok,false,scenario);assert.equal(client.articles.size,0);
+ }
+});
+
 test("buildHandoffCommand maps logical destinations to groups", () => {
   const ref = { provider: "zammad", threadId: "1" };
   const sales = buildHandoffCommand(ref, "B2B_INTRO", "b2b", { destination: "SALES_PARTNERSHIP" });
@@ -138,4 +151,17 @@ test("ZammadSupportProvider sends reply via fake client", async () => {
   });
   assert.equal(result.ok, true);
   assert.equal(client.articles.size, 1);
+});
+
+
+test('routine handoff stops remaining mutations after OFF and safety verifies the returned priority',async()=>{
+ const client=new FakeZammadClient(),now=new Date().toISOString();
+ client.tickets.set('2',{id:2,number:'2',title:'synthetic',group_id:1,state_id:1,priority_id:1,owner_id:1,customer_id:5,created_at:now,updated_at:now,yubie_bot_mode:'AUTO'});
+ const support=new ZammadSupportProvider(client,'whatsapp message');let checks=0;
+ const command=buildHandoffCommand({provider:'zammad',threadId:'2'},'HUMAN_REQUEST','human_request');
+ command.authorizeDispatch=async()=>++checks===1;
+ assert.equal((await support.handoff(command)).ok,false);assert.equal(client.tags.size,0);
+ const update=client.updateTicket.bind(client);client.updateTicket=async(...args)=>({...await update(...args),priority_id:1});
+ const result=await support.handoff(buildHandoffCommand({provider:'zammad',threadId:'2'},'FOOD_SAFETY','food_safety',{priorityIds:{high:'5'}}));
+ assert.equal(result.code,'AMBIGUOUS');assert.equal(client.articles.size,0);
 });

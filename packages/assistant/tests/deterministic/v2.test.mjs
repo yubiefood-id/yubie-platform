@@ -28,6 +28,10 @@ test('V2 global aliases work from nested states with normalized input', async ()
   assert.equal((await turn('9',state('ORDER_MENU'))).nextState.nodeId,'HOME');
 });
 
+test('product aliases keep the same selected product inside the product menu',async()=>{
+  for(const [input,id] of [['beli shake','shake'],['harga tepung','flour'],['info ppang','ppang'],['mau mie','mie']])assert.equal((await turn(input,state('PRODUCT_MENU'))).nextState.context.productId,id);
+});
+
 test('V2 priority safety is internal while human owned and survives version migration', async () => {
   const r = await turn('produk berjamur, hubungi admin', {nodeId:'buy',flowVersion:'deterministic-v1',context:{},fallbackCount:0}, 'HUMAN_ACTIVE');
   assert.equal(r.action.kind,'handoff');
@@ -80,4 +84,44 @@ test('V2 missing category-specific knowledge cannot reuse broad product summary 
   const r=await e.processTurn({text:'5',persisted:state('ABOUT_MENU'),conversationState:'BOT_ACTIVE'});
   assert.doesNotMatch(r.action.text,/general/);
   assert.deepEqual(seen,[['nutrition_allergens','brand:yubie']]);
+});
+
+
+test('V2 approved promotion requires effective evidence; a source-code constant grants no campaign',async()=>{
+ const now=Date.now(),caps={catalog_available:true,account_available:false,checkout_available:false,order_portal_available:false,human_support_available:false};
+ const deps={flowVersion:'deterministic-v2',capabilities:caps,knowledge:{async getEffectivePublicKnowledge(type,scope){assert.equal(type,'promotion');assert.equal(scope,'brand:yubie');return {data:{code:'YUBIE15',percentage:15,startsAt:new Date(now-1000).toISOString(),endsAt:new Date(now+60000).toISOString(),eligibility:'Sesuai ketentuan campaign yang disetujui.'},source:'SYNTHETIC_TEST_ONLY'};}}};
+ const r=await new DeterministicConversationEngine(deps).processTurn({text:'promo',persisted:state(),conversationState:'BOT_ACTIVE'});
+ assert.match(r.action.text,/YUBIE15/);assert.match(r.action.text,/15%/);assert.doesNotMatch(r.action.text,/checkout/);
+ deps.knowledge.getEffectivePublicKnowledge=async()=>({data:{code:'YUBIE15',percentage:15,startsAt:new Date(now-2000).toISOString(),endsAt:new Date(now-1000).toISOString(),eligibility:'expired'},source:'SYNTHETIC_TEST_ONLY'});
+ const expired=await new DeterministicConversationEngine(deps).processTurn({text:'promo',persisted:state(),conversationState:'BOT_ACTIVE'});assert.doesNotMatch(expired.action.text,/YUBIE15/);
+ deps.knowledge.getEffectivePublicKnowledge=async()=>({data:{code:'YUBIE15',percentage:10,startsAt:new Date(now-1000).toISOString(),endsAt:new Date(now+60000).toISOString(),eligibility:'mismatch'},source:'SYNTHETIC_TEST_ONLY'});
+ const mismatch=await new DeterministicConversationEngine(deps).processTurn({text:'promo',persisted:state(),conversationState:'BOT_ACTIVE'});assert.doesNotMatch(mismatch.action.text,/YUBIE15/);
+});
+
+test('V2 rejects a product view with an untrusted URL before rendering text or media',async()=>{
+ const e=new DeterministicConversationEngine({knowledge,flowVersion:'deterministic-v2',capabilities:{catalog_available:true},resolveProduct:()=>({id:'shake',name:'Shake',description:'Synthetic',variantRows:[],catalogVersion:'test',websiteUrl:'https://evil.invalid'})});
+ const r=await e.processTurn({text:'beli shake',persisted:state(),conversationState:'BOT_ACTIVE'});assert.doesNotMatch(r.action.text,/evil/);assert.match(r.action.text,/belum tersedia/);
+});
+
+
+test('V2 handoff preserves after-hours expectations without claiming agent acceptance',async()=>{
+ const old=process.env.YUBIE_BUSINESS_HOURS_JSON;
+ try {process.env.YUBIE_BUSINESS_HOURS_JSON=JSON.stringify({timezone:'Asia/Jakarta',weekdays:[]});const r=await turn('0');assert.match(r.action.text,/jam operasional/);assert.doesNotMatch(r.action.text,/agen.*menerima|segera/);}finally{if(old===undefined)delete process.env.YUBIE_BUSINESS_HOURS_JSON;else process.env.YUBIE_BUSINESS_HOURS_JSON=old;}
+});
+
+
+test('V2 nested menu choices and back navigation keep their documented parents',async()=>{
+ const cases=[['PRODUCT_DETAIL',['WEBSITE_HANDOFF','PRODUCT_INFO','PRODUCT_MENU'],'PRODUCT_MENU'],['PRODUCT_INFO',['PRODUCT_INFO','PRODUCT_INFO','PRODUCT_INFO','PRODUCT_INFO'],'PRODUCT_DETAIL'],['ABOUT_MENU',['ABOUT_DETAIL','ABOUT_DETAIL','ABOUT_DETAIL','ABOUT_DETAIL','ABOUT_DETAIL','ABOUT_DETAIL'],'HOME'],['ORDER_MENU',['ORDER_PORTAL','ADDRESS_GUIDANCE','PAYMENT_GUIDANCE','HUMAN_HANDOFF','HUMAN_HANDOFF'],'HOME'],['SUPPORT_MENU',['SUPPORT_FAQ','HUMAN_HANDOFF','HUMAN_HANDOFF','FOOD_SAFETY_HANDOFF'],'HOME'],['SUPPORT_FAQ',['ORDER_MENU','PRODUCT_MENU','HUMAN_HANDOFF'],'SUPPORT_MENU'],['B2B_MENU',['B2B_CONSENT','B2B_CONSENT','B2B_CONSENT','B2B_CONSENT'],'HOME'],['B2B_CONSENT',['B2B_COLLECT','SALES_HANDOFF'],'B2B_MENU']];
+ for(const [node,targets,parent] of cases) {
+  for(const [index,target] of targets.entries())assert.equal((await turn(String(index+1),state(node,{productId:'shake'}))).nextState.nodeId,target,`${node}:${index+1}`);
+  assert.equal((await turn('9',state(node))).nextState.nodeId,parent,node);
+ }
+ for(const alias of ['0','cs','admin','manusia','customer service','operator'])assert.equal((await turn(alias,state('ORDER_MENU'))).action.kind,'handoff',alias);
+ for(const alias of ['menu','start','halo','hai','mulai'])assert.equal((await turn(alias,state('PRODUCT_INFO'))).nextState.nodeId,'HOME',alias);
+});
+
+
+test('refund and concrete order complaints escalate before ordinary navigation',async()=>{
+ for(const text of ['refund dong','barang salah','pesanan belum sampai','pembayaran bermasalah'])assert.equal((await turn(text,state('PRODUCT_DETAIL',{productId:'shake'}))).action.kind,'handoff',text);
+ assert.equal((await turn('produk busuk minta refund')).action.destination,'FOOD_SAFETY');
 });

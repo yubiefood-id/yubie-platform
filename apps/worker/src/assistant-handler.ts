@@ -19,8 +19,9 @@ import {
   CLASSIFIER_VERSION,
   type HandoffDestination,
   matchesFoodSafety,
+  isPriorityEscalation,
 } from "@yubie/assistant";
-import { resolveYubiProduct, type ConversationState } from "@yubie/domain";
+import { resolveYubiProduct, BOT_REENTRY_COOLDOWN_MS, type ConversationState } from "@yubie/domain";
 import { deriveYubiCapabilities, parseLaunchProfile } from "@yubie/config";
 import {
   ChatwootConversationContextProvider,
@@ -36,9 +37,11 @@ import {
   isCustomerInboundArticle,
 } from "@yubie/integrations";
 import type { ConversationContextProvider } from "@yubie/integrations";
-import { eq, sql } from "drizzle-orm";
 import {
   createDatabase,
+  withAssistantTransaction,
+  PostgresAssistantWorkRepository,
+  PostgresAuditRepository,
   PostgresAssistantOutboxRepository,
   PostgresAssistantRunRepository,
   PostgresConversationFlowStateRepository,
@@ -130,11 +133,22 @@ async function processAssistantInboxLocked(
   const inboxRepo = new PostgresWebhookInboxRepository(database);
 
 
-  const rows = await database.db.select().from(webhookInbox).where(eq(webhookInbox.id, inboxId)).limit(1);
-  const row = rows[0];
+  const row = await new PostgresAssistantWorkRepository(database).inboxById(inboxId);
   if (!row || row.status === "processed") return;
   await inboxRepo.markProcessing(inboxId);
 
+  const observed=row.conversationRef?await support.getCurrentHumanState({provider:support.provider,threadId:row.conversationRef}):null;
+  const eventRefs=row.provider==="zammad" && row.rawBody?parseZammadTriggerPayload(JSON.parse(row.rawBody)):null;
+  const closedEvent=eventRefs?.stateId && support.resolveLifecycleState?await support.resolveLifecycleState(eventRefs.stateId)==="closed":false;
+  if(row.conversationRef) {
+    const sessions=new PostgresConversationSessionRepository(database);
+    const current=await sessions.getByProviderThreadId(support.provider,row.conversationRef);
+    const at=new Date().toISOString();
+    if(closedEvent || observed?.lifecycle==="closed") {
+      if(current.ok && !current.value)await sessions.upsert({provider:support.provider,providerThreadId:row.conversationRef,providerCustomerId:row.contactRef??"0",providerInboxOrChannelId:row.inboxRef??"0",inboxId:row.inboxRef??"0",state:"RESOLVED",lastActivityAt:at,createdAt:at,updatedAt:at});
+      if(!current.ok || current.value?.state!=="RESOLVED")await sessions.updateState(support.provider,row.conversationRef,"RESOLVED",at);
+    }else if(observed?.humanActive && current.ok && current.value && current.value.state!=="RESOLVED")await sessions.updateState(support.provider,row.conversationRef,"HUMAN_ACTIVE",at);
+  }
   const message = await resolveNormalizedMessage(database, row, support);
   if (!message) {
     await inboxRepo.markProcessed(inboxId, new Date().toISOString());
@@ -161,17 +175,18 @@ async function processAssistantInboxLocked(
   const threadRef = { provider, threadId: message.conversationId };
   const sessionResult = await sessions.getByProviderThreadId(provider, message.conversationId);
   const lastMessageId=sessionResult.ok ? sessionResult.value?.providerLastMessageId : null;
-  if(!safety && provider==="zammad" && lastMessageId && /^\d+$/.test(lastMessageId) && BigInt(message.messageId)<=BigInt(lastMessageId)) {await inboxRepo.markProcessed(inboxId,now);return;}
+  const escalation=isPriorityEscalation(message.text);
+  const outOfOrder=!escalation && provider==="zammad" && !!lastMessageId && /^\d+$/.test(lastMessageId) && BigInt(message.messageId)<=BigInt(lastMessageId);
   let conversationState: ConversationState =
     sessionResult.ok && sessionResult.value ? sessionResult.value.state : "BOT_ELIGIBLE";
 
   const humanState = await support.getCurrentHumanState(threadRef);
-  if (humanState.humanActive) {
+  if (humanState.humanActive && conversationState!=="RESOLVED") {
     conversationState = "HUMAN_ACTIVE";
   }
-  if(conversationState==="RESOLVED" && sessionResult.ok && sessionResult.value?.botReleasedAt && sessionResult.value.resolvedAt && Date.now()-Date.parse(sessionResult.value.resolvedAt)>=30*60*1000 && !humanState.humanActive && !humanState.automationDisabled && ["menu","start"].includes(message.text.trim().toLowerCase())) {
+  if(conversationState==="RESOLVED" && sessionResult.ok && sessionResult.value?.botReleasedAt && sessionResult.value.resolvedAt && Date.now()-Date.parse(sessionResult.value.resolvedAt)>=BOT_REENTRY_COOLDOWN_MS && !humanState.humanActive && !humanState.automationDisabled && ["menu","start"].includes(message.text.trim().toLowerCase())) {
     conversationState="BOT_ELIGIBLE";
-    await database.db.execute(sql`UPDATE conversation_sessions SET bot_released_at=NULL WHERE provider=${provider} AND provider_thread_id=${message.conversationId}`);
+    await new PostgresAssistantWorkRepository(database).consumeRelease(provider,message.conversationId);
   }
 
   const savedSession = await sessions.upsert({
@@ -179,7 +194,7 @@ async function processAssistantInboxLocked(
     providerThreadId: message.conversationId,
     providerCustomerId: message.contactId,
     providerInboxOrChannelId: message.inboxId,
-    providerLastMessageId: provider === "zammad" && lastMessageId && /^\d+$/.test(lastMessageId) && BigInt(lastMessageId)>BigInt(message.messageId) ? lastMessageId : message.messageId,
+    ...(safety?{}:{providerLastMessageId: provider === "zammad" && lastMessageId && /^\d+$/.test(lastMessageId) && BigInt(lastMessageId)>BigInt(message.messageId) ? lastMessageId : message.messageId}),
     ...(provider === "chatwoot"
       ? { chatwootConversationId: message.conversationId, chatwootContactId: message.contactId }
       : {}),
@@ -250,8 +265,11 @@ async function processAssistantInboxLocked(
     },
   });
 
+  // A delayed navigation message cannot be interpreted against a newer menu.
+  // Reset safely and ask for a new selection; safety never advances this watermark.
+  if(outOfOrder)increment("assistant_out_of_order_reset_total");
   const engineResult = await router.process({
-    message,
+    message:outOfOrder?{...message,text:"menu"}:message,
     conversationState: automationOff ? "HUMAN_ACTIVE" : conversationState,
     flowState,
   });
@@ -325,7 +343,7 @@ async function processAssistantInboxLocked(
     const handoffId=await enqueue("handoff",{intent:engineResult.intent,handoffReason:engineResult.handoffReason,destination:engineResult.handoffDestination,flowVersion:engineResult.flowVersion,productId:engineResult.nextFlowState?.context.productId,...(effect?.kind==="CREATE_HANDOFF" && effect.summary?{summary:effect.summary}:{})});
     if(canSend && engineResult.text)await enqueue("reply",{content:engineResult.text,handoffReceipt:true},handoffId);
     // B2B context is no longer needed in navigation after its durable handoff.
-    if(engineResult.handoffDestination==="SALES_PARTNERSHIP")await database.db.execute(sql`UPDATE conversation_flow_state SET context_jsonb = '{}'::jsonb WHERE provider=${provider} AND provider_thread_id=${message.conversationId}`);
+    if(engineResult.handoffDestination==="SALES_PARTNERSHIP")await new PostgresAssistantWorkRepository(database).clearContext(provider,message.conversationId);
   } else if(engineResult.kind==="reply" && canSend) {
     let previous: string|undefined;
     if(engineResult.effects) {
@@ -355,18 +373,67 @@ async function processAssistantInboxLocked(
   await inboxRepo.markProcessed(inboxId, now);
 }
 
-export async function processAssistantInbox(database: Database,inboxId: string,support: SupportConversationProvider) {
-  const rows=await database.db.select().from(webhookInbox).where(eq(webhookInbox.id,inboxId)).limit(1);
-  if(!rows[0])return;
-  const thread=rows[0].conversationRef ?? inboxId;
-  try {await database.db.transaction(async tx=>{
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`yubi:${support.provider}:${thread}`},0))`);
-    const bound={db:tx,client:database.client} as unknown as Database;
-    await processAssistantInboxLocked(bound,inboxId,support);
-  });}catch(error){
-    await database.db.execute(sql`UPDATE webhook_inbox SET attempt_count=attempt_count+1,status='failed',last_error='ASSISTANT_PROCESSING_FAILED' WHERE id=${inboxId} AND status<>'processed'`);
-    throw new Error("assistant_processing_failed",{cause:error});
+async function requestInboxRecovery(database: Database,row: typeof webhookInbox.$inferSelect,provider: string) {
+  const thread=row.conversationRef??row.id,at=new Date().toISOString();
+  const sessions=new PostgresConversationSessionRepository(database);
+  const session=await sessions.getByProviderThreadId(provider,thread);
+  if(session.ok && session.value) {
+    if(!["HUMAN_ACTIVE","RESOLVED","QUEUED"].includes(session.value.state))await sessions.updateState(provider,thread,"HANDOFF_REQUESTED",at);
+  }else await sessions.upsert({provider,providerThreadId:thread,providerCustomerId:row.contactRef??"0",providerInboxOrChannelId:row.inboxRef??"0",inboxId:row.inboxRef??"0",state:"HANDOFF_REQUESTED",lastActivityAt:at,createdAt:at,updatedAt:at});
+  const result=await new PostgresAssistantOutboxRepository(database).enqueue({provider,providerThreadId:thread,conversationRef:thread,actionType:"handoff",payloadFingerprint:fingerprint(`${provider}:${thread}`,"inbox_recovery",row.id),payloadJson:JSON.stringify({intent:"OTHER",handoffReason:"inbox_retry_exhausted"}),createdAt:at});
+  if(result.ok && result.value.status==="inserted") {
+    await new PostgresAuditRepository(database).append({actor:"assistant-worker",action:"inbox_retry_exhausted",resourceType:"webhook_inbox",resourceId:row.id,occurredAt:at});
+    increment("assistant_inbox_dead_letter_total");
   }
+}
+
+export async function processAssistantInbox(database: Database,inboxId: string,support: SupportConversationProvider) {
+  const row=await new PostgresAssistantWorkRepository(database).inboxById(inboxId);
+  if(!row || row.status==="processed")return;
+  const thread=row.conversationRef??inboxId;
+  let failure: unknown;
+  await withAssistantTransaction(database,async locked=>{
+    const work=new PostgresAssistantWorkRepository(locked);
+    const currentRow=await work.inboxById(inboxId);
+    if(!currentRow || currentRow.status==="processed")return;
+    let attemptedId=inboxId;
+    try {
+      // The savepoint rolls back the whole turn while the outer transaction keeps
+      // its conversation lock through failure accounting. Concurrent fifth retries
+      // therefore see the committed count before attempting another provider read.
+      await withAssistantTransaction(locked,async bound=>{
+        if(currentRow.attemptCount>=5) {
+          await requestInboxRecovery(bound,currentRow,support.provider);
+          return;
+        }
+        const pending=await new PostgresAssistantWorkRepository(bound).pendingConversation(currentRow.provider,thread);
+        // Lifecycle events must latch ownership/closure before a reopened article.
+        for(const lifecycle of pending.filter(r=>!r.messageRef)) {
+          if(lifecycle.attemptCount>=5)await requestInboxRecovery(bound,lifecycle,support.provider);
+          else {attemptedId=lifecycle.id;await processAssistantInboxLocked(bound,lifecycle.id,support);}
+          if(lifecycle.id===inboxId)return;
+        }
+        attemptedId=inboxId;
+        const current=await resolveNormalizedMessage(bound,currentRow,support);
+        if(current && isPriorityEscalation(current.text)) {
+          await processAssistantInboxLocked(bound,inboxId,support);
+          return;
+        }
+        for(const earlier of pending.filter(r=>!!r.messageRef)) {
+          if(earlier.attemptCount>=5) {await requestInboxRecovery(bound,earlier,support.provider);continue;}
+          attemptedId=earlier.id;
+          await processAssistantInboxLocked(bound,earlier.id,support);
+          if(earlier.id===inboxId)return;
+        }
+        throw new Error("conversation_backlog_requires_recovery");
+      });
+    }catch(error){
+      const failed=await work.processingFailed(attemptedId);
+      if(failed && failed.attemptCount>=5)await requestInboxRecovery(locked,failed,support.provider);
+      failure=error;
+    }
+  },`yubi:${support.provider}:${thread}`);
+  if(failure)throw new Error("assistant_processing_failed",{cause:failure});
 }
 
 export async function processAssistantJob(inboxId: string) {
