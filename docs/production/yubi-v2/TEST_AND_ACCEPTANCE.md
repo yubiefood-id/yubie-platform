@@ -31,8 +31,15 @@ Local database suites must run sequentially where legacy upgrade fixtures share
 the root database. Run `npm run db:migrate` again after persistence tests before
 API/worker/bot consumers. V2 integration fixtures create isolated databases.
 Dependencies are refreshed to remove vulnerable nested build dependencies; no
-Trivy exclusion is added. Local Trivy database download was blocked by Docker DNS;
-the unchanged GitHub security gate supplies scan acceptance.
+Trivy exclusion is added. Docker's default network initially blocked the local
+vulnerability database download; host networking allowed the scan. It exposed two
+nested image-size findings after the earlier sharp/undici/ws fixes. A clean npm 10
+lockfile resolution removes those vulnerable entries. The unchanged GitHub security
+gate remains required on the final candidate.
+The local scan now passes with zero HIGH/CRITICAL findings and no exclusions.
+Semgrep scans 249 source targets with zero blocking findings. A clean npm 10
+install also passes, avoiding the npm 11 optional-dependency mismatch seen in
+superseded CI runs.
 
 Independent specification, standards and security reviews identified dispatch
 guard races, lifecycle/reentry gaps, ordering and retry hazards. Regression tests

@@ -15,6 +15,7 @@ apps/worker/tests/outbox-delivery.test.mjs
 apps/worker/tests/yubi-reliability.test.mjs
 docs/production/runbooks/assistant-emergency-off.md
 docs/production/yubi-v2/ARCHITECTURE.md
+docs/production/yubi-v2/CHANGED_FILES.txt
 docs/production/yubi-v2/CONVERSATION_COPY_ID.md
 docs/production/yubi-v2/CURRENT_STATE.md
 docs/production/yubi-v2/DETERMINISTIC_FLOW_V2.md

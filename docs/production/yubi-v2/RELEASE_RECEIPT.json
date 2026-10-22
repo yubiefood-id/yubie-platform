@@ -3,7 +3,7 @@
   "release": "yubi-v2-engineering-candidate",
   "observedDate": "2026-10-22",
   "baselineMainSha": "2563d8af616043047fba065600eb8b995764267e",
-  "implementationSha": "b8138e90c3c1999ba3fc6e953ad07554090cc01a",
+  "implementationSha": "d5a1f21d24bfbb60939c4af3e363fdc79f03f7a9",
   "implementationShaScope": "Source implementation before documentation-only PR E; not an authorized deployed artifact",
   "yubiProductionVerdict": "NO_GO",
   "websiteTransactionalCommerceVerdict": "NO_GO_SEPARATE_GATE",
@@ -29,16 +29,22 @@
     "queueRestartStandalone": "PASS_REAL_PG_BOSS_SIMULATED_PROVIDER",
     "isolatedBackupRestore": "PASS_LOCAL_SYNTHETIC_ONLY",
     "providerContract": "SIMULATED_NOT_LIVE",
-    "localTrivy": "BLOCKED_DOCKER_DNS_USE_UNCHANGED_CI_SECURITY_GATE"
+    "apiDatabaseSuite": { "status": "PASS", "passed": 45, "skipped": 0 },
+    "assistantSuite": { "status": "PASS", "passed": 40, "skipped": 0 },
+    "integrationContracts": { "status": "PASS_SIMULATED_PROVIDER", "passed": 57, "skipped": 0 },
+    "semgrep": { "status": "PASS", "targetsScanned": 249, "blockingFindings": 0 },
+    "localTrivy": "PASS_ZERO_HIGH_CRITICAL_NO_EXCLUSIONS"
   },
   "ci": {
+    "statusScope": "Snapshot during receipt preparation; query linked run IDs for later completion. The final release requires the exact reviewed candidate and all five green gates.",
     "requiredGates": ["quality", "persistence", "security", "browser", "containers"],
     "baselineRun": { "id": 39644015374, "status": "PASS_BASELINE_ONLY" },
     "flowPrRun": { "id": 39788309723, "status": "PASS_FIVE_GATES_PR_A_ONLY" },
-    "mediaCandidateRun": { "id": 39814882738, "status": "QUEUED_NOT_ACCEPTED" },
-    "navigationCandidateRun": { "id": 39814889919, "status": "QUEUED_NOT_ACCEPTED" },
-    "reliabilityCandidateRun": { "id": 39815166596, "status": "QUEUED_NOT_ACCEPTED" },
-    "documentationCandidateRun": null,
+    "supersededFailures": "Nested vulnerable build dependencies and npm 11/10 lockfile incompatibility; repaired through a clean npm 10 resolution, not ignored",
+    "mediaCandidateRun": { "id": 39816905056, "status": "IN_PROGRESS_NOT_ACCEPTED" },
+    "navigationCandidateRun": { "id": 39816928107, "status": "IN_PROGRESS_NOT_ACCEPTED" },
+    "reliabilityCandidateRun": { "id": 39816942557, "status": "IN_PROGRESS_NOT_ACCEPTED" },
+    "documentationCandidateRun": { "id": 39817006811, "status": "IN_PROGRESS_NOT_ACCEPTED" },
     "verifiedCandidateArtifactDigest": null,
     "signedReleaseArtifact": null
   },
@@ -66,7 +72,8 @@
     "A": "https://github.com/yubiefood-id/yubie-platform/pull/24",
     "B": "https://github.com/yubiefood-id/yubie-platform/pull/25",
     "C": "https://github.com/yubiefood-id/yubie-platform/pull/26",
-    "D": "https://github.com/yubiefood-id/yubie-platform/pull/27"
+    "D": "https://github.com/yubiefood-id/yubie-platform/pull/27",
+    "E": "https://github.com/yubiefood-id/yubie-platform/pull/28"
   },
   "operatorBlockers": [
     "Four exact-product final photos and Product/Brand sign-off",
