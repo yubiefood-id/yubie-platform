@@ -60,4 +60,5 @@ export interface DeterministicTurnResult {
   action: DeterministicAction;
   nextState: PersistedFlowState;
   metrics: string[];
+  effects?: import("./v2.js").V2Effect[];
 }

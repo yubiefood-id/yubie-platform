@@ -36,12 +36,13 @@ export class ConversationEngineRouter {
   }
 }
 
-export function createConversationEngineRouter(deps: {
-  knowledge: KnowledgeLookup;
-  getPurchaseOptions?: DeterministicEngineDeps["getPurchaseOptions"];
+export function createConversationEngineRouter(deps: DeterministicEngineDeps & {
   legacyProcessor?: (input: ConversationEngineInput) => Promise<ConversationEngineResult>;
 }): ConversationEngineRouter {
   const routerDeps: ConversationEngineRouterDeps = { knowledge: deps.knowledge };
+  if (deps.flowVersion) routerDeps.flowVersion = deps.flowVersion;
+  if (deps.capabilities) routerDeps.capabilities = deps.capabilities;
+  if (deps.resolveProduct) routerDeps.resolveProduct = deps.resolveProduct;
   if (deps.getPurchaseOptions) routerDeps.getPurchaseOptions = deps.getPurchaseOptions;
   if (deps.legacyProcessor) routerDeps.legacyProcessor = deps.legacyProcessor;
   return new ConversationEngineRouter(routerDeps);

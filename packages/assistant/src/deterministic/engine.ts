@@ -1,4 +1,5 @@
 import type { KnowledgeLookup } from "../knowledge-tools.js";
+import { processV2, type V2Deps } from "./v2.js";
 import { V1_FLOW } from "./flows.js";
 import {
   isSensitiveNode,
@@ -30,6 +31,9 @@ export interface PurchaseOptionView {
 
 export interface DeterministicEngineDeps {
   knowledge: KnowledgeLookup;
+  flowVersion?: string;
+  capabilities?: V2Deps["capabilities"];
+  resolveProduct?: V2Deps["resolveProduct"];
   getPurchaseOptions?: (productSlug: string) => Promise<{ options: PurchaseOptionView[] } | null>;
 }
 
@@ -163,6 +167,7 @@ export class DeterministicConversationEngine {
   constructor(private readonly deps: DeterministicEngineDeps) {}
 
   async processTurn(input: DeterministicTurnInput): Promise<DeterministicTurnResult> {
+    if (this.deps.flowVersion === "deterministic-v2") return processV2(input, this.deps);
     const metrics: string[] = ["deterministic_message_total"];
     let state: PersistedFlowState = { ...input.persisted, flowVersion: FLOW_VERSION };
     const route = preRoute(V1_FLOW, state, input.text, input.conversationState);

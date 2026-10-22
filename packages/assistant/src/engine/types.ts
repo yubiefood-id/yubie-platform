@@ -4,6 +4,7 @@ import type { DeterministicTurnResult, PersistedFlowState } from "../determinist
 export type EngineKind = "deterministic" | "legacy";
 
 export interface ConversationEngineResult {
+  effects?: import("../deterministic/v2.js").V2Effect[];
   kind: "reply" | "handoff" | "noop";
   text?: string;
   handoffDestination?: import("../deterministic/types.js").HandoffDestination;
@@ -32,6 +33,7 @@ export function mapDeterministicResult(result: DeterministicTurnResult): Convers
   if (action.kind === "noop") {
     return {
       kind: "noop",
+      ...(result.effects ? { effects: result.effects } : {}),
       intent: action.intent,
       risk: action.risk,
       metrics: result.metrics,
@@ -43,6 +45,7 @@ export function mapDeterministicResult(result: DeterministicTurnResult): Convers
   if (action.kind === "reply") {
     return {
       kind: "reply",
+      ...(result.effects ? { effects: result.effects } : {}),
       text: action.text,
       intent: action.intent ?? "OTHER",
       risk: action.risk ?? "GREEN",
@@ -54,6 +57,7 @@ export function mapDeterministicResult(result: DeterministicTurnResult): Convers
   }
   return {
     kind: "handoff",
+    ...(result.effects ? { effects: result.effects } : {}),
     text: action.text,
     handoffDestination: action.destination,
     handoffReason: action.reason,
