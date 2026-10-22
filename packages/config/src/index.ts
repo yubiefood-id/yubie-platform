@@ -647,3 +647,4 @@ export function inspectServiceRuntimeConfig(env: RuntimeEnvSource = process.env,
     return { ok: false, errors: [String(error)] };
   }
 }
+export * from "./yubi-capabilities.js";
