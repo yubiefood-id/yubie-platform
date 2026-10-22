@@ -78,7 +78,7 @@ export async function processV2(input: DeterministicTurnInput, deps: V2Deps): Pr
   if(!target) {
     s.fallbackCount++;
     if(s.fallbackCount>=3)return handoff("CUSTOMER_SUPPORT","bounded_fallback","OTHER");
-    const text=V2_COPY[s.fallbackCount===1?"unknown":"unknown_again"]!+navigationFooter;
+    const text=V2_COPY[!n?"unsupported":s.fallbackCount===1?"unknown":"unknown_again"]!+navigationFooter;
     effects.push({kind:"REPLY_TEXT",text,messageId:`v2.fallback.${s.fallbackCount}`});
     return finish({kind:"reply",nodeId:s.nodeId,text});
   }
@@ -106,6 +106,7 @@ export async function processV2(input: DeterministicTurnInput, deps: V2Deps): Pr
   if(!text)text=V2_COPY[V2_NODES[target]!.copy]??"";
   const product=deps.resolveProduct?.(String(s.context.productId??""));
   if(target==="PRODUCT_DETAIL") {
+    metrics.push("product_selected_total");
     text=product?`${product.name}\n\n${product.description}\n\nVarian:\n${product.variantRows.join("\n")}\n\n${caps.catalog_available?product.websiteUrl+"\n\n":""}1. ${caps.checkout_available?"Beli":"Lihat"} di Website\n2. Info Produk\n3. Lihat Produk Lain`:V2_COPY.product_unavailable!;
     if(product?.assetId && caps.catalog_available)effects.push({kind:"SEND_PRODUCT_MEDIA",productId:product.id,assetId:product.assetId,caption:text+navigationFooter,websiteUrl:product.websiteUrl,catalogVersion:product.catalogVersion,fallbackText:text+navigationFooter});
     else text=V2_COPY.media_unavailable+"\n\n"+text;

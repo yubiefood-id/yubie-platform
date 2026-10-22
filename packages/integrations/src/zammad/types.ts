@@ -1,4 +1,5 @@
 export interface ZammadTicket {
+  yubie_bot_mode?: string;
   id: number;
   number: string;
   title: string;

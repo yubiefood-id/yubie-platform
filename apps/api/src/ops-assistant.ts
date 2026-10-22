@@ -1,9 +1,13 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { parseYubieEnvName } from "@yubie/config";
+import {deriveYubiCapabilities,parseLaunchProfile} from "@yubie/config";
+import {approvedYubiPhotos} from "@yubie/domain";
+import {yubiReentrySchema,yubiFlowVersionSchema} from "@yubie/validation";
 import {
   createDatabase,
   PostgresAssistantOutboxRepository,
   PostgresRuntimeConfigRepository,
+  PostgresConversationSessionRepository,
   type Database,
 } from "@yubie/persistence";
 
@@ -33,20 +37,46 @@ export async function handleOpsAssistant(request: Request, database: Database): 
   const runtime = new PostgresRuntimeConfigRepository(database);
   const outbox = new PostgresAssistantOutboxRepository(database);
 
+  if(request.method==="POST" && url.pathname==="/ops/assistant/reentry") {
+    const parsed=yubiReentrySchema.safeParse(await request.json());
+    if(!parsed.success)return Response.json({error:"invalid_reentry"},{status:400});
+    const body=parsed.data;
+    const now=new Date().toISOString();
+    const released=await database.db.transaction(async tx=>{
+      const bound={db:tx,client:database.client} as unknown as Database;
+      const ok=await new PostgresConversationSessionRepository(bound).releaseForReentry(body.provider!,body.threadId!,now);
+      if(ok)await new PostgresRuntimeConfigRepository(bound).set("last_bot_reentry",{provider:body.provider,threadId:body.threadId},body.changedBy!,now);
+      return ok;
+    });
+    return Response.json({ok:released,requiresCustomerMenu:true},{status:released?200:409});
+  }
+
+  if(request.method==="POST" && url.pathname==="/ops/assistant/flow-version") {
+    const parsed=yubiFlowVersionSchema.safeParse(await request.json());
+    if(!parsed.success)return Response.json({error:"invalid_flow_selection"},{status:400});
+    const body=parsed.data;
+    if(body.releaseSha!==process.env.RELEASE_SHA)return Response.json({error:"release_identity_mismatch"},{status:409});
+    await runtime.set("deterministic_flow_version",body.flowVersion,body.changedBy,new Date().toISOString());
+    await runtime.set("flow_selection_approval",{releaseSha:body.releaseSha,approvalRef:body.approvalRef},body.changedBy,new Date().toISOString());
+    return Response.json({ok:true,flowVersion:body.flowVersion,automationUnchanged:true});
+  }
+
   if (request.method === "GET" && url.pathname === "/ops/assistant") {
     const config = await runtime.getSnapshot();
-    const pending = await outbox.claimPending(100);
-    const deadLetters = pending.filter((r) => r.status === "failed" || r.status === "ambiguous");
+    const counts=await database.client`SELECT status,count(*)::int AS count FROM assistant_outbox GROUP BY status`;
+    const queueLag=counts.filter(r=>['pending','retry','delivering'].includes(r.status)).reduce((n,r)=>n+r.count,0);
+    const deadLetters=counts.filter(r=>['failed','ambiguous'].includes(r.status)).reduce((n,r)=>n+r.count,0);
 
     return Response.json({
       mode: config.mode,
+      flowVersion: config.flowVersion,
       assistantEnabled: config.assistantEnabled,
       modelVersion: config.modelVersion,
       promptVersion: config.promptVersion,
       knowledgeVersion: config.knowledgeVersion,
       allowedGreenIntents: config.allowedGreenIntents,
-      queueLag: pending.length,
-      deadLetters: deadLetters.length,
+      queueLag,
+      deadLetters,
       releaseSha: process.env.RELEASE_SHA ?? "dev",
     });
   }
@@ -56,6 +86,14 @@ export async function handleOpsAssistant(request: Request, database: Database): 
     const allowed = ["off", "shadow", "suggestion", "auto"];
     if (!body.mode || !allowed.includes(body.mode)) {
       return Response.json({ error: "invalid_mode" }, { status: 400 });
+    }
+    if(body.mode==="auto" && process.env.YUBIE_ENV==="production") {
+      const config=await runtime.getSnapshot();
+      if(config.flowVersion==="deterministic-v2") {
+        const acceptance=config.supportAcceptance as {releaseSha?:string;approvalRef?:string;operationsAccepted?:boolean}|null;
+        const caps=deriveYubiCapabilities(parseLaunchProfile(process.env.YUBIE_LAUNCH_PROFILE),config.websiteRelease,"production");
+        if(!acceptance?.approvalRef || acceptance.releaseSha!==process.env.RELEASE_SHA || acceptance.operationsAccepted!==true || !caps.catalog_available || new Set(approvedYubiPhotos.map(a=>a.productId)).size!==4)return Response.json({error:"yubi_v2_acceptance_required"},{status:409});
+      }
     }
     await runtime.set("mode", body.mode, body.changedBy ?? "operator", new Date().toISOString());
     if (body.mode === "off") {

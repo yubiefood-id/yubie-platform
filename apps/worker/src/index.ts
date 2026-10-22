@@ -42,6 +42,7 @@ async function start() {
   await boss.createQueue("listing.health");
   await boss.createQueue("integration.health");
   await boss.createQueue("assistant.process");
+  await boss.createQueue("assistant.dead");
   await boss.createQueue("support.reply");
   await boss.createQueue("support.reconcile");
   await boss.createQueue("chatwoot.reply");
@@ -124,6 +125,19 @@ async function start() {
   await boss.schedule("support.reconcile", "*/15 * * * *", {});
   await boss.schedule("chatwoot.reconcile", "*/15 * * * *", {});
   await boss.schedule("webhook.cleanup", "0 * * * *", {});
+  // Repair the durable inbox -> queue wakeup gap and retry only bounded failed events.
+  const sweep=setInterval(async()=>{
+    try {
+      const provider=process.env.SUPPORT_PROVIDER??process.env.CHAT_PROVIDER??"fake";
+      const inboxProvider=provider==="chatwoot"?"chatwoot_agentbot":provider;
+      const rows=await repos.database.client`SELECT id FROM webhook_inbox WHERE provider=${inboxProvider} AND status IN ('received','processing','failed') AND attempt_count<5 ORDER BY received_at LIMIT 50`;
+      for(const row of rows)await boss.send("assistant.process",{inboxId:row.id},{singletonKey:row.id,retryLimit:4,retryDelay:30,retryBackoff:true,deadLetter:"assistant.dead"});
+      await processPendingOutbox(repos.database,createSupportProvider());
+      await repos.database.client`UPDATE conversation_flow_state SET context_jsonb='{}'::jsonb,node_id=CASE WHEN flow_version='deterministic-v2' THEN 'HOME' ELSE 'home' END,fallback_count=0 WHERE updated_at < now()-interval '72 hours' AND context_jsonb<>'{}'::jsonb`;
+      await repos.database.client`UPDATE assistant_outbox SET payload_json=(payload_json::jsonb - 'summary')::text WHERE created_at < now()-interval '72 hours' AND payload_json::jsonb ? 'summary'`;
+    }catch{console.error(JSON.stringify({event:"assistant.sweep_failed",errorCode:"SWEEP_FAILED"}));}
+  },10_000);
+  sweep.unref();
 
   console.log(JSON.stringify({ level: "info", event: "worker.started", releaseSha: process.env.RELEASE_SHA ?? "dev" }));
 }

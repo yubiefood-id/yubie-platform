@@ -18,8 +18,10 @@ import {
   SYSTEM_PROMPT_V1,
   CLASSIFIER_VERSION,
   type HandoffDestination,
+  matchesFoodSafety,
 } from "@yubie/assistant";
-import type { ConversationState } from "@yubie/domain";
+import { resolveYubiProduct, type ConversationState } from "@yubie/domain";
+import { deriveYubiCapabilities, parseLaunchProfile } from "@yubie/config";
 import {
   ChatwootConversationContextProvider,
   createChatwootClient,
@@ -34,7 +36,7 @@ import {
   isCustomerInboundArticle,
 } from "@yubie/integrations";
 import type { ConversationContextProvider } from "@yubie/integrations";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   createDatabase,
   PostgresAssistantOutboxRepository,
@@ -70,7 +72,7 @@ async function resolveNormalizedMessage(
   if (row.provider === "zammad") {
     const parsed = row.rawBody
       ? parseZammadTriggerPayload(JSON.parse(row.rawBody) as import("@yubie/integrations").ZammadTriggerPayload)
-      : null;
+      : row.conversationRef && row.messageRef ? {ticketId:row.conversationRef,articleId:row.messageRef,customerId:row.contactRef??"0",groupId:row.inboxRef??"1"} : null;
     if (!parsed?.articleId) return null;
 
     const article = support.getArticle
@@ -120,17 +122,18 @@ function mapHandoffDestination(destination?: HandoffDestination) {
   return destination;
 }
 
-export async function processAssistantInbox(
+async function processAssistantInboxLocked(
   database: Database,
   inboxId: string,
   support: SupportConversationProvider,
 ) {
   const inboxRepo = new PostgresWebhookInboxRepository(database);
-  await inboxRepo.markProcessing(inboxId);
+
 
   const rows = await database.db.select().from(webhookInbox).where(eq(webhookInbox.id, inboxId)).limit(1);
   const row = rows[0];
-  if (!row) return;
+  if (!row || row.status === "processed") return;
+  await inboxRepo.markProcessing(inboxId);
 
   const message = await resolveNormalizedMessage(database, row, support);
   if (!message) {
@@ -148,13 +151,17 @@ export async function processAssistantInbox(
   const runtimeConfig = new PostgresRuntimeConfigRepository(database);
   const configSnapshot = await runtimeConfig.getSnapshot();
 
-  if (!configSnapshot.assistantEnabled || configSnapshot.mode === "off") {
+  const safety = matchesFoodSafety(message.text);
+  const automationOff = !configSnapshot.assistantEnabled || configSnapshot.mode === "off";
+  if (automationOff && !safety) {
     await inboxRepo.markProcessed(inboxId, now);
     return;
   }
 
   const threadRef = { provider, threadId: message.conversationId };
   const sessionResult = await sessions.getByProviderThreadId(provider, message.conversationId);
+  const lastMessageId=sessionResult.ok ? sessionResult.value?.providerLastMessageId : null;
+  if(!safety && provider==="zammad" && lastMessageId && /^\d+$/.test(lastMessageId) && BigInt(message.messageId)<=BigInt(lastMessageId)) {await inboxRepo.markProcessed(inboxId,now);return;}
   let conversationState: ConversationState =
     sessionResult.ok && sessionResult.value ? sessionResult.value.state : "BOT_ELIGIBLE";
 
@@ -162,13 +169,17 @@ export async function processAssistantInbox(
   if (humanState.humanActive) {
     conversationState = "HUMAN_ACTIVE";
   }
+  if(conversationState==="RESOLVED" && sessionResult.ok && sessionResult.value?.botReleasedAt && sessionResult.value.resolvedAt && Date.now()-Date.parse(sessionResult.value.resolvedAt)>=30*60*1000 && !humanState.humanActive && !humanState.automationDisabled && ["menu","start"].includes(message.text.trim().toLowerCase())) {
+    conversationState="BOT_ELIGIBLE";
+    await database.db.execute(sql`UPDATE conversation_sessions SET bot_released_at=NULL WHERE provider=${provider} AND provider_thread_id=${message.conversationId}`);
+  }
 
-  await sessions.upsert({
+  const savedSession = await sessions.upsert({
     provider,
     providerThreadId: message.conversationId,
     providerCustomerId: message.contactId,
     providerInboxOrChannelId: message.inboxId,
-    providerLastMessageId: message.messageId,
+    providerLastMessageId: provider === "zammad" && lastMessageId && /^\d+$/.test(lastMessageId) && BigInt(lastMessageId)>BigInt(message.messageId) ? lastMessageId : message.messageId,
     ...(provider === "chatwoot"
       ? { chatwootConversationId: message.conversationId, chatwootContactId: message.contactId }
       : {}),
@@ -179,13 +190,13 @@ export async function processAssistantInbox(
     updatedAt: now,
   });
 
-  const sessionId =
-    sessionResult.ok && sessionResult.value ? sessionResult.value.id : `session-${message.conversationId}`;
+  if (!savedSession.ok) throw new Error("session_write_failed");
+  const sessionId = savedSession.value;
   const botEngine = resolveBotEngine();
   const started = Date.now();
 
   const existingFlow = await flowStates.get(provider, message.conversationId);
-  const initialFlow = createInitialFlowState();
+  const initialFlow = configSnapshot.flowVersion === "deterministic-v2" ? {nodeId:"HOME",flowVersion:"deterministic-v2",context:{},fallbackCount:0} : createInitialFlowState();
   const flowState = existingFlow.ok && existingFlow.value
     ? {
         nodeId: existingFlow.value.nodeId,
@@ -195,8 +206,13 @@ export async function processAssistantInbox(
       }
     : initialFlow;
 
+  const supportEvidence = configSnapshot.supportAcceptance as {approvalRef?: string; releaseSha?: string} | null;
+  const capabilities = deriveYubiCapabilities(parseLaunchProfile(process.env.YUBIE_LAUNCH_PROFILE),configSnapshot.websiteRelease,process.env.YUBIE_ENV ?? "development",!!supportEvidence?.approvalRef && supportEvidence.releaseSha === process.env.RELEASE_SHA);
   const router = createConversationEngineRouter({
     knowledge,
+    flowVersion: safety ? "deterministic-v2" : configSnapshot.flowVersion,
+    capabilities,
+    resolveProduct: resolveYubiProduct,
     legacyProcessor: async (input) => {
       const envConfig = loadAssistantConfig();
       const mode = configSnapshot.mode as "shadow" | "suggestion" | "auto";
@@ -236,7 +252,7 @@ export async function processAssistantInbox(
 
   const engineResult = await router.process({
     message,
-    conversationState,
+    conversationState: automationOff ? "HUMAN_ACTIVE" : conversationState,
     flowState,
   });
 
@@ -277,12 +293,12 @@ export async function processAssistantInbox(
     messageRef: message.messageId,
     intent: engineResult.intent,
     risk: engineResult.risk,
-    classifierVersion: botEngine === "deterministic" ? FLOW_VERSION : CLASSIFIER_VERSION,
+    classifierVersion: botEngine === "deterministic" ? engineResult.flowVersion ?? FLOW_VERSION : CLASSIFIER_VERSION,
     policyVersion: POLICY_VERSION,
     knowledgeVersion: configSnapshot.knowledgeVersion,
     modelProvider: botEngine,
     modelName: botEngine === "deterministic" ? "none" : (process.env.VLLM_MODEL ?? "default"),
-    promptVersion: botEngine === "deterministic" ? FLOW_VERSION : PROMPT_VERSION,
+    promptVersion: botEngine === "deterministic" ? engineResult.flowVersion ?? FLOW_VERSION : PROMPT_VERSION,
     validatorOutcome: engineResult.kind,
     latencyMs: Date.now() - started,
     outcome: engineResult.kind,
@@ -293,65 +309,31 @@ export async function processAssistantInbox(
   }
   await runs.insert(runRecord);
 
+  let effectIndex=0;
+  const enqueue=async(actionType: string,payload: Record<string,unknown>,dependsOnId?: string)=>{
+    const encoded=JSON.stringify({...payload,customerReceivedAt:message.receivedAt,requires:Object.entries(capabilities).filter(([key,value])=>value && key!=="human_support_available").map(([key])=>key)});
+    const result=await outbox.enqueue({runId,provider,providerThreadId:message.conversationId,conversationRef:message.conversationId,actionType,payloadFingerprint:fingerprint(`${provider}:${message.conversationId}`,`${inboxId}:${effectIndex++}`,""),payloadJson:encoded,createdAt:now,...(dependsOnId?{dependsOnId}:{})});
+    // Audit the action identity, not customer/B2B text.
+    await runs.insertAction({runId,actionType,detailsJson:JSON.stringify({outboxId:result.ok?result.value.id:null}),createdAt:now});
+    if(!result.ok)throw new Error("outbox_write_failed");
+    return result.value.id;
+  };
+  const canSend=configSnapshot.assistantEnabled && configSnapshot.mode === "auto";
   if (engineResult.kind === "handoff") {
-    await sessions.updateState(provider, message.conversationId, "HANDOFF_REQUESTED", now);
-    const dest = mapHandoffDestination(engineResult.handoffDestination);
-    const handoffConfig: Parameters<typeof buildHandoffCommand>[3] = {};
-    if (dest) handoffConfig.destination = dest;
-    if (engineResult.nodeId) handoffConfig.nodeId = engineResult.nodeId;
-    const handoff = buildHandoffCommand(
-      threadRef,
-      engineResult.intent,
-      engineResult.handoffReason,
-      handoffConfig,
-    );
-    const payload = JSON.stringify({
-      labels: handoff.labels,
-      intent: engineResult.intent,
-      handoffReason: engineResult.handoffReason,
-      groupId: handoff.groupId,
-      priorityId: handoff.priorityId,
-      destination: engineResult.handoffDestination,
-    });
-    await outbox.enqueue({
-      runId,
-      provider,
-      providerThreadId: message.conversationId,
-      conversationRef: message.conversationId,
-      actionType: "handoff",
-      payloadFingerprint: fingerprint(message.conversationId, "handoff", payload),
-      payloadJson: payload,
-      createdAt: now,
-    });
-    await runs.insertAction({ runId, actionType: "handoff", detailsJson: payload, createdAt: now });
-
-    if (engineResult.text) {
-      const replyPayload = JSON.stringify({ content: engineResult.text });
-      await outbox.enqueue({
-        runId,
-        provider,
-        providerThreadId: message.conversationId,
-        conversationRef: message.conversationId,
-        actionType: "reply",
-        payloadFingerprint: fingerprint(message.conversationId, "reply-handoff", replyPayload),
-        payloadJson: replyPayload,
-        createdAt: now,
-      });
-      await runs.insertAction({ runId, actionType: "reply", detailsJson: replyPayload, createdAt: now });
-    }
-  } else if (engineResult.kind === "reply" && engineResult.text) {
-    const payload = JSON.stringify({ content: engineResult.text });
-    await outbox.enqueue({
-      runId,
-      provider,
-      providerThreadId: message.conversationId,
-      conversationRef: message.conversationId,
-      actionType: "reply",
-      payloadFingerprint: fingerprint(message.conversationId, "reply", payload),
-      payloadJson: payload,
-      createdAt: now,
-    });
-    await runs.insertAction({ runId, actionType: "reply", detailsJson: payload, createdAt: now });
+    if(conversationState!=="HUMAN_ACTIVE" && conversationState!=="RESOLVED")await sessions.updateState(provider,message.conversationId,"HANDOFF_REQUESTED",now);
+    const effect=engineResult.effects?.find(e=>e.kind==="CREATE_HANDOFF");
+    const handoffId=await enqueue("handoff",{intent:engineResult.intent,handoffReason:engineResult.handoffReason,destination:engineResult.handoffDestination,flowVersion:engineResult.flowVersion,productId:engineResult.nextFlowState?.context.productId,...(effect?.kind==="CREATE_HANDOFF" && effect.summary?{summary:effect.summary}:{})});
+    if(canSend && engineResult.text)await enqueue("reply",{content:engineResult.text,handoffReceipt:true},handoffId);
+    // B2B context is no longer needed in navigation after its durable handoff.
+    if(engineResult.handoffDestination==="SALES_PARTNERSHIP")await database.db.execute(sql`UPDATE conversation_flow_state SET context_jsonb = '{}'::jsonb WHERE provider=${provider} AND provider_thread_id=${message.conversationId}`);
+  } else if(engineResult.kind==="reply" && canSend) {
+    let previous: string|undefined;
+    if(engineResult.effects) {
+      for(const effect of engineResult.effects) {
+        if(effect.kind==="SEND_PRODUCT_MEDIA")previous=await enqueue("product_media",{...effect},previous);
+        else if("text" in effect)previous=await enqueue("reply",{content:effect.text,messageId:effect.messageId},previous);
+      }
+    } else if(engineResult.text)await enqueue("reply",{content:engineResult.text});
     increment("deterministic_task_completed_total");
   }
 
@@ -366,7 +348,6 @@ export async function processAssistantInbox(
       outcome: engineResult.kind,
       nodeId: engineResult.nodeId,
       latencyMs: Date.now() - started,
-      conversationRef: message.conversationId,
       provider,
     }),
   );
@@ -374,12 +355,26 @@ export async function processAssistantInbox(
   await inboxRepo.markProcessed(inboxId, now);
 }
 
+export async function processAssistantInbox(database: Database,inboxId: string,support: SupportConversationProvider) {
+  const rows=await database.db.select().from(webhookInbox).where(eq(webhookInbox.id,inboxId)).limit(1);
+  if(!rows[0])return;
+  const thread=rows[0].conversationRef ?? inboxId;
+  try {await database.db.transaction(async tx=>{
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`yubi:${support.provider}:${thread}`},0))`);
+    const bound={db:tx,client:database.client} as unknown as Database;
+    await processAssistantInboxLocked(bound,inboxId,support);
+  });}catch(error){
+    await database.db.execute(sql`UPDATE webhook_inbox SET attempt_count=attempt_count+1,status='failed',last_error='ASSISTANT_PROCESSING_FAILED' WHERE id=${inboxId} AND status<>'processed'`);
+    throw new Error("assistant_processing_failed",{cause:error});
+  }
+}
+
 export async function processAssistantJob(inboxId: string) {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL required");
   const database = createDatabase(databaseUrl);
   const support = createSupportProvider();
-  await processAssistantInbox(database, inboxId, support);
+  try {await processAssistantInbox(database,inboxId,support);} finally {const {closeDatabase}=await import("@yubie/persistence");await closeDatabase(database);}
 }
 
 export function activeSupportProviderName() {

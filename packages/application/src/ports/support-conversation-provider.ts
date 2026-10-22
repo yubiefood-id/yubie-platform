@@ -38,12 +38,16 @@ export type ProviderSendResult =
   | { ok: false; code: Exclude<ProviderResultCode, "SUCCESS">; message?: string };
 
 export interface SendReplyCommand {
+  /** Rebuilt by the worker; never deserialized from customer/provider input. */
+  authorizeDispatch?: () => Promise<boolean>;
+  handoffReceipt?: boolean;
   threadRef: SupportThreadRef;
   content: string;
   idempotencyKey: string;
 }
 
 export interface SendProductMediaCommand {
+  authorizeDispatch?: () => Promise<boolean>;
   threadRef: SupportThreadRef;
   productId: string;
   assetId: string;
@@ -58,6 +62,8 @@ export interface OutboundDeliveryStatus {
 }
 
 export interface HandoffCommand {
+  summary?: Record<string,unknown>;
+  idempotencyKey?: string;
   threadRef: SupportThreadRef;
   labels: string[];
   groupId?: string;
@@ -67,6 +73,9 @@ export interface HandoffCommand {
 
 export interface HumanControlState {
   humanActive: boolean;
+  automationDisabled?: boolean;
+  lastCustomerAt?: string;
+  serviceWindowOpen?: boolean;
   reason?: string;
 }
 

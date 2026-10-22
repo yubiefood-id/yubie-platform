@@ -84,6 +84,18 @@ test("buildZammadDedupeKey prefers delivery id", () => {
   assert.equal(key, "delivery-1");
 });
 
+test('Zammad article identity dedupes different provider delivery ids and payload encodings',()=>{
+  const common={provider:'zammad',ticketId:'1',articleId:'2'};
+  assert.equal(buildZammadDedupeKey({...common,deliveryId:'a',payloadHash:'a'}),buildZammadDedupeKey({...common,deliveryId:'b',payloadHash:'b'}));
+});
+
+test('real agent articles are distinct from the bot and an unowned open ticket does not imply a human owner',async()=>{
+  const {mapArticle,isHumanActiveTicket}=await import('../dist/zammad/mapper.js');
+  const article={id:1,body:'reply',content_type:'text/plain',internal:false,sender:'Agent',created_by_id:7,created_at:new Date().toISOString()};
+  assert.equal(mapArticle(article,7).role,'bot');assert.equal(mapArticle({...article,created_by_id:8},7).role,'agent');
+  assert.equal(isHumanActiveTicket({owner_id:1,state_id:2},[{id:2,name:'open',state_type_id:2}]),false);
+});
+
 test("buildHandoffCommand maps logical destinations to groups", () => {
   const ref = { provider: "zammad", threadId: "1" };
   const sales = buildHandoffCommand(ref, "B2B_INTRO", "b2b", { destination: "SALES_PARTNERSHIP" });
@@ -117,6 +129,7 @@ test("ZammadSupportProvider sends reply via fake client", async () => {
     updated_at: new Date().toISOString(),
     created_at: new Date().toISOString(),
   });
+  client.articlesByTicket.set("1", [{id:0,ticket_id:1,sender:'Customer',type:'web',internal:false,body:'halo',created_at:new Date().toISOString()}]);
   const provider = new ZammadSupportProvider(client, "web");
   const result = await provider.sendReply({
     threadRef: { provider: "zammad", threadId: "1" },
