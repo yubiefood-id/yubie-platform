@@ -487,8 +487,19 @@ export function parseCommerceRuntimeConfig(env: RuntimeEnvSource = process.env):
   }
 
   if (provider === "ipaymu") {
-    if (env.IPAYMU_ENV !== "sandbox") {
-      errors.push("COMMERCE_PROVIDER=ipaymu requires IPAYMU_ENV=sandbox (production iPaymu activation is refused)");
+    // Explicit environment selection only; never inferred from a missing value.
+    const ipaymuEnv = env.IPAYMU_ENV;
+    const ipaymuEnvValid = ipaymuEnv === "sandbox" || ipaymuEnv === "production";
+    if (!ipaymuEnvValid) {
+      errors.push(
+        "COMMERCE_PROVIDER=ipaymu requires IPAYMU_ENV=sandbox or IPAYMU_ENV=production (explicit selection; production activation is a reviewed operator gate)",
+      );
+    }
+    const expectedOrigin = ipaymuEnv === "production" ? "https://my.ipaymu.com" : "https://sandbox.ipaymu.com";
+    if (ipaymuEnv === "production" && parseYubieEnvName(env.YUBIE_ENV) !== "production") {
+      errors.push(
+        "IPAYMU_ENV=production requires YUBIE_ENV=production (production PSP credentials must never run in development/staging)",
+      );
     }
     if (!databaseConfigured) {
       errors.push("COMMERCE_PROVIDER=ipaymu requires DATABASE_URL");
@@ -496,14 +507,10 @@ export function parseCommerceRuntimeConfig(env: RuntimeEnvSource = process.env):
     for (const varName of ["IPAYMU_VA", "IPAYMU_API_KEY", "IPAYMU_NOTIFY_URL"] as const) {
       if (!env[varName]) errors.push(`COMMERCE_PROVIDER=ipaymu requires ${varName}`);
     }
-    const base = (env.IPAYMU_API_BASE_URL ?? "https://sandbox.ipaymu.com").trim();
-    try {
-      const parsed = new URL(base);
-      if (parsed.protocol !== "https:" || parsed.host !== "sandbox.ipaymu.com") {
-        errors.push("IPAYMU_API_BASE_URL must be https://sandbox.ipaymu.com");
-      }
-    } catch {
-      errors.push("IPAYMU_API_BASE_URL must be https://sandbox.ipaymu.com");
+    const base = (env.IPAYMU_API_BASE_URL ?? expectedOrigin).trim().replace(/\/+$/, "");
+    if (base !== expectedOrigin) {
+      // Exact match rejects wrong hosts, ports, http, embedded credentials, paths, queries.
+      errors.push(`IPAYMU_API_BASE_URL must be ${expectedOrigin}`);
     }
     if (!appOrigin) {
       errors.push("COMMERCE_PROVIDER=ipaymu requires APP_ORIGIN");

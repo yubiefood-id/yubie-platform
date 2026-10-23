@@ -2,7 +2,7 @@ rules:
   - id: yubie-ipaymu-production-host
     languages: [ts, js]
     severity: ERROR
-    message: Production iPaymu hosts are refused. Sandbox calls use https://sandbox.ipaymu.com only.
+    message: Production iPaymu hosts are refused outside the reviewed origin-allowlist files (adapter signature.ts, config index.ts).
     paths:
       include:
         - apps
@@ -10,11 +10,13 @@ rules:
       exclude:
         - "**/tests/**"
         - "**/dist/**"
+        - packages/integrations/src/ipaymu/signature.ts
+        - packages/config/src/index.ts
     pattern-regex: https://(my|live)\.ipaymu\.com
   - id: yubie-ipaymu-production-env
     languages: [ts, js]
     severity: ERROR
-    message: IPAYMU_ENV must stay sandbox. Production activation is an operator gate, not a source default.
+    message: IPAYMU_ENV=production literals are refused outside the reviewed allowlist files (signature.ts, config index.ts, payment provider factory).
     paths:
       include:
         - apps
@@ -22,4 +24,7 @@ rules:
       exclude:
         - "**/tests/**"
         - "**/dist/**"
+        - packages/integrations/src/ipaymu/signature.ts
+        - packages/config/src/index.ts
+        - packages/integrations/src/payments/create-commerce-payment-provider.ts
     pattern-regex: IPAYMU_ENV\s*[:=]\s*["']production["']

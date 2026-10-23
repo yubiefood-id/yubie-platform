@@ -125,8 +125,9 @@ test("ipaymu sandbox configuration parses and never echoes secrets", () => {
   assert.equal(config.inventoryMode, "lots");
 });
 
-test("ipaymu refuses production env, production hosts, and missing secrets by name only", () => {
-  assert.throws(() => parseCommerceRuntimeConfig({ ...IPAYMU_BASE, IPAYMU_ENV: "production" }), /IPAYMU_ENV=sandbox/);
+test("ipaymu refuses cross-env credentials and missing secrets by name only", () => {
+  // Production credentials can never run in a staging-shaped deployment.
+  assert.throws(() => parseCommerceRuntimeConfig({ ...IPAYMU_BASE, IPAYMU_ENV: "production" }), /YUBIE_ENV=production/);
   assert.throws(
     () => parseCommerceRuntimeConfig({ ...IPAYMU_BASE, IPAYMU_API_BASE_URL: "https://my.ipaymu.com/api/v2" }),
     /sandbox\.ipaymu\.com/,
@@ -141,4 +142,25 @@ test("ipaymu refuses production env, production hosts, and missing secrets by na
   assert.match(message, /IPAYMU_VA|IPAYMU_API_KEY|IPAYMU_NOTIFY_URL|IPAYMU_ENV/);
   assert.equal(message.includes("sandbox-key"), false);
   assert.equal(message.includes("sandbox-va"), false);
+});
+
+test("ipaymu production requires explicit production environment and exact production origin", () => {
+  const PRODUCTION_BASE = {
+    ...IPAYMU_BASE,
+    IPAYMU_ENV: "production",
+    YUBIE_ENV: "production",
+    APP_ORIGIN: "https://yubiefood.com",
+    IPAYMU_NOTIFY_URL: "https://api.yubiefood.com/v1/webhooks/ipaymu",
+  };
+  assert.equal(parseCommerceRuntimeConfig(PRODUCTION_BASE).provider, "ipaymu");
+  assert.equal(parseCommerceRuntimeConfig({ ...PRODUCTION_BASE, IPAYMU_API_BASE_URL: "https://my.ipaymu.com" }).provider, "ipaymu");
+  assert.throws(() => parseCommerceRuntimeConfig({ ...PRODUCTION_BASE, YUBIE_ENV: "staging" }), /YUBIE_ENV=production/);
+  assert.throws(() => parseCommerceRuntimeConfig({ ...PRODUCTION_BASE, YUBIE_ENV: "development" }), /YUBIE_ENV=production/);
+  // Cross-environment and spoofed origins are rejected in both directions.
+  assert.throws(() => parseCommerceRuntimeConfig({ ...PRODUCTION_BASE, IPAYMU_API_BASE_URL: "https://sandbox.ipaymu.com" }), /my\.ipaymu\.com/);
+  assert.throws(() => parseCommerceRuntimeConfig({ ...PRODUCTION_BASE, IPAYMU_API_BASE_URL: "https://my.ipaymu.com.evil.tld" }), /my\.ipaymu\.com/);
+  assert.throws(() => parseCommerceRuntimeConfig({ ...PRODUCTION_BASE, IPAYMU_API_BASE_URL: "https://my.ipaymu.com:8443" }), /my\.ipaymu\.com/);
+  assert.throws(() => parseCommerceRuntimeConfig({ ...PRODUCTION_BASE, IPAYMU_API_BASE_URL: "http://my.ipaymu.com" }), /my\.ipaymu\.com/);
+  // Sandbox env keeps parsing with its own exact origin.
+  assert.equal(parseCommerceRuntimeConfig(IPAYMU_BASE).provider, "ipaymu");
 });

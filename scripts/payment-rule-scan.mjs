@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 /**
- * CI gate for .semgrep/payment.yml. Runs the same two rules without installing
+ * CI gate for .semgrep/payment.yml. Runs the same rules without installing
  * Semgrep. An operator with the pinned Semgrep CLI can run:
  *   semgrep --config .semgrep/payment.yml --error
- * This script also checks that iPaymu session creation performs one POST.
+ * Production iPaymu origins/env values are permitted only inside the reviewed
+ * allowlist files (adapter origin validation + config parsing + provider
+ * factory); everywhere else they stay a hard error. This script also checks
+ * that iPaymu session creation performs one POST.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -12,6 +15,17 @@ const root = new URL("..", import.meta.url).pathname;
 const sourceRoots = ["apps", "packages"];
 const hostRule = /https:\/\/(my|live)\.ipaymu\.com/;
 const envRule = /IPAYMU_ENV\s*[:=]\s*["']production["']/;
+const hostRuleAllowlist = new Set([
+  // Sole definitions of the official production origin constant.
+  "packages/integrations/src/ipaymu/signature.ts",
+  // Sole config-layer expected-origin mapping for IPAYMU_ENV=production.
+  "packages/config/src/index.ts",
+]);
+const envRuleAllowlist = new Set([
+  ...hostRuleAllowlist,
+  // Factory compares IPAYMU_ENV against "production" to build the adapter.
+  "packages/integrations/src/payments/create-commerce-payment-provider.ts",
+]);
 const offenders = [];
 
 function walk(dir) {
@@ -26,8 +40,8 @@ function walk(dir) {
     if (!/\.(ts|js|mjs)$/.test(entry)) continue;
     const text = readFileSync(full, "utf8");
     const rel = relative(root, full);
-    if (hostRule.test(text)) offenders.push({ file: rel, rule: "yubie-ipaymu-production-host" });
-    if (envRule.test(text)) offenders.push({ file: rel, rule: "yubie-ipaymu-production-env" });
+    if (hostRule.test(text) && !hostRuleAllowlist.has(rel)) offenders.push({ file: rel, rule: "yubie-ipaymu-production-host" });
+    if (envRule.test(text) && !envRuleAllowlist.has(rel)) offenders.push({ file: rel, rule: "yubie-ipaymu-production-env" });
   }
 }
 
