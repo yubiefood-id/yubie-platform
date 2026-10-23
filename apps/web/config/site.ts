@@ -7,8 +7,9 @@ export const siteConfig = {
   email: "hello@yubiefood.com",
   announcement: "Kenali pilihan pangan Yubie. Belanja melalui kanal resmi.",
   social: {
-    instagram: "https://instagram.com/yubie.id",
-    tiktok: "https://tiktok.com/@yubie.id",
+    instagram: "https://www.instagram.com/yubiefood.official/",
+    tiktok: "https://www.tiktok.com/@yubiefood.official",
+    whatsappCommunity: "https://chat.whatsapp.com/IVpNHQOsn371YeTSdyX6q2",
   },
 } as const;
 

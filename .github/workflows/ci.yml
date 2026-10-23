@@ -136,7 +136,10 @@ jobs:
   browser:
     needs: quality
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Playwright browser downloads (chromium+firefox+webkit) can exceed 20m on
+    # slow runner network days (two 20m timeouts observed 2026-10-23); 30m
+    # leaves room for worst-case install plus the ~8m matrix suite.
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
