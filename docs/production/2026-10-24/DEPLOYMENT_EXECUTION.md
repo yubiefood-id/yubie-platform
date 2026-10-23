@@ -25,6 +25,7 @@ Running log; every entry names evidence (SHA, run, digest, URL, timestamp UTC). 
 
 ## Production backend (Contabo, compose project `yubie-prod`)
 
+- **BLOCKED_OPERATOR (B0): deploy SSH refused.** `ssh vps-contabo-yubie-1` → `Permission denied (publickey,password)` re-verified 2026-10-24 (refused since 2026-10-20, readiness ledger O4). All steps below execute the moment access is restored; exact commands are in ROLLBACK.md/README patterns and this section.
 - Isolation: own project name, volumes (`yubie-prod_pgdata`), internal network, DB credentials; Zammad/RetroPick untouched. NOT_RUN
 - Fresh DB, migrations `0001–0021` once via migrate one-shot. NOT_RUN
 - Post-migration `pg_dump` baseline + restore verification into scratch container. NOT_RUN
