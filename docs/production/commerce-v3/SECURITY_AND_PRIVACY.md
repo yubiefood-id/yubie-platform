@@ -7,7 +7,11 @@ Never merge by email or an old delivery phone. Conflicts require assisted resolu
 OTP admission requires the trusted web/API hop, same-origin signed CSRF, browser
 binding, Turnstile host/action verification, country allowlist, durable phone/IP/
 browser/global budgets and resend cooldown. Exact accepted idempotent retries
-return the persisted request without consuming CAPTCHA again. Application sessions
+return the persisted request without consuming CAPTCHA again. Pre-CAPTCHA
+admission commits bounded request counters (10/browser/hour, 40/IP/hour,
+120/global/hour), then calls the provider outside database transactions/locks.
+Delivery rechecks the current country allowlist. Storage-only retention runs in
+the hourly cleanup queue even when SMS/customer routes are disabled. Application sessions
 are issued only after single-use proof; linking also checks a current recent
 session. Session rotation/revocation, identity, proof consumption and audit share
 one PostgreSQL transaction. Storage outages fail closed independently of payments.

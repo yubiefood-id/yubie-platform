@@ -17,7 +17,7 @@ test('phone endpoints enforce CSRF, persist before202 and issue only verified Ht
  const bootstrap=await call('/v1/auth/session');const session=await bootstrap.json();assert.equal(typeof session.data.csrfToken,'string');
  const cookie=bootstrap.headers.getSetCookie().find(c=>c.startsWith('yubie_browser=')).split(';')[0];
  const headers={cookie,'x-csrf-token':session.data.csrfToken,'idempotency-key':randomUUID()};
- const response=await call('/v1/auth/phone/challenges',start,headers);assert.equal(response.status,202);const challenge=(await response.json()).data;assert.equal(challenge.code,undefined);assert.equal((await db.client`SELECT id FROM users`).length,0);
+ const response=await call('/v1/auth/phone/challenges',start,headers);assert.equal(response.status,202);assert.equal(response.headers.getSetCookie().find(c=>c.startsWith('yubie_browser=')).split(';')[0],cookie);const challenge=(await response.json()).data;assert.equal(challenge.code,undefined);assert.equal((await db.client`SELECT id FROM users`).length,0);
  const verifyCaptcha=ctx.phoneAuth.verifyCaptcha;ctx.phoneAuth.verifyCaptcha=async()=>false;
  const duplicate=await call('/v1/auth/phone/challenges',start,headers);assert.equal(duplicate.status,202);assert.equal((await duplicate.json()).data.id,challenge.id);ctx.phoneAuth.verifyCaptcha=verifyCaptcha;
  let code;await dispatchPhoneChallenges({tx:ctx.identityTransactions,clock:ctx.clock,ids:ctx.ids,tokens:ctx.tokens,...ctx.phoneAuth,delivery:{async send(c){code=c.code;return{status:'delivered'};},async lookup(){return{status:'delivered'};}}});

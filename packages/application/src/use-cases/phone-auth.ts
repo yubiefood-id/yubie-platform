@@ -35,14 +35,33 @@ export async function startPhoneChallenge(input: StartPhoneInput, deps: PhoneAut
   if (input.purpose !== "login" && (!input.actor || (input.purpose === "link_phone" && !recent(input.actor, ms)))) return fail("unauthorized");
   const browserHash = deps.crypto.hash("browser:" + input.browser), phoneHash = deps.crypto.hash("phone:" + phone.e164);
   const requestHash = deps.crypto.hash(JSON.stringify([phone.e164, input.purpose, input.actor?.userId ?? null]));
-  try { return await deps.tx.run("identity.challenge", async repos => {
+  try {
+    if (!input.captchaVerified) {
+      const admitted = await deps.tx.run("identity.captcha_admission", async repos => {
+        const store = identity(repos); await store.lock(["captcha:" + browserHash]);
+        if (input.purpose !== "login" && !await isCustomerProofValid(repos, input.actor, now, input.purpose === "link_phone")) return fail("unauthorized");
+        const existing = await store.findRequest(browserHash, input.idempotencyKey);
+        if (existing) return existing.requestHash === requestHash ? ok({ replay: existing }) : fail("conflict");
+        const hour = Math.floor(ms / 3600_000), end = new Date((hour + 1) * 3600_000).toISOString();
+        for (const [key, limit] of [["captcha-browser:" + browserHash, 10], ["captcha-ip:" + deps.crypto.hash(input.ip), 40], ["captcha-global", 120]] as const) {
+          if (!await store.admit(key + ":" + hour, limit, end)) return fail("rate_limited");
+        }
+        return ok({ replay: null });
+      });
+      if (!admitted.ok) return admitted;
+      const replay = admitted.value.replay;
+      if (replay) return ok({ id: replay.id, state: replay.deliveryState, expiresAt: replay.expiresAt, resendAfter: new Date(Date.parse(replay.createdAt) + 60_000).toISOString() });
+      // External proof runs after committing admission, with no open DB locks.
+      let verified = false;
+      try { verified = await deps.verifyNewChallengeProof?.() ?? false; } catch { /* Fail closed, preserving the request budget. */ }
+      if (!verified) return fail("forbidden");
+    }
+    return await deps.tx.run("identity.challenge", async repos => {
+    const now = deps.clock.now(), ms = Date.parse(now);
     const store = identity(repos); await store.lock(["otp:" + phoneHash, "browser:" + browserHash]);
     if (input.purpose !== "login" && !await isCustomerProofValid(repos, input.actor, now, input.purpose === "link_phone")) return fail("unauthorized");
     const existing = await store.findRequest(browserHash, input.idempotencyKey);
     if (existing) return existing.requestHash === requestHash ? ok({ id: existing.id, state: existing.deliveryState, expiresAt: existing.expiresAt, resendAfter: new Date(Date.parse(existing.createdAt) + 60_000).toISOString() }) : fail("conflict");
-    // An exact persisted retry does not consume a single-use CAPTCHA again.
-    // New challenges always require proof while the admission lock is held.
-    if (!input.captchaVerified && !await deps.verifyNewChallengeProof?.()) return fail("forbidden");
     if (input.purpose === "reauth") {
       const own = await store.findUserIdentity(input.actor!.userId, "phone");
       if (own?.subject !== phone.e164) return fail("unauthorized");
@@ -115,7 +134,10 @@ export async function dispatchPhoneChallenges(deps: PhoneAuthDeps & { delivery: 
     try {
       if (c.deliveryAttempts === 1 && c.deliveryCiphertext) {
         const payload = JSON.parse(deps.crypto.open(c.deliveryCiphertext)) as { phone: string; code: string };
-        state = (await deps.delivery.send({ id: c.id, ...payload, ttlSeconds: Math.max(1, Math.floor((Date.parse(c.expiresAt) - Date.parse(now)) / 1000)) })).status;
+        const destination = normalizePhone(payload.phone);
+        state = destination?.country && deps.allowedCountries.includes(destination.country)
+          ? (await deps.delivery.send({ id: c.id, ...payload, ttlSeconds: Math.max(1, Math.floor((Date.parse(c.expiresAt) - Date.parse(now)) / 1000)) })).status
+          : "failed";
       } else {
         const status = (await deps.delivery.lookup(c.id)).status; state = status === "unknown" ? "ambiguous" : status;
       }
@@ -126,4 +148,12 @@ export async function dispatchPhoneChallenges(deps: PhoneAuthDeps & { delivery: 
       await store.saveChallenge({ ...fresh, deliveryState: state, deliveryCiphertext: null, leaseUntil: null, nextAttemptAt: new Date(Date.parse(now) + 30_000).toISOString(), updatedAt: now });
     });
   }
+}
+
+/** Retention must continue when all customer routes and SMS are disabled. */
+export async function purgePhoneChallenges(deps: { tx: TransactionManager; clock: Clock }): Promise<void> {
+  await deps.tx.run("identity.retention", async repos => {
+    if (!repos.customerIdentity) throw new Error("CUSTOMER_STORAGE_UNAVAILABLE");
+    await repos.customerIdentity.purgeExpired(deps.clock.now());
+  });
 }

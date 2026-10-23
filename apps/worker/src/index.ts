@@ -1,8 +1,8 @@
 import PgBoss from "pg-boss";
 import { inspectServiceRuntimeConfig } from "@yubie/config";
-import { checkListingHealth, SystemClock } from "@yubie/application";
+import { checkListingHealth, SystemClock, purgePhoneChallenges } from "@yubie/application";
 import { createSupportProvider, HttpLinkHealthChecker } from "@yubie/integrations";
-import { closeDatabase, createWorkerRepositories, PostgresAssistantWorkRepository } from "@yubie/persistence";
+import { closeDatabase, createWorkerRepositories, PostgresAssistantWorkRepository, PostgresTransactionManager } from "@yubie/persistence";
 import { processAssistantJob } from "./assistant-handler.js";
 import { startMetricsServer } from "./metrics-server.js";
 import { reconcileSupport } from "./reconcile-handler.js";
@@ -87,6 +87,7 @@ async function start() {
   await boss.work("chatwoot.reconcile", { batchSize: 1 }, handleReconcile);
 
   await boss.work("webhook.cleanup", async () => {
+    await purgePhoneChallenges({ tx: new PostgresTransactionManager(repos.database), clock });
     const { PostgresWebhookInboxRepository } = await import("@yubie/persistence");
     const inbox = new PostgresWebhookInboxRepository(repos.database);
     await inbox.purgeExpiredRawBodies(new Date().toISOString());

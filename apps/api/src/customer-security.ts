@@ -13,7 +13,7 @@ function csrf(browser: string): string {
 export function customerBootstrap(request: Request, ctx: AppContext) {
   const found = customerCookie(request, "yubie_browser"), existing = found && /^[A-Za-z0-9_-]{43}$/.test(found) ? found : null;
   const browser = existing ?? randomBytes(32).toString("base64url");
-  return { browser, csrfToken: csrf(browser), headers: { "cache-control": "no-store", ...(!existing ? { "set-cookie": `yubie_browser=${browser}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600${(ctx.appOrigin ?? new URL(request.url).origin).startsWith("https:") ? "; Secure" : ""}` } : {}) } };
+  return { browser, csrfToken: csrf(browser), headers: { "cache-control": "no-store", "set-cookie": `yubie_browser=${browser}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600${(ctx.appOrigin ?? new URL(request.url).origin).startsWith("https:") ? "; Secure" : ""}` } };
 }
 export function authorizeCustomerMutation(request: Request, ctx: AppContext): string | null {
   const browser = customerCookie(request, "yubie_browser"), token = request.headers.get("x-csrf-token") ?? "";

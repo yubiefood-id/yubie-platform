@@ -107,3 +107,32 @@ test('audit failure rolls back proof consumption, identity and session atomicall
  } finally {await db.client.unsafe('DROP TRIGGER reject_phone_audit ON audit_events');await db.client.unsafe('DROP FUNCTION reject_phone_audit()');}
  assert.equal((await a.verifyPhoneChallenge({id:c.id,code:c.code,browser:c.input.browser},deps)).ok,true);
 });
+
+test('queued SMS obeys a tightened delivery country allowlist',{skip:!enabled},async()=>{
+ deps=context();now+=3600_000;
+ const r=await a.startPhoneChallenge({...request('synthetic-browser-binding-00000013'),phone:'+12025550103',country:'US'},deps);assert.equal(r.ok,true);
+ let calls=0;await a.dispatchPhoneChallenges({...deps,allowedCountries:['ID'],delivery:{async send(){calls++;return{status:'accepted'};},async lookup(){return{status:'unknown'};}}});
+ assert.equal(calls,0);assert.equal((await db.client`SELECT delivery_state FROM phone_verifications WHERE id=${r.value.id}`)[0].delivery_state,'failed');
+});
+test('failed CAPTCHA is durably bounded without holding a database transaction for network work',{skip:!enabled},async()=>{
+ deps=context();now+=3600_000;let calls=0,active=0;const originalTx=deps.tx;deps.tx={async run(label,fn){active++;try{return await originalTx.run(label,fn);}finally{active--;}}};
+ const input={...request('synthetic-browser-binding-00000014'),captchaVerified:false};
+ const proof=async()=>{assert.equal(active,0);calls++;return false;};
+ for(let i=0;i<15;i++)await a.startPhoneChallenge({...input,idempotencyKey:randomUUID()},{...deps,verifyNewChallengeProof:proof});
+ assert.equal(calls,10);assert.equal((await db.client`SELECT id FROM phone_verifications WHERE browser_hash=${deps.crypto.hash('browser:'+input.browser)}`).length,0);
+});
+
+test('Google login rolls back identity and session when audit persistence fails',{skip:!enabled},async()=>{
+ deps=context();now+=3600_000;
+ await db.client.unsafe("CREATE FUNCTION reject_google_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='identity.google_authenticated' THEN RAISE EXCEPTION 'synthetic audit outage'; END IF; RETURN NEW; END $$");
+ await db.client.unsafe("CREATE TRIGGER reject_google_audit BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION reject_google_audit()");
+ const auth={...deps,users:new p.PostgresUserRepository(db),sessions:new p.PostgresSessionRepository(db),verifier:{async verify(){return{ok:true,value:{sub:'audit-google-sub',email:null,emailVerified:false,name:null,picture:null}};}}};
+ try{const r=await a.googleLogin({credential:'synthetic',csrfToken:'a',csrfCookie:'a'},auth);assert.equal(r.ok,false);assert.equal((await db.client`SELECT id FROM users WHERE google_sub='audit-google-sub'`).length,0);}
+ finally{await db.client.unsafe('DROP TRIGGER reject_google_audit ON audit_events');await db.client.unsafe('DROP FUNCTION reject_google_audit()');}
+});
+test('retention cleanup needs neither delivery provider nor encryption keys',{skip:!enabled},async()=>{
+ deps=context();now+=3600_000;const r=await a.startPhoneChallenge(request('synthetic-browser-binding-00000015'),deps);assert.equal(r.ok,true);
+ now+=301_000;await a.purgePhoneChallenges({tx:deps.tx,clock:deps.clock});
+ const [c]=await db.client`SELECT * FROM phone_verifications WHERE id=${r.value.id}`;assert.equal(c.verifier,null);assert.equal(c.delivery_ciphertext,null);assert.equal(c.phone_ciphertext,null);
+ now+=86400_000;await a.purgePhoneChallenges({tx:deps.tx,clock:deps.clock});assert.equal((await db.client`SELECT id FROM phone_verifications WHERE id=${r.value.id}`).length,0);
+});

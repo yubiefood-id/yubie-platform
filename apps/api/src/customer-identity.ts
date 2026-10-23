@@ -3,7 +3,7 @@ import { startPhoneChallenge, verifyPhoneChallenge, linkGoogleIdentity } from "@
 import { normalizePhone, type AppError } from "@yubie/domain";
 import { phoneChallengeSchema, phoneVerifySchema, googleLoginSchema } from "@yubie/validation";
 import type { AppContext } from "./composition/create-app.js";
-import { authorizeCustomerMutation, currentCustomerProof, customerCookie, customerSessionCookie } from "./customer-security.js";
+import { authorizeCustomerMutation, currentCustomerProof, customerCookie, customerSessionCookie, customerBootstrap } from "./customer-security.js";
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(data, { status, headers: { "cache-control": "no-store", ...headers } });
 function failure(error: AppError): Response {
   const status = { validation: 400, unauthorized: 401, forbidden: 403, conflict: 409, rate_limited: 429 }[error.code as "validation" | "unauthorized" | "forbidden" | "conflict" | "rate_limited"] ?? 503;
@@ -55,7 +55,7 @@ export async function handleCustomerIdentity(request: Request, ctx: AppContext):
       if (!isIP(ip)) return json({ ok: false, code: "TRUSTED_CLIENT_CONTEXT_UNAVAILABLE" }, 503);
       const verifyCaptcha = () => ctx.phoneAuth!.verifyCaptcha(parsed.data.captchaToken, ip);
       const result = await startPhoneChallenge({ ...parsed.data, purpose: challenge?.purpose ?? parsed.data.purpose, browser, ip, idempotencyKey: request.headers.get("idempotency-key") ?? "", captchaVerified: false, ...(actor ? { actor } : {}) }, { ...deps, verifyNewChallengeProof: verifyCaptcha });
-      return result.ok ? json({ ok: true, data: result.value }, 202) : failure(result.error);
+      return result.ok ? json({ ok: true, data: result.value }, 202, customerBootstrap(request, ctx).headers) : failure(result.error);
     }
     return json({ ok: false, code: "NOT_FOUND" }, 404);
   } catch (error) {

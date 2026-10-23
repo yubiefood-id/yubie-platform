@@ -120,6 +120,8 @@ export async function googleLogin(
     await repos.customerIdentity.lock(["google:" + deps.tokens.hash(identity.value.sub)]);
     const result = await persist({ ...deps, users: repos.users, sessions: repos.authSessions }, repos.customerIdentity);
     if (!result.ok) throw new AuthWriteError(result.error);
+    const audit = await repos.audit.append({ action: "identity.google_authenticated", resourceType: "user", resourceId: result.value.user.id, actor: result.value.user.id, occurredAt: deps.clock.now() });
+    if (!audit.ok) throw new AuthWriteError(audit.error);
     return result;
   }); } catch (error) {
     return error instanceof AuthWriteError ? err(error.safeError) : err({ code: "unavailable", message: "Customer storage is unavailable.", retryable: true, requestId: "auth" });
