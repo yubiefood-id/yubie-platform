@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./google-maps/browser": {
+      "types": "./src/google-maps/browser.ts",
+      "default": "./dist/google-maps/browser.js"
     }
   },
   "scripts": {

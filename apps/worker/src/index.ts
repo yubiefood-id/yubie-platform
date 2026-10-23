@@ -1,13 +1,14 @@
 import PgBoss from "pg-boss";
 import { inspectServiceRuntimeConfig } from "@yubie/config";
-import { checkListingHealth, SystemClock } from "@yubie/application";
+import { checkListingHealth, SystemClock, purgePhoneChallenges, purgeAddressPins } from "@yubie/application";
 import { createSupportProvider, HttpLinkHealthChecker } from "@yubie/integrations";
-import { closeDatabase, createWorkerRepositories, PostgresAssistantWorkRepository } from "@yubie/persistence";
+import { closeDatabase, createWorkerRepositories, PostgresAssistantWorkRepository, PostgresTransactionManager } from "@yubie/persistence";
 import { processAssistantJob } from "./assistant-handler.js";
 import { startMetricsServer } from "./metrics-server.js";
 import { reconcileSupport } from "./reconcile-handler.js";
 import { deliverSupportOutbox, processPendingOutbox } from "./reply-delivery-handler.js";
 import { runPaymentReconcile } from "./payment-reconcile-handler.js";
+import { runPhoneDelivery } from "./phone-delivery-handler.js";
 
 // Fail closed before any queue starts processing: an invalid runtime
 // configuration (unknown provider, missing Zammad values in
@@ -86,6 +87,8 @@ async function start() {
   await boss.work("chatwoot.reconcile", { batchSize: 1 }, handleReconcile);
 
   await boss.work("webhook.cleanup", async () => {
+    await purgePhoneChallenges({ tx: new PostgresTransactionManager(repos.database), clock });
+    await purgeAddressPins({ tx: new PostgresTransactionManager(repos.database), clock });
     const { PostgresWebhookInboxRepository } = await import("@yubie/persistence");
     const inbox = new PostgresWebhookInboxRepository(repos.database);
     await inbox.purgeExpiredRawBodies(new Date().toISOString());
@@ -102,6 +105,11 @@ async function start() {
     }
   });
   await boss.schedule("payment.reconcile", "*/5 * * * *", {});
+  await boss.createQueue("identity.delivery");
+  await boss.work("identity.delivery", { batchSize: 1 }, async () => {
+    await runPhoneDelivery(repos.database);
+  });
+  await boss.schedule("identity.delivery", "* * * * *", {});
 
   await boss.work("listing.health", async (jobs) => {
     for (const job of jobs) {
@@ -131,6 +139,7 @@ async function start() {
     if(sweeping)return;
     sweeping=true;
     try {
+      await boss.send("identity.delivery", {}, { singletonKey: "phone-delivery", retryLimit: 3, retryDelay: 10 });
       const provider=process.env.SUPPORT_PROVIDER??process.env.CHAT_PROVIDER??"fake";
       const inboxProvider=provider==="chatwoot"?"chatwoot_agentbot":provider;
       const work=new PostgresAssistantWorkRepository(repos.database);

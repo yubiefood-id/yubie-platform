@@ -68,8 +68,9 @@ PDP. Final approved photo → SEND_PRODUCT_MEDIA, otherwise honest text fallback
 PRODUCT_DETAIL choice 1 only describes purchase when checkout_available; otherwise
 catalog guidance. Missing catalog capability suppresses website links. ORDER_PORTAL
 requires account_available AND order_portal_available. Payment guidance respects
-checkout_available. Promo requires effective approved code/percentage/eligibility
-matching the existing domain quote; absent/expired/mismatched evidence is neutral.
+checkout_available. Commerce V3 promotion eligibility belongs to the authenticated
+website and requires verified phone ownership. Yubi never reveals a code or
+promises a discount; unavailable accounts get honest unavailable guidance.
 
 B2B_MENU 1–4 selects bulk/reseller/sample-development/partnership. Consent 1 starts
 company → need → product → city → volume; each answer ≤256 characters. Volume may

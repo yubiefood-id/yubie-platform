@@ -112,21 +112,24 @@ test("Postgres invariants A, B, C, and E", { skip: !databaseUrl }, async () => {
     const intents = await database.client`SELECT count(*)::int AS n FROM order_payments WHERE principal_key = ${principal}`;
     assert.equal(intents[0].n, 1, "A: one unresolved intent");
 
-    // B — YUBIE15 grand total is what iPaymu is asked to charge, as one line.
+    // B — leaked codes grant no discount; the authorized grand total is one iPaymu line.
     const promo = await createFirstPartyCheckout({
       ...CART,
       promoCode: "YUBIE15",
       idempotencyPrincipal: guest(2),
       idempotencyKey: "b-1",
     }, deps);
-    assert.equal(promo.ok, true);
-    assert.equal(promo.value.totalAmount, 29750);
-    const sent = provider.created.find((item) => item.referenceId === promo.value.checkoutRef);
-    assert.equal(sent.amount, 29750);
+    assert.equal(promo.ok, false);
+    assert.equal(promo.error.code, "forbidden");
+    const fullPrice = await createFirstPartyCheckout({ ...CART, idempotencyPrincipal: guest(2), idempotencyKey: "b-2" }, deps);
+    assert.equal(fullPrice.ok, true);
+    assert.equal(fullPrice.value.totalAmount, 35000);
+    const sent = provider.created.find((item) => item.referenceId === fullPrice.value.checkoutRef);
+    assert.equal(sent.amount, 35000);
     assert.equal(sent.items.length, 1);
-    assert.equal(sent.items[0].netUnitAmount, 29750);
-    const stored = await database.client`SELECT amount FROM order_payments p JOIN orders o ON o.id = p.order_id WHERE o.checkout_ref = ${promo.value.checkoutRef}`;
-    assert.equal(stored[0].amount, 29750);
+    assert.equal(sent.items[0].netUnitAmount, 35000);
+    const stored = await database.client`SELECT amount FROM order_payments p JOIN orders o ON o.id = p.order_id WHERE o.checkout_ref = ${fullPrice.value.checkoutRef}`;
+    assert.equal(stored[0].amount, 35000);
 
     // C — timeout keeps the reservation and a retry does not open a second session.
     provider.mode = "timeout";

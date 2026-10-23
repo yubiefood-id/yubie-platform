@@ -57,3 +57,20 @@ export function checkoutIntentHash(input: CheckoutIntentShape): string {
 export function checkoutRequestHash(intentHash: string, customerEmail: string, customerName?: string | null): string {
   return sha256Hex(JSON.stringify(["request-v1", intentHash, customerEmail.trim().toLowerCase(), customerName?.trim() || null]));
 }
+
+/** V3 receives validated, normalized address data; receipt/cache metadata is not intent. */
+export function checkoutIntentHashV3(input: CheckoutIntentShape): string {
+  const lineIdentity = checkoutIntentHash({ lines: input.lines, promoCode: input.promoCode });
+  const address = (input.delivery ?? {}) as Record<string, unknown>;
+  const fields = ["recipientName", "recipientPhone", "fullAddress", "province", "city", "district", "subdistrict", "postalCode", "building", "rt", "rw", "notes", "countryCode"];
+  const delivery = fields.map(key => [key, typeof address[key] === "string" ? address[key].trim() : null]);
+  const pin = address.pin as { latitude?: unknown; longitude?: unknown } | null | undefined;
+  // Source, accuracy, receipt and TTL may change while confirming the same point.
+  const point = pin ? [pin.latitude, pin.longitude] : null;
+  return sha256Hex(JSON.stringify(["intent-v3", lineIdentity, delivery, point]));
+}
+
+/** Contact phone is customer-authored contact data, not authentication proof. */
+export function checkoutRequestHashV3(intentHash: string, contact: { phone: string; email?: string | null; name?: string | null }): string {
+  return sha256Hex(JSON.stringify(["request-v3", intentHash, contact.phone, contact.email?.trim().toLowerCase() || null, contact.name?.trim() || null]));
+}

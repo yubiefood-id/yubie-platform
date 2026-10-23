@@ -55,6 +55,21 @@ export class InMemoryOrderRepository implements OrderRepository {
 export class InMemoryPaymentRepository implements PaymentRepository {
   private readonly items = new Map<string, PaymentRecord>();
 
+  private readonly guestOwners = new Map<string, string>();
+  async findCheckoutGuestOwner(guestPrincipal: string) { return this.guestOwners.get(guestPrincipal) ?? null; }
+  async listCheckoutGuestPrincipals(userId: string) { return [...this.guestOwners].filter(([, owner]) => owner === userId).map(([principal]) => principal); }
+  async bindCheckoutGuest(guestPrincipal: string, userId: string, _now: string) {
+    if (!this.guestOwners.has(guestPrincipal)) this.guestOwners.set(guestPrincipal, userId);
+    return this.guestOwners.get(guestPrincipal) === userId;
+  }
+
+  async lockCheckoutPrincipals(_principals: string[]): Promise<void> { /* Test-only; PostgreSQL provides concurrency locking. */ }
+
+  async findUnresolvedByPrincipals(principals: string[]) {
+    return ok([...this.items.values()].filter(item => item.principalKey && principals.includes(item.principalKey)
+      && (item.status === "pending" || ["late_success_after_terminal", "multiple_successful_transactions"].includes(item.reconciliationState ?? ""))).slice(0, 2));
+  }
+
   async findById(id: string) {
     return ok(this.items.get(id) ?? null);
   }
@@ -93,7 +108,10 @@ export class InMemoryPaymentRepository implements PaymentRepository {
 
   snapshot(): () => void {
     const saved = new Map(this.items);
+    const owners = new Map(this.guestOwners);
     return () => {
+      this.guestOwners.clear();
+      for (const [key, owner] of owners) this.guestOwners.set(key, owner);
       this.items.clear();
       for (const [id, item] of saved) this.items.set(id, item);
     };

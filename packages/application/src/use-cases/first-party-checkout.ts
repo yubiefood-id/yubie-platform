@@ -9,7 +9,7 @@ import {
   orderStatusForPayment,
   paymentStatusFromProviderSession,
   productFamilies,
-  quotePromotion,
+  normalizePhone,
   resolveShippingPolicy,
   type AppError,
   type OrderLineRecord,
@@ -30,8 +30,12 @@ import type {
 } from "../ports.js";
 import { DuplicatePaymentIntentError, InsufficientInventoryError } from "../ports.js";
 import { erpStockWriteDecision } from "../policies/erp-authority.js";
-import { checkoutIntentHash, checkoutRequestHash, isCheckoutPrincipalKey } from "./checkout-intent.js";
+import { checkoutIntentHash, checkoutRequestHash, checkoutIntentHashV3, checkoutRequestHashV3, isCheckoutPrincipalKey } from "./checkout-intent.js";
 import { applyPaymentStatus } from "./process-payment-webhook.js";
+import { authorizeCheckoutPromotion, reserveCheckoutPromotion, settlePromotionForPayment, PromotionAuthorizationError } from "./verified-promotions.js";
+import type { CustomerProof } from "./phone-auth.js";
+import { lockCheckoutScope, CheckoutScopeError } from "./checkout-principals.js";
+class CheckoutTotalError extends Error {}
 
 export interface CheckoutLineInput {
   productId: string;
@@ -40,8 +44,10 @@ export interface CheckoutLineInput {
 }
 
 export interface CreateFirstPartyCheckoutInput {
+  checkoutVersion?: 3;
   lines: CheckoutLineInput[];
-  customerEmail: string;
+  customerEmail: string | null;
+  customerPhone?: string | null;
   customerName?: string;
   /** Bounded non-PII API correlation id for audit evidence. */
   requestId?: string;
@@ -63,6 +69,9 @@ export interface CreateFirstPartyCheckoutInput {
   idempotencyPrincipal: string;
   /** Public promotion identifier. The server is always the pricing authority. */
   promoCode?: string;
+  customerProof?: CustomerProof;
+  /** Server-derived possession of an existing guest checkout cookie only. */
+  possessedGuestPrincipal?: string;
   /** Adapter selected by commerce config. Existing callers stay on xendit. */
   provider?: PaymentProviderKind;
 }
@@ -111,7 +120,8 @@ export interface AccountOrderView {
   lines: OrderLineRecord[];
   delivery: OrderRecord["delivery"];
   expiresAt: string | null;
-  customerEmail: string;
+  customerEmail: string | null;
+  customerPhone?: string | null;
   createdAt: string;
 }
 
@@ -147,11 +157,14 @@ function outcomeResult(outcome: StoredCheckoutOutcome): CheckoutResult {
 }
 
 /** The unresolved intent for this principal and cart, as a replayable outcome. */
-async function openIntentOutcome(repos: TransactionalRepositories, principalKey: string, intentHash: string): Promise<StoredCheckoutOutcome | null> {
-  const payment = await repos.payments.findUnresolvedByPrincipalHash(principalKey, intentHash);
-  if (!payment.ok || !payment.value) return null;
+async function openIntentOutcome(repos: TransactionalRepositories, principalKey: string, intentHash: string, principals = [principalKey]): Promise<StoredCheckoutOutcome | null> {
+  const pending = await repos.payments.findUnresolvedByPrincipals(principals);
+  if (!pending.ok) throw new Error("Checkout recovery storage unavailable");
+  if (!pending.value.length) return null;
+  if (pending.value.length !== 1 || pending.value[0]!.requestHash !== intentHash || pending.value[0]!.status !== "pending") return { kind: "pending", message: OPEN_INTENT_PENDING_MESSAGE };
+  const payment = { value: pending.value[0]! };
   const order = await repos.orders.findById(payment.value.orderId);
-  if (!order.ok || !order.value) return null;
+  if (!order.ok || !order.value) throw new Error("Checkout recovery order unavailable");
   // A flagged intent (ambiguous create, attach failure, pending reconciliation)
   // may point at a cancelled or unknown session; only a clean one is reused.
   if (!payment.value.redirectUrl || payment.value.reconciliationState) return { kind: "pending", message: OPEN_INTENT_PENDING_MESSAGE };
@@ -171,10 +184,30 @@ async function openIntentOutcome(repos: TransactionalRepositories, principalKey:
   };
 }
 
+/** Provider calls race verified callbacks: always merge into a locked fresh record. */
+async function lockCheckout(repos: TransactionalRepositories, paymentId: string, orderId: string) {
+  const payment = await repos.payments.lockById(paymentId);
+  const order = await repos.orders.findById(orderId);
+  if (!payment.ok || !payment.value || !order.ok || !order.value) throw new Error("Checkout persistence unavailable");
+  return { payment: payment.value, order: order.value };
+}
+
+function confirmedOutcome(order: OrderRecord, payment: PaymentRecord, successReturnUrl: string): StoredCheckoutOutcome | null {
+  if (payment.status === "pending") return null;
+  if (payment.status === "succeeded" || payment.status === "refunded") {
+    return { kind: "success", result: { mode: "live", checkoutToken: order.checkoutPublicToken, checkoutRef: order.checkoutRef,
+      redirectUrl: `${successReturnUrl}${successReturnUrl.includes("?") ? "&" : "?"}checkout=${order.checkoutPublicToken}`,
+      expiresAt: payment.expiresAt, subtotalAmount: order.totals.subtotalAmount, shippingAmount: order.totals.shippingAmount,
+      totalAmount: order.totalAmount, currency: "IDR" } };
+  }
+  return { kind: "failure", error: { code: "validation", message: "Payment attempt is already closed. Start a new checkout.", retryable: false } };
+}
+
 /**
  * Line items sent to the payment provider. iPaymu requires the lines to sum
  * to the charged amount and has no discount or shipping field, so it gets one
- * aggregate line at the grand total. Xendit keeps per-product lines.
+ * aggregate line at the grand total. Xendit keeps per-product lines when
+ * their sum matches; discounted/shipping baskets also use the final aggregate.
  */
 export function buildProviderLineItems(
   provider: PaymentProviderKind | undefined,
@@ -185,7 +218,8 @@ export function buildProviderLineItems(
   if (!isPayableTotal(totals.grandTotalAmount)) {
     throw new RangeError(`Grand total ${totals.grandTotalAmount} is not a payable amount`);
   }
-  if (provider === "ipaymu") {
+  const lineTotal = priced.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
+  if (provider === "ipaymu" || lineTotal !== totals.grandTotalAmount) {
     return [{ referenceId: checkoutRef, name: `Pesanan Yubie ${checkoutRef}`, quantity: 1, netUnitAmount: totals.grandTotalAmount }];
   }
   return priced.map((line) => ({ referenceId: line.id, name: `${line.productName} ${line.sizeLabel}`, quantity: line.quantity, netUnitAmount: line.unitPrice }));
@@ -228,6 +262,74 @@ export async function createFirstPartyCheckout(
   if (!isCheckoutPrincipalKey(input.idempotencyPrincipal)) {
     return err({ code: "validation", message: "Checkout requires a user or guest checkout principal.", retryable: false, requestId: "checkout" });
   }
+  const phone = input.checkoutVersion === 3 ? normalizePhone(input.customerPhone ?? "") : null;
+  if ((input.checkoutVersion === 3 && !phone) || (input.checkoutVersion !== 3 && !input.customerEmail)) {
+    return err({ code: "validation", message: "Checkout contact is invalid.", retryable: false, requestId: "checkout" });
+  }
+  if (input.possessedGuestPrincipal && (!/^guest:[0-9a-f]{64}$/.test(input.possessedGuestPrincipal)
+    || (input.idempotencyPrincipal !== input.possessedGuestPrincipal && input.idempotencyPrincipal !== `user:${input.userId}`))) {
+    return err({ code: "validation", message: "Invalid checkout recovery principal.", retryable: false, requestId: "checkout" });
+  }
+  const idempotencyKey = input.idempotencyKey ?? null;
+  const claimInput = {
+    scope: IDEMPOTENCY_SCOPE,
+    principalKey: input.idempotencyPrincipal,
+    operation: IDEMPOTENCY_OPERATION,
+    idempotencyKey: idempotencyKey ?? "",
+  };
+  const attachOutcome = (repos: TransactionalRepositories, outcome: StoredCheckoutOutcome) =>
+    repos.idempotency.attachResponse(claimInput, JSON.stringify(outcome));
+
+  /** Replay semantics for a duplicate claim encountered inside TX1. */
+  const replayStored = (stored: string | null) => {
+    if (!stored) {
+      return err({ code: "pending_reconciliation", message: "This checkout attempt is still unresolved. Retry the same attempt; a second payable session will not be created.", retryable: true, requestId: "checkout" });
+    }
+    try {
+      return outcomeResult(JSON.parse(stored) as StoredCheckoutOutcome);
+    } catch {
+      return err({ code: "conflict", message: "Stored idempotent response unreadable; use a new Idempotency-Key.", retryable: false, requestId: "checkout" });
+    }
+  };
+
+  const now = deps.clock.now();
+  const auditActor = input.requestId && /^[A-Za-z0-9_-]{1,64}$/.test(input.requestId)
+    ? `checkout:${input.requestId}`
+    : "checkout";
+  const intentHash = (input.checkoutVersion === 3 ? checkoutIntentHashV3 : checkoutIntentHash)({ lines: input.lines.map(line => ({ ...line, quantity: Math.min(Math.max(Math.trunc(line.quantity) || 0, 1), MAX_CART_LINE_QUANTITY) })), promoCode: input.promoCode, delivery: input.delivery ?? null });
+  const requestHash = input.checkoutVersion === 3
+    ? checkoutRequestHashV3(intentHash, { phone: phone!.e164, email: input.customerEmail, name: input.customerName ?? null })
+    : checkoutRequestHash(intentHash, input.customerEmail!, input.customerName);
+
+  // Authenticate recovery scope and commit proved cookie association separately
+  // from purchase eligibility. A rejected purchase must not erase that proof.
+  // Recover existing attempts before today's catalog/shipping rules, then lock
+  // and recheck again in TX1 before any new payable order can be created.
+  let recovered: CheckoutResult | null;
+  try {
+    recovered = await deps.tx.run("checkout.replay", async repos => {
+      const principals = await lockCheckoutScope({ principal: input.idempotencyPrincipal, ...(input.possessedGuestPrincipal ? { guest: input.possessedGuestPrincipal } : {}) }, repos, now);
+      if (idempotencyKey) {
+        const stored = await repos.idempotency.lookup({ ...claimInput, requestHash });
+        if (!stored.ok) return stored;
+        if (stored.value) return replayStored(stored.value.responseJson);
+      }
+      const open = await openIntentOutcome(repos, input.idempotencyPrincipal, intentHash, principals);
+      if (!open) return null;
+      if (idempotencyKey) {
+        const claim = await repos.idempotency.claim({ ...claimInput, requestHash, createdAt: now });
+        if (!claim.ok) return claim;
+        if (claim.value.status === "duplicate") return replayStored(claim.value.responseJson);
+        if (!(await attachOutcome(repos, open)).ok) throw new Error("Checkout recovery persistence unavailable");
+      }
+      return outcomeResult(open);
+    });
+  } catch (error) {
+    if (error instanceof CheckoutScopeError) return err({ code: error.code, message: error.message, retryable: error.code === "pending_reconciliation", requestId: "checkout" });
+    throw error;
+  }
+  if (recovered) return recovered;
+
   const priced: OrderLineRecord[] = [];
   for (const line of input.lines) {
     const product = productFamilies.find((item) => item.id === line.productId && item.status === "available");
@@ -257,45 +359,7 @@ export async function createFirstPartyCheckout(
     return err({ code: "validation", message: String(error), retryable: false, requestId: "checkout" });
   }
   const subtotalAmount = priced.reduce((total, line) => total + line.unitPrice * line.quantity, 0);
-  const promotion = quotePromotion(input.promoCode, subtotalAmount);
-  const totals = buildOrderTotals(subtotalAmount, shipping.amount, 0, promotion?.discountAmount ?? 0);
-  if (!isPayableTotal(totals.grandTotalAmount)) {
-    return err({
-      code: "validation",
-      message: `Order total must be between 1 and ${MAX_CHECKOUT_TOTAL_IDR} IDR for web checkout. Contact us on WhatsApp for larger orders.`,
-      retryable: false,
-      requestId: "checkout",
-    });
-  }
-
-  const idempotencyKey = input.idempotencyKey ?? null;
-  const claimInput = {
-    scope: IDEMPOTENCY_SCOPE,
-    principalKey: input.idempotencyPrincipal,
-    operation: IDEMPOTENCY_OPERATION,
-    idempotencyKey: idempotencyKey ?? "",
-  };
-  const attachOutcome = (repos: TransactionalRepositories, outcome: StoredCheckoutOutcome) =>
-    repos.idempotency.attachResponse(claimInput, JSON.stringify(outcome));
-
-  /** Replay semantics for a duplicate claim encountered inside TX1. */
-  const replayStored = (stored: string | null) => {
-    if (!stored) {
-      return err({ code: "pending_reconciliation", message: "This checkout attempt is still unresolved. Retry the same attempt; a second payable session will not be created.", retryable: true, requestId: "checkout" });
-    }
-    try {
-      return outcomeResult(JSON.parse(stored) as StoredCheckoutOutcome);
-    } catch {
-      return err({ code: "conflict", message: "Stored idempotent response unreadable; use a new Idempotency-Key.", retryable: false, requestId: "checkout" });
-    }
-  };
-
-  const now = deps.clock.now();
-  const auditActor = input.requestId && /^[A-Za-z0-9_-]{1,64}$/.test(input.requestId)
-    ? `checkout:${input.requestId}`
-    : "checkout";
-  const intentHash = checkoutIntentHash({ lines: priced, promoCode: input.promoCode, delivery: input.delivery ?? null });
-  const requestHash = checkoutRequestHash(intentHash, input.customerEmail, input.customerName);
+  let totals = buildOrderTotals(subtotalAmount, shipping.amount, 0, 0);
 
   const orderId = `ord_${deps.ids.nextId()}`;
   const checkoutRef = `co_${deps.ids.nextId()}_${Date.now().toString(36)}`;
@@ -309,6 +373,7 @@ export async function createFirstPartyCheckout(
     status: "draft",
     userId: input.userId ?? null,
     customerEmail: input.customerEmail,
+    customerPhone: phone?.e164 ?? null,
     customerName: input.customerName ?? null,
     delivery: input.delivery ?? null,
     currency: "IDR",
@@ -330,6 +395,7 @@ export async function createFirstPartyCheckout(
     currency: "IDR",
     amount: totals.grandTotalAmount,
     status: "pending",
+    reconciliationState: "create_in_flight",
     expiresAt: orderExpiresAt,
     createdAt: now,
     updatedAt: now,
@@ -342,19 +408,30 @@ export async function createFirstPartyCheckout(
   let claimed = false;
   try {
     const tx1 = await deps.tx.run("checkout.draft", async (repos) => {
+      if (input.userId && repos.promotions) await repos.promotions.lockCustomer(input.userId);
+      const checkoutPrincipals = await lockCheckoutScope({ principal: input.idempotencyPrincipal, ...(input.possessedGuestPrincipal ? { guest: input.possessedGuestPrincipal } : {}) }, repos, now);
       if (idempotencyKey) {
         const claim = await repos.idempotency.claim({ ...claimInput, requestHash, createdAt: now });
         if (!claim.ok) return claim;
         if (claim.value.status === "duplicate") return replayStored(claim.value.responseJson);
         claimed = true;
       }
-      const open = await openIntentOutcome(repos, input.idempotencyPrincipal, intentHash);
+      const open = await openIntentOutcome(repos, input.idempotencyPrincipal, intentHash, checkoutPrincipals);
       if (open) {
         if (idempotencyKey) await attachOutcome(repos, open);
         return outcomeResult(open);
       }
+      const promotion = await authorizeCheckoutPromotion({
+        lines: priced, ...(input.userId === undefined ? {} : { userId: input.userId }),
+        ...(input.customerProof ? { actor: input.customerProof } : {}), ...(input.promoCode ? { code: input.promoCode } : {}),
+        ...(input.possessedGuestPrincipal ? { guestPrincipal: input.possessedGuestPrincipal } : {}),
+      }, repos, deps.clock.now());
+      totals = buildOrderTotals(subtotalAmount, shipping.amount, 0, promotion?.quote.discountAmount ?? 0);
+      if (!isPayableTotal(totals.grandTotalAmount)) throw new CheckoutTotalError();
+      draftOrder.totals = totals; draftOrder.totalAmount = totals.grandTotalAmount; paymentIntent.amount = totals.grandTotalAmount;
       await repos.orders.save(draftOrder);
       await repos.payments.save(paymentIntent);
+      if (promotion) await reserveCheckoutPromotion(promotion, orderId, repos, deps);
       if ((input.inventoryMode ?? "none") === "lots") {
         await repos.inventory.reserveForOrder({
           orderId,
@@ -376,6 +453,11 @@ export async function createFirstPartyCheckout(
     });
     if (tx1 !== null) return tx1; // duplicate replay outcome
   } catch (error) {
+    if (error instanceof CheckoutScopeError) return err({ code: error.code, message: error.message, retryable: error.code === "pending_reconciliation", requestId: "checkout" });
+    if (error instanceof PromotionAuthorizationError || error instanceof CheckoutTotalError) {
+      if (claimed && idempotencyKey) await deps.tx.run("checkout.idempotency.release", repos => repos.idempotency.releaseClaim(claimInput)).catch(() => undefined);
+      return error instanceof PromotionAuthorizationError ? err(error.safeError) : err({ code: "validation", message: `Order total must be between 1 and ${MAX_CHECKOUT_TOTAL_IDR} IDR for web checkout. Contact us on WhatsApp for larger orders.`, retryable: false, requestId: "checkout" });
+    }
     if (error instanceof InsufficientInventoryError) {
       // PostgreSQL rolled the whole transaction back (claim included). The
       // in-memory manager cannot roll back, so release the claim explicitly
@@ -405,6 +487,7 @@ export async function createFirstPartyCheckout(
     amount: totals.grandTotalAmount,
     currency: "IDR",
     customerEmail: input.customerEmail,
+    customerPhone: phone?.e164 ?? null,
     description: `Yubie order ${checkoutRef}`,
     successReturnUrl: `${input.successReturnUrl}${separator}checkout=${token}`,
     cancelReturnUrl: input.cancelReturnUrl,
@@ -426,13 +509,19 @@ export async function createFirstPartyCheckout(
         kind: "failure",
         error: { code: "validation", message: "Payment provider rejected the checkout request.", retryable: false },
       };
-      await deps.tx.run("checkout.provider_failed", async (repos) => {
-        await repos.orders.save({ ...draftOrder, status: "cancelled", updatedAt: deps.clock.now() });
-        await repos.payments.save({ ...paymentIntent, status: "failed", reconciliationState: "provider_create_failed", updatedAt: deps.clock.now() });
+      const confirmed = await deps.tx.run("checkout.provider_failed", async (repos) => {
+        const fresh = await lockCheckout(repos, paymentIntent.id, orderId);
+        const outcome = confirmedOutcome(fresh.order, fresh.payment, input.successReturnUrl);
+        if (outcome) { if (idempotencyKey) await attachOutcome(repos, outcome); return outcome; }
+        await repos.orders.save({ ...fresh.order, status: "cancelled", updatedAt: deps.clock.now() });
+        await repos.payments.save({ ...fresh.payment, status: "failed", reconciliationState: "provider_create_failed", updatedAt: deps.clock.now() });
         await repos.inventory.releaseForOrder(orderId, "provider_create_failed", deps.clock.now());
+        await settlePromotionForPayment(repos, orderId, "failed", deps.clock.now());
         await repos.audit.append({ action: "order.provider_create_failed", resourceType: "order", resourceId: orderId, actor: auditActor, occurredAt: deps.clock.now() });
         if (idempotencyKey) await attachOutcome(repos, failure);
+        return null;
       });
+      if (confirmed) return outcomeResult(confirmed);
       return err({ code: "validation", message: "Payment provider rejected the checkout request; nothing was charged. Retry with a new Idempotency-Key.", retryable: false, requestId: "checkout" });
     }
 
@@ -442,11 +531,16 @@ export async function createFirstPartyCheckout(
     // reconciliation and answer retryable-unavailable. A late webhook for the
     // orphan session can still land: it attaches by reference.
     const pendingMessage = "Payment provider outcome unknown. Retry this same attempt; a second payable session will not be created.";
-    await deps.tx.run("checkout.provider_ambiguous", async (repos) => {
-      await repos.payments.save({ ...paymentIntent, reconciliationState: "ambiguous_create", updatedAt: deps.clock.now() });
+    const confirmed = await deps.tx.run("checkout.provider_ambiguous", async (repos) => {
+      const fresh = await lockCheckout(repos, paymentIntent.id, orderId);
+      const outcome = confirmedOutcome(fresh.order, fresh.payment, input.successReturnUrl);
+      if (outcome) { if (idempotencyKey) await attachOutcome(repos, outcome); return outcome; }
+      await repos.payments.save({ ...fresh.payment, reconciliationState: "ambiguous_create", updatedAt: deps.clock.now() });
       await repos.audit.append({ action: "order.provider_create_ambiguous", resourceType: "order", resourceId: orderId, actor: auditActor, occurredAt: deps.clock.now() });
       if (idempotencyKey) await attachOutcome(repos, { kind: "pending", message: pendingMessage });
+      return null;
     });
+    if (confirmed) return outcomeResult(confirmed);
     return err({
       code: session.error.code === "timeout" ? "timeout" : "unavailable",
       message: pendingMessage,
@@ -469,16 +563,20 @@ export async function createFirstPartyCheckout(
   };
 
   try {
-    await deps.tx.run("checkout.attach_session", async (repos) => {
+    const confirmed = await deps.tx.run("checkout.attach_session", async (repos) => {
+      const fresh = await lockCheckout(repos, paymentIntent.id, orderId);
+      const outcome = confirmedOutcome(fresh.order, fresh.payment, input.successReturnUrl);
+      if (outcome) { if (idempotencyKey) await attachOutcome(repos, outcome); return outcome; }
       await repos.payments.save({
-        ...paymentIntent,
+        ...fresh.payment,
         providerSessionId: session.value.providerSessionId,
+        reconciliationState: null,
         redirectUrl: session.value.redirectUrl,
         expiresAt: session.value.expiresAt ?? orderExpiresAt,
         ...(session.value.providerBusinessId !== undefined ? { providerBusinessId: session.value.providerBusinessId } : {}),
         updatedAt: deps.clock.now(),
       });
-      await repos.orders.save({ ...draftOrder, status: "pending_payment", updatedAt: deps.clock.now() });
+      await repos.orders.save({ ...fresh.order, status: "pending_payment", updatedAt: deps.clock.now() });
       await repos.audit.append({ action: "order.pending_payment", resourceType: "order", resourceId: orderId, actor: auditActor, occurredAt: deps.clock.now() });
       await repos.outbox.enqueue({
         eventType: "order.pending_payment",
@@ -489,7 +587,9 @@ export async function createFirstPartyCheckout(
         availableAt: deps.clock.now(),
       });
       if (idempotencyKey) await attachOutcome(repos, { kind: "success", result });
+      return null;
     });
+    if (confirmed) return outcomeResult(confirmed);
   } catch (tx2Error) {
     // The provider session EXISTS but could not be attached. Compensation,
     // in order of importance: (1) never lose the session id — persist it onto
@@ -498,16 +598,21 @@ export async function createFirstPartyCheckout(
     // never be paid. The order stays a recoverable draft.
     let cancelAccepted: boolean | null = null;
     try {
-      await deps.tx.run("checkout.attach_failed", async (repos) => {
+      const confirmed = await deps.tx.run("checkout.attach_failed", async (repos) => {
+        const fresh = await lockCheckout(repos, paymentIntent.id, orderId);
+        const outcome = confirmedOutcome(fresh.order, fresh.payment, input.successReturnUrl);
+        if (outcome) { if (idempotencyKey) await attachOutcome(repos, outcome); return outcome; }
         await repos.payments.save({
-          ...paymentIntent,
+          ...fresh.payment,
           providerSessionId: session.value.providerSessionId,
           redirectUrl: session.value.redirectUrl,
           reconciliationState: "attach_failed",
           updatedAt: deps.clock.now(),
         });
         await repos.audit.append({ action: "order.attach_failed", resourceType: "order", resourceId: orderId, actor: auditActor, occurredAt: deps.clock.now() });
+        return null;
       });
+      if (confirmed) return outcomeResult(confirmed);
       // Cancel OUTSIDE any transaction; a network failure here leaves the
       // session live — reconciliation still has the persisted session id.
       const cancelled = await deps.provider.cancelPaymentSession(session.value.providerSessionId);
@@ -613,6 +718,7 @@ export async function getAccountOrder(
     delivery: order.delivery,
     expiresAt: payment?.expiresAt ?? null,
     customerEmail: order.customerEmail,
+    customerPhone: order.customerPhone ?? null,
     createdAt: order.createdAt,
   });
 }

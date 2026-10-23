@@ -1,6 +1,7 @@
 import { getApiOrigin } from "@/lib/api-origin";
-import { forwardableProxyHeaders } from "./proxy-headers";
+import { forwardableProxyHeaders, customerProxyHeaders } from "./proxy-headers";
 import { directCommerce } from "@/config/launch";
+import { readProxyBody } from "./api-proxy-body";
 
 /** Server hop timeout: a hung API must never pin the web worker. */
 const PROXY_TIMEOUT_MS = 15_000;
@@ -17,7 +18,7 @@ export async function proxyApi(request: Request, path: string): Promise<Response
   // Catalog releases have no backend dependency and accept no customer data.
   // Marketplace links come only from the reviewed static listing manifest.
   if (!directCommerce) return Response.json({ ok: false, code: "FEATURE_DISABLED" }, { status: 503, headers: { "cache-control": "no-store" } });
-  const headers: Record<string, string> = { "content-type": "application/json", ...forwardableProxyHeaders(request.headers) };
+  const headers: Record<string, string> = { "content-type": "application/json", ...forwardableProxyHeaders(request.headers), ...customerProxyHeaders(request, process.env.WEB_TRUST_CLOUDFLARE_IP === "true") };
   const cookie = request.headers.get("cookie");
   if (cookie) headers.cookie = cookie;
   if (process.env.API_PROXY_TOKEN) headers["x-api-proxy-token"] = process.env.API_PROXY_TOKEN;
@@ -29,11 +30,12 @@ export async function proxyApi(request: Request, path: string): Promise<Response
     upstream = await fetch(`${getApiOrigin()}${path}`, {
       method: request.method,
       headers,
-      body: request.method === "GET" || request.method === "HEAD" ? undefined : await request.text(),
+      body: await readProxyBody(request),
       redirect: "manual",
       signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "BODY_TOO_LARGE") return Response.json({ ok: false, code: "BODY_TOO_LARGE" }, { status: 413, headers: { "cache-control": "no-store", "x-request-id": correlationId } });
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
     if (timedOut) return Response.json({ ok: false, code: "API_TIMEOUT" }, { status: 504, headers: { "x-request-id": correlationId } });
     return Response.json({ ok: false, code: "API_UNREACHABLE" }, { status: 502, headers: { "x-request-id": correlationId } });
@@ -45,6 +47,8 @@ export async function proxyApi(request: Request, path: string): Promise<Response
   responseHeaders.set("cache-control", "no-store");
   const contentType = upstream.headers.get("content-type");
   if (contentType) responseHeaders.set("content-type", contentType);
+  const retryAfter = upstream.headers.get("retry-after");
+  if (retryAfter && /^\d{1,5}$/.test(retryAfter)) responseHeaders.set("retry-after", retryAfter);
   const requestId = upstream.headers.get("x-request-id");
   responseHeaders.set("x-request-id", requestId && /^[A-Za-z0-9_-]{1,64}$/.test(requestId) ? requestId : correlationId);
   const setCookies = typeof upstream.headers.getSetCookie === "function" ? upstream.headers.getSetCookie() : [];

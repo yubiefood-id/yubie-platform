@@ -59,7 +59,9 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 300_000,
   }] : [{
-    command: `NEXT_PUBLIC_YUBIE_LAUNCH_PROFILE=DIRECT_COMMERCE_SANDBOX npm run build --workspace @yubie/web && NODE_ENV=test npm run start --workspace @yubie/web -- --host 127.0.0.1 --port ${port}`,
+    // Synthetic browser Maps config is usable only with intercepted SDK fixtures.
+    // No real Maps, OTP or payment provider credentials enter the mock tier.
+    command: `NEXT_PUBLIC_YUBIE_LAUNCH_PROFILE=DIRECT_COMMERCE_SANDBOX NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY=synthetic NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=synthetic npm run build --workspace @yubie/web && NODE_ENV=test npm run start --workspace @yubie/web -- --host 127.0.0.1 --port ${port}`,
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: false,
     timeout: 300_000,

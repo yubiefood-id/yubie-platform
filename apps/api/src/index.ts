@@ -30,6 +30,11 @@ import { catalog } from "./catalog.js";
 import { createAppContext, type AppContext } from "./composition/create-app.js";
 import { createRequestId } from "./middleware/request-id.js";
 import { logEvent } from "./middleware/log.js";
+import { handleCustomerIdentity } from "./customer-identity.js";
+import { customerBootstrap, currentCustomerProof } from "./customer-security.js";
+import { handleCustomerAddresses } from "./customer-addresses.js";
+import { handleCustomerLocations } from "./customer-locations.js";
+import { handleCustomerPromotions } from "./customer-promotions.js";
 
 const commerce = new PreviewCommerceProvider();
 let appContext: AppContext | null = null;
@@ -151,8 +156,12 @@ function integerField(value: unknown): number | null {
  */
 function checkoutError(code: string): { status: number; code: string } {
   switch (code) {
+    case "unauthorized":
+      return { status: 401, code: "CHECKOUT_SESSION_REQUIRED" };
     case "validation":
       return { status: 400, code: "INVALID_REQUEST" };
+    case "forbidden":
+      return { status: 403, code: "PROMOTION_NOT_ELIGIBLE" };
     case "out_of_stock":
       return { status: 409, code: "INSUFFICIENT_INVENTORY" };
     case "conflict":
@@ -190,6 +199,14 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
 
   const gate = proxyTrustGate(request, url.pathname);
   if (gate) return gate;
+  const identityResponse = await handleCustomerIdentity(request, ctx);
+  if (identityResponse) return identityResponse;
+  const addressResponse = await handleCustomerAddresses(request, ctx);
+  if (addressResponse) return addressResponse;
+  const locationResponse = await handleCustomerLocations(request, ctx);
+  if (locationResponse) return locationResponse;
+  const promotionResponse = await handleCustomerPromotions(request, ctx);
+  if (promotionResponse) return promotionResponse;
 
   if (request.method === "GET" && url.pathname === "/healthz") {
     return json({ ok: true, service: "yubie-api", version: "v1", releaseSha: ctx.releaseSha });
@@ -334,18 +351,21 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     }
     const parsed = checkoutRequestSchema.safeParse(parsedJson);
     if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    if (ctx.paymentMode === "preview" && parsed.data.promoCode?.trim()) return json({ ok: false, code: "PROMOTION_UNAVAILABLE" }, { status: 503 });
     if (ctx.paymentMode !== "preview" && ctx.paymentProvider) {
       // First-party flow (ADR-012): server re-prices every line from the
       // canonical catalog, creates the order + Xendit payment session, and
       // returns only {checkoutToken, redirectUrl, ...} to the browser. The
       // Idempotency-Key makes duplicate submits replay the first response.
       const sessionUser = await resolveSession(readSessionToken(request), { sessions: ctx.authSessions, users: ctx.users, tokens: ctx.tokens, clock: ctx.clock });
+      if (!sessionUser.ok) return json({ ok: false, code: "CUSTOMER_STORAGE_UNAVAILABLE" }, { status: 503 });
       const appOrigin = ctx.appOrigin ?? url.origin;
       const guest = guestCheckoutToken(request);
       const guestCookie = sessionUser.value || guest.existing ? null : checkoutCookie(guest.token, appOrigin.startsWith("https://"));
       const principal = checkoutPrincipalKey({ userId: sessionUser.value?.id ?? null, guestToken: guest.token });
       if (!principal) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
       const cookieHeaders: Record<string, string> = guestCookie ? { "set-cookie": guestCookie } : {};
+      const customerProof = parsed.data.promoCode && sessionUser.value ? await currentCustomerProof(request, ctx) : undefined;
       const result = await createFirstPartyCheckout({
         lines: parsed.data.lines,
         customerEmail: parsed.data.customerEmail,
@@ -361,6 +381,8 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
         idempotencyKey: request.headers.get("idempotency-key"),
         idempotencyPrincipal: principal,
         ...(parsed.data.promoCode ? { promoCode: parsed.data.promoCode } : {}),
+        ...(customerProof ? { customerProof } : {}),
+        ...(guest.existing ? { possessedGuestPrincipal: checkoutPrincipalKey({ guestToken: guest.token })! } : {}),
       }, { tx: ctx.tx, provider: ctx.paymentProvider, clock: ctx.clock, ids: ctx.ids });
       if (!result.ok) {
         logEvent("api.checkout_failed", { requestId, errorCode: result.error.code });
@@ -501,8 +523,11 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
       credential: parsed.data.credential,
       csrfToken: parsed.data.g_csrf_token,
       csrfCookie,
-    }, { verifier: ctx.verifier, users: ctx.users, sessions: ctx.authSessions, tokens: ctx.tokens, clock: ctx.clock, ids: ctx.ids });
-    if (!result.ok) return json({ ok: false, code: "AUTH_FAILED" }, { status: 401 });
+    }, { verifier: ctx.verifier, users: ctx.users, sessions: ctx.authSessions, tokens: ctx.tokens, clock: ctx.clock, ids: ctx.ids,
+      ...(ctx.identityTransactions ? { tx: ctx.identityTransactions } : {}),
+      ...(readSessionToken(request) ? { previousSessionHash: ctx.tokens.hash(readSessionToken(request)!) } : {}),
+    });
+    if (!result.ok) return json({ ok: false, code: result.error.code === "unavailable" ? "CUSTOMER_STORAGE_UNAVAILABLE" : "AUTH_FAILED" }, { status: result.error.code === "unavailable" ? 503 : 401 });
     // Secure follows the CONFIGURED origin, not the per-request protocol
     // reconstruction: behind a TLS-terminating proxy (Caddy) the incoming
     // scheme can look plain and would silently drop the Secure attribute.
@@ -514,15 +539,17 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
   }
 
   if (request.method === "POST" && url.pathname === "/v1/auth/logout") {
-    await logout(readSessionToken(request), { sessions: ctx.authSessions, tokens: ctx.tokens, clock: ctx.clock });
+    const revoked = await logout(readSessionToken(request), { sessions: ctx.authSessions, tokens: ctx.tokens, clock: ctx.clock });
+    if (!revoked.ok) return json({ ok: false, code: "CUSTOMER_STORAGE_UNAVAILABLE" }, { status: 503 });
     const secure = (ctx.appOrigin ?? url.origin).startsWith("https://");
     return json({ ok: true, data: { revoked: true } }, { headers: { "set-cookie": clearSessionCookie(secure) } });
   }
 
   if (request.method === "GET" && url.pathname === "/v1/auth/session") {
     const user = await resolveSession(readSessionToken(request), { sessions: ctx.authSessions, users: ctx.users, tokens: ctx.tokens, clock: ctx.clock });
-    if (!user.ok) return json({ ok: false, code: "AUTH_FAILED" }, { status: 500 });
-    return json({ ok: true, data: { authenticated: user.value !== null, user: user.value, googleClientId: ctx.googleClientId } });
+    if (!user.ok) return json({ ok: false, code: "CUSTOMER_STORAGE_UNAVAILABLE" }, { status: 503 });
+    const bootstrap = customerBootstrap(request, ctx);
+    return json({ ok: true, data: { authenticated: user.value !== null, user: user.value, googleClientId: ctx.googleClientId, csrfToken: bootstrap.csrfToken, phoneAvailable: !!ctx.phoneAuth, otpCountries: ctx.phoneAuth?.allowedCountries ?? [], mapsAvailable: !!ctx.deliveryLocations } }, { headers: bootstrap.headers });
   }
 
   const accountOrderMatch = url.pathname.match(/^\/v1\/account\/orders(?:\/([^/]+))?$/);
@@ -563,7 +590,7 @@ const SESSION_COOKIE = "yubie_session";
 
 function readSessionToken(request: Request): string | null {
   const match = request.headers.get("cookie")?.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
-  return match?.[1] ? decodeURIComponent(match[1]) : null;
+  try { return match?.[1] ? decodeURIComponent(match[1]) : null; } catch { return null; }
 }
 
 function sessionCookie(token: string, expiresAt: string, secure: boolean): string {

@@ -68,6 +68,8 @@ function mapUserRow(row: typeof users.$inferSelect): UserAccount {
   return {
     id: row.id,
     googleSub: row.googleSub,
+    phone: row.phone,
+    phoneVerifiedAt: row.phoneVerifiedAt,
     email: row.email,
     name: row.name,
     picture: row.picture,

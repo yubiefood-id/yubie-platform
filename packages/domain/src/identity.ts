@@ -6,12 +6,14 @@
 
 export interface UserAccount {
   id: string;
-  googleSub: string;
+  googleSub: string | null;
   email: string | null;
   name: string | null;
   picture: string | null;
   createdAt: string;
   updatedAt: string;
+  phone?: string | null;
+  phoneVerifiedAt?: string | null;
 }
 
 export interface AuthSession {
@@ -29,4 +31,6 @@ export interface PublicUser {
   email: string | null;
   name: string | null;
   picture: string | null;
+  phone?: string | null;
+  phoneVerified?: boolean;
 }
