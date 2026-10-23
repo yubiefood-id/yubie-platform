@@ -8,6 +8,7 @@ import { AddressEditor, emptyDeliveryAddress } from "./address-editor";
 export function AddressBook({ mapsAvailable }: { mapsAvailable: boolean }) {
   const [rows, setRows] = useState<CustomerAddress[]>([]), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<string | null>(null), [open, setOpen] = useState(false), [message, setMessage] = useState("");
+  const [editorEpoch, setEditorEpoch] = useState(0);
   const [value, setValue] = useState<DeliveryAddressInput>(emptyDeliveryAddress);
   useEffect(() => {
     let active = true;
@@ -41,18 +42,18 @@ export function AddressBook({ mapsAvailable }: { mapsAvailable: boolean }) {
     } catch { setMessage("Daftar alamat belum dapat diperbarui. Muat ulang untuk memeriksanya."); } finally { setBusy(false); }
   };
   return <section className="address-book" aria-labelledby="address-book-title">
-    <div className="address-book-heading"><h2 id="address-book-title">Alamat saya</h2><button type="button" className="button warm" disabled={busy || loading} onClick={() => { setEditing(null); setValue(emptyDeliveryAddress()); setOpen(true); setMessage(""); }}>Tambah alamat</button></div>
+    <div className="address-book-heading"><h2 id="address-book-title">Alamat saya</h2><button type="button" className="button warm" disabled={busy || loading} onClick={() => { setEditorEpoch(epoch => epoch + 1); setEditing(null); setValue(emptyDeliveryAddress()); setOpen(true); setMessage(""); }}>Tambah alamat</button></div>
     {message && <p role="status">{message}</p>}
     {loading ? <p aria-busy="true">Memuat alamat…</p> : rows.length === 0 && !open ? <p className="checkout-note">Simpan alamat agar lebih mudah memilih pengiriman berikutnya.</p> : null}
     <ul className="address-list">{rows.map(row => <li key={row.id}>
       <div><strong>{row.address.label}</strong>{row.isDefault && <span className="address-default">Utama</span>}</div>
       <p>{row.address.recipientName}<br />{row.address.fullAddress}<br />{row.address.city}, {row.address.province} {row.address.postalCode}</p>
-      <div className="address-row-actions"><button type="button" className="text-button" disabled={busy} onClick={() => { setEditing(row.id); setValue({ ...row.address, ...(row.pin ? { pin: row.pin } : {}) }); setOpen(true); setMessage(""); }}>Ubah alamat</button>
+      <div className="address-row-actions"><button type="button" className="text-button" disabled={busy} onClick={() => { setEditorEpoch(epoch => epoch + 1); setEditing(row.id); setValue({ ...row.address, ...(row.pin ? { pin: row.pin } : {}) }); setOpen(true); setMessage(""); }}>Ubah alamat</button>
         {!row.isDefault && <button type="button" className="text-button" disabled={busy} onClick={() => changeDefault(row.id)}>Jadikan utama</button>}
         <button type="button" className="text-button" disabled={busy} onClick={() => remove(row.id)}>Hapus alamat</button></div>
     </li>)}</ul>
     {open && <form onSubmit={save} className="address-book-form" aria-label={editing ? "Ubah alamat" : "Tambah alamat"}>
-      <AddressEditor value={value} onChange={setValue} prefix="saved-address" mapsAvailable={mapsAvailable} />
+      <AddressEditor key={editorEpoch} value={value} onChange={setValue} prefix="saved-address" mapsAvailable={mapsAvailable} />
       <div className="address-row-actions"><button className="button primary" type="submit" disabled={busy}>{busy ? "Menyimpan…" : "Simpan alamat"}</button><button className="text-button" type="button" disabled={busy} onClick={() => setOpen(false)}>Batal</button></div>
     </form>}
   </section>;

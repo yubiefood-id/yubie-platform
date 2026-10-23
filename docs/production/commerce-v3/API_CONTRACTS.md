@@ -19,6 +19,7 @@ headers cannot choose internal endpoints, provider credentials or identity owner
 | PATCH/DELETE /v1/account/addresses/:id | Owner-conditioned updates;404 for absent/other owner; no order snapshot changes |
 | PUT /v1/account/default-address | Owned addressId; atomic single-default change |
 | POST /v1/locations/autocomplete,details,reverse-geocode | Minimal fields, Indonesia restriction, bounded search/session token or coordinates; fixed Google API destinations |
+| POST /v1/locations/confirm | Explicit point confirmation; server country lookup must return ID. Returns a five-minute receipt bound to the browser and exact point. Saved pin writes require this receipt; it is never persisted with the address |
 | GET /v1/promotions/welcome; POST .../claim | Public eligibility/summary without code; claim requires verified user and returns existing/new owned entitlement; dates/rate/scope server-owned |
 | POST /v1/checkout-quotes | Version3 contact/address/cart; authoritative non-binding totals, no payment/order creation |
 | POST /v1/checkouts | Existing version1 shape/retries retained; explicit checkoutVersion3 requires phone, optional email and validated delivery; caller cannot supply monetary authority |

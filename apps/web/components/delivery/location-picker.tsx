@@ -54,6 +54,19 @@ export function LocationPicker({ available, pin, onConfirm, manualId }: { availa
     generation.current++; setBusy(false); setSearching(false); setSuggestions([]); setCandidate(null); setPreview(""); onConfirm(null);
     document.getElementById(manualId)?.focus();
   };
+  const moved = (point: { latitude: number; longitude: number }) => {
+    generation.current++; setBusy(false); setCandidate({ ...point, source: "map" }); setPreview(""); setMessage(""); onConfirm(null);
+  };
+  const confirm = async () => {
+    if (!candidate || !available) return;
+    const current = ++generation.current; setBusy(true); setMessage("");
+    try {
+      const proof = await customerRequest<{ validationToken: string }>("/api/locations/confirm", "POST", { latitude: candidate.latitude, longitude: candidate.longitude });
+      if (!active.current || current !== generation.current) return;
+      onConfirm({ ...candidate, confirmed: true, validationToken: proof.validationToken }); setCandidate(null); setPreview("");
+    } catch { if (active.current && current === generation.current) setMessage("Titik belum dapat dikonfirmasi untuk pengiriman Indonesia. Pilih titik lain atau gunakan alamat manual."); }
+    finally { if (active.current && current === generation.current) setBusy(false); }
+  };
   return <div className="location-picker">
     <div className="location-actions">
       <button type="button" className="button primary" onClick={locate} disabled={busy}>Gunakan lokasi saya</button>
@@ -68,9 +81,9 @@ export function LocationPicker({ available, pin, onConfirm, manualId }: { availa
     {busy && <p role="status">Mencari lokasi…</p>}
     {message && <p role="status">{message}</p>}
     {candidate && <>
-      {available && <DeliveryMap point={candidate} onChange={point => { setCandidate({ ...point, source: "map" }); setPreview(""); onConfirm(null); }} />}
+      {available && <DeliveryMap point={candidate} onChange={moved} />}
       {preview && <p className="location-preview">Perkiraan lokasi: {preview}<span className="maps-attribution">Google Maps</span></p>}
-      <button type="button" className="button warm" disabled={busy || (candidate.accuracyMeters ?? 0) > 250} onClick={() => { onConfirm({ ...candidate, confirmed: true }); setCandidate(null); setPreview(""); setMessage(""); }}>Konfirmasi titik pengiriman</button>
+      <button type="button" className="button warm" disabled={!available || busy || (candidate.accuracyMeters ?? 0) > 250} onClick={confirm}>Konfirmasi titik pengiriman</button>
     </>}
     {pin && <p role="status">Titik pengiriman sudah dikonfirmasi. <button type="button" className="text-button" onClick={() => onConfirm(null)}>Hapus titik</button></p>}
   </div>;

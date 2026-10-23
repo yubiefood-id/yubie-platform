@@ -13,3 +13,9 @@ test('foreign, invalid and unavailable locations never become approved Indonesia
  await assert.rejects(()=>provider.details({placeId:'https://internal.invalid/private',sessionToken:token}),/LOCATION_REQUEST_INVALID/);
  const down=new integrations.GoogleDeliveryLocationProvider({apiKey:'synthetic',fetchFn:async()=>{throw Error('secret provider response');}});await assert.rejects(()=>down.autocomplete({query:'Alamat',sessionToken:token}),e=>e.message==='LOCATION_PROVIDER_UNAVAILABLE');
 });
+
+test('reverse preview returns only approved fields, excluding internal caller context',async()=>{
+ const provider=new integrations.GoogleDeliveryLocationProvider({apiKey:'synthetic',fetchFn:async()=>Response.json({status:'OK',results:[{formatted_address:'Lokasi sintetis',place_id:'ChIJ_synthetic',address_components:[{types:['country'],short_name:'ID'}]}]})});
+ const result=await provider.reverse({latitude:-6.9,longitude:107.6,browser:'private-binding',ip:'private-context',action:'reverse'});
+ assert.deepEqual(Object.keys(result).sort(),['countryCode','label','latitude','longitude','placeId']);
+});

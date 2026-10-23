@@ -1,7 +1,7 @@
-import { normalizeDeliveryAddress, ok, err, type CustomerAddress, type DeliveryAddressInput, type ErrorCode, type UseCaseResult } from "@yubie/domain";
+import { normalizeDeliveryAddress, ok, err, type CustomerAddress, type DeliveryAddressInput, type DeliveryPinInput, type ErrorCode, type UseCaseResult } from "@yubie/domain";
 import type { Clock, IdGenerator, TransactionManager, TransactionalRepositories } from "../ports.js";
 import { isCustomerProofValid, type CustomerProof } from "./phone-auth.js";
-interface AddressDeps { tx: TransactionManager; clock: Clock; ids: IdGenerator; }
+interface AddressDeps { tx: TransactionManager; clock: Clock; ids: IdGenerator; verifyPin?: (pin: DeliveryPinInput) => boolean | Promise<boolean>; }
 const fail = (code: ErrorCode) => err({ code, message: "Customer address is unavailable or invalid.", retryable: code === "unavailable", requestId: "customer-address" });
 function store(repos: TransactionalRepositories) {
   if (!repos.customerAddresses) throw new Error("CUSTOMER_STORAGE_UNAVAILABLE");
@@ -33,10 +33,11 @@ export async function saveCustomerAddress(input: { actor: CustomerProof; id?: st
     const owned = await addresses.list(owner);
     if (!previous && owned.length >= 20) return fail("validation");
     const { pin, ...details } = normalized;
+    if (pin && !await deps.verifyPin?.(pin)) return fail("validation");
     const unchangedPin = pin && previous?.pin && pin.latitude === previous.pin.latitude && pin.longitude === previous.pin.longitude && pin.source === previous.pin.source;
     const address: CustomerAddress = {
       id: previous?.id ?? "adr_" + deps.ids.nextId(), userId: owner, address: details,
-      pin: (input.address.pin === undefined || unchangedPin) && previous ? previous.pin : pin ? { ...pin, confirmedAt: now, expiresAt: new Date(Date.parse(now) + 30 * 86400_000).toISOString() } : null,
+      pin: (input.address.pin === undefined || unchangedPin) && previous ? previous.pin : pin ? { latitude: pin.latitude, longitude: pin.longitude, source: pin.source, confirmed: true, ...(pin.accuracyMeters === undefined ? {} : { accuracyMeters: pin.accuracyMeters }), confirmedAt: now, expiresAt: new Date(Date.parse(now) + 30 * 86400_000).toISOString() } : null,
       isDefault: previous?.isDefault ?? owned.length === 0, createdAt: previous?.createdAt ?? now, updatedAt: now,
     };
     const current = visible(address, now);

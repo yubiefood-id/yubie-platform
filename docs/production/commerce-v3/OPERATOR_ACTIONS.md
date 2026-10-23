@@ -47,3 +47,8 @@ after 30 days, are hidden after expiry, and are cleared by the independent hourl
 cleanup job. Editing an unchanged pin retains its original expiry. Privacy/terms
 text, actual Google attribution rendering, key restrictions, quota exhaustion,
 device location accuracy and named operator UAT must be accepted before release.
+Pin confirmation calls the server's country lookup; missing/foreign results
+fail closed. A signed browser/point-bound receipt expires after five minutes and
+is required for saving a newly supplied pin. If validation is unavailable, save
+the manually entered Indonesian address without a pin. Google country results
+do not certify the exact street, building, recipient or carrier serviceability.

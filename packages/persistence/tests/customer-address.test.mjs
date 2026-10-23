@@ -25,7 +25,7 @@ async function setup(){
   await db.client`INSERT INTO auth_sessions(id,user_id,token_hash,created_at,expires_at) VALUES(${id},${id},${issued.tokenHash},${time},${new Date(now+90*86400_000).toISOString()})`;
   actors.push({userId:id,authenticatedAt:time,sessionHash:issued.tokenHash});
  }
- return{deps:{tx:new p.PostgresTransactionManager(db),clock,ids:{nextId:()=>randomUUID()}},actors};
+ return{deps:{tx:new p.PostgresTransactionManager(db),clock,ids:{nextId:()=>randomUUID()},verifyPin:async()=>true},actors};
 }
 test('saved addresses are owner-scoped, bounded and have one atomic default',{skip:!enabled},async()=>{
  const {deps,actors:[owner,other]}=await setup();
@@ -61,4 +61,15 @@ test('Maps request budget commits before remote work without storing search or c
  for(let i=0;i<21;i++)await a.lookupDeliveryLocation({action:'autocomplete',query:'Synthetic location query',sessionToken:randomUUID(),browser:'synthetic-location-browser',ip:'synthetic-location-ip'},deps);
  assert.equal(calls,20);
  const [row]=await db.client`SELECT count(*)::int AS n FROM identity_rate_buckets WHERE key LIKE '%Synthetic location query%'`;assert.equal(row.n,0);
+});
+
+test('saved address edits and deletion do not alter an existing order address or money snapshot',{skip:!enabled},async()=>{
+ const {deps,actors:[owner]}=await setup();const time=deps.clock.now(),id='snapshot_'+randomUUID();
+ const snapshot={name:'Synthetic',phone:'+12025550100',address:'Alamat historis sintetis',city:'Bandung'};
+ await db.client`INSERT INTO orders(id,checkout_ref,checkout_public_token,user_id,customer_email,delivery_jsonb,subtotal_amount,grand_total_amount,total_amount,created_at,updated_at) VALUES(${id},${id},${id},${owner.userId},'synthetic@example.invalid',${JSON.stringify(snapshot)}::jsonb,10000,10000,10000,${time},${time})`;
+ const saved=await a.saveCustomerAddress({actor:owner,address:input},deps);assert.equal(saved.ok,true);
+ await a.saveCustomerAddress({actor:owner,id:saved.value.id,address:{fullAddress:'Alamat baru sintetis untuk pengujian'}},deps);
+ await a.deleteCustomerAddress({actor:owner,id:saved.value.id},deps);
+ const [row]=await db.client`SELECT delivery_jsonb,grand_total_amount,total_amount FROM orders WHERE id=${id}`;
+ assert.deepEqual(row.delivery_jsonb,snapshot);assert.equal(row.grand_total_amount,10000);assert.equal(row.total_amount,10000);
 });

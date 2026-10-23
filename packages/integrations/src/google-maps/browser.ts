@@ -35,11 +35,13 @@ function load(apiKey: string): Promise<MapsSdk> {
   }).catch(error => { pending = null; throw error; });
   return pending;
 }
-export async function createDeliveryMap(options: { apiKey: string; mapId: string; element: HTMLElement | null; point: DeliveryMapPoint; onChange(point: DeliveryMapPoint): void }): Promise<DeliveryMapController> {
-  if (!options.apiKey || !options.mapId || !options.element) throw new Error("MAP_UNAVAILABLE");
+export async function createDeliveryMap(options: { apiKey: string; mapId: string; element: HTMLElement | null; point: DeliveryMapPoint; onChange(point: DeliveryMapPoint): void; signal?: AbortSignal }): Promise<DeliveryMapController> {
+  if (!options.apiKey || !options.mapId || !options.element || options.signal?.aborted) throw new Error("MAP_UNAVAILABLE");
   const sdk = await load(options.apiKey);
+  if (options.signal?.aborted) throw new Error("MAP_UNAVAILABLE");
+  const canvas = document.createElement("div"); canvas.style.width = "100%"; canvas.style.height = "100%"; options.element.append(canvas);
   const center = { lat: options.point.latitude, lng: options.point.longitude };
-  const map = new sdk.Map(options.element, { center, zoom: 17, mapId: options.mapId, streetViewControl: false, mapTypeControl: false, gestureHandling: "cooperative" });
+  const map = new sdk.Map(canvas, { center, zoom: 17, mapId: options.mapId, streetViewControl: false, mapTypeControl: false, gestureHandling: "cooperative" });
   const marker = new sdk.marker.AdvancedMarkerElement({ map, position: center, gmpDraggable: true, title: "Titik pengiriman. Geser untuk menyesuaikan lokasi." });
   const change = (latitude: number, longitude: number) => {
     if (Number.isFinite(latitude) && Math.abs(latitude) <= 90 && Number.isFinite(longitude) && Math.abs(longitude) <= 180) options.onChange({ latitude, longitude });
@@ -55,6 +57,6 @@ export async function createDeliveryMap(options: { apiKey: string; mapId: string
   });
   return {
     setPoint(point) { const position = { lat: point.latitude, lng: point.longitude }; marker.position = position; map.panTo(position); },
-    destroy() { drag.remove(); click.remove(); marker.map = null; options.element?.replaceChildren(); },
+    destroy() { drag.remove(); click.remove(); marker.map = null; canvas.remove(); },
   };
 }

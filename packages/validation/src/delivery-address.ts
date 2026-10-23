@@ -1,5 +1,5 @@
 import { z } from "zod";
-export const deliveryPinSchema = z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180), source: z.enum(["device", "google", "map"]), confirmed: z.literal(true), accuracyMeters: z.number().min(0).max(100_000).optional() }).strict();
+export const deliveryPinSchema = z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180), source: z.enum(["device", "google", "map"]), confirmed: z.literal(true), accuracyMeters: z.number().min(0).max(100_000).optional(), validationToken: z.string().min(1).max(2048).optional() }).strict();
 export const customerAddressSchema = z.object({
   label: z.string().trim().min(1).max(40), recipientName: z.string().trim().min(2).max(80), recipientPhone: z.string().trim().min(4).max(40), fullAddress: z.string().trim().min(8).max(500),
   province: z.string().trim().min(2).max(80), city: z.string().trim().min(2).max(80), district: z.string().trim().max(80).default(""), subdistrict: z.string().trim().max(80).default(""),

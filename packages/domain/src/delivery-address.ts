@@ -8,6 +8,7 @@ export interface AddressDetails {
 export interface DeliveryPinInput {
   latitude: number; longitude: number; source: "device" | "google" | "map";
   confirmed: true; accuracyMeters?: number | undefined;
+  validationToken?: string | undefined;
 }
 export type DeliveryAddressInput = AddressDetails & { pin?: DeliveryPinInput | null };
 export interface DeliveryPin extends DeliveryPinInput { confirmedAt: string; expiresAt: string; }
@@ -32,12 +33,13 @@ export function normalizeDeliveryAddress(input: DeliveryAddressInput): DeliveryA
   if (!phone) return null;
   address.recipientPhone = phone.e164;
   const pin = input.pin;
+  if (pin?.validationToken !== undefined && (typeof pin.validationToken !== "string" || pin.validationToken.length > 2048)) return null;
   if (pin && (!Number.isFinite(pin.latitude) || Math.abs(pin.latitude) > 90 || !Number.isFinite(pin.longitude) || Math.abs(pin.longitude) > 180 || pin.confirmed !== true || !["device", "google", "map"].includes(pin.source) || (pin.accuracyMeters !== undefined && (!Number.isFinite(pin.accuracyMeters) || pin.accuracyMeters < 0 || pin.accuracyMeters > 100_000)))) return null;
   return {
     label: address.label, recipientName: address.recipientName, recipientPhone: address.recipientPhone,
     fullAddress: address.fullAddress, province: address.province, city: address.city, district: address.district,
     subdistrict: address.subdistrict, postalCode: address.postalCode, building: address.building,
     rt: address.rt, rw: address.rw, notes: address.notes, countryCode: "ID",
-    ...(pin ? { pin: { latitude: pin.latitude, longitude: pin.longitude, source: pin.source, confirmed: true, ...(pin.accuracyMeters === undefined ? {} : { accuracyMeters: pin.accuracyMeters }) } } : input.pin === null ? { pin: null } : {}),
+    ...(pin ? { pin: { latitude: pin.latitude, longitude: pin.longitude, source: pin.source, confirmed: true, ...(pin.accuracyMeters === undefined ? {} : { accuracyMeters: pin.accuracyMeters }), ...(pin.validationToken === undefined ? {} : { validationToken: pin.validationToken }) } } : input.pin === null ? { pin: null } : {}),
   };
 }

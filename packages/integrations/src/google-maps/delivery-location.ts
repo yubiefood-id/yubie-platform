@@ -54,7 +54,7 @@ export class GoogleDeliveryLocationProvider implements DeliveryLocationProvider 
     for (const value of data.results.slice(0, 5)) {
       const result = object(value); if (!result || !Array.isArray(result.address_components)) continue;
       const country = result.address_components.some(v => { const c = object(v); return Array.isArray(c?.types) && c.types.includes("country") && c.short_name === "ID"; });
-      if (country && label(result.formatted_address)) return { ...input, label: result.formatted_address, countryCode: "ID", ...(placeId(result.place_id) ? { placeId: result.place_id } : {}) };
+      if (country && label(result.formatted_address)) return { latitude: input.latitude, longitude: input.longitude, label: result.formatted_address, countryCode: "ID", ...(placeId(result.place_id) ? { placeId: result.place_id } : {}) };
     }
     return null;
   }

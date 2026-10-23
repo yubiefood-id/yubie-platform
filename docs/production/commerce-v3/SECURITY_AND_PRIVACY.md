@@ -31,6 +31,21 @@ context, OTP admission returns 503. Production API additionally requires its
 existing `API_PROXY_TOKEN`. Browser sessions are HttpOnly, SameSite=Lax and Secure
 on the configured HTTPS origin. CAPTCHA is transactional proof, not marketing consent.
 
-Address authorization/Maps retention, promotion reservation/payment races and
-browser accessibility acceptance remain subsequent milestone requirements.
-They are not approved by the identity tests. Production activation remains blocked.
+Address mutations recheck the owned customer session in the transaction and
+condition repository operations on the owner. Defaults serialize per owner and
+have a unique partial index. A supplied pin needs a short-lived signed receipt
+issued after the server's country lookup returns ID. The receipt binds browser,
+coordinates and expiry; changing the point or copying it to another browser fails.
+Only the confirmed point is stored, never its receipt or provider response blob.
+Existing order address/money snapshots are independent and remain unchanged by
+address edits/deletion. Country lookup is not street-address verification.
+
+Location requests commit pseudonymous budgets before network work. Search labels
+remain transient; expired pin coordinates are hidden on reads/edits and cleared
+by the independent cleanup job. UI editing contexts reset pending requests;
+functional updates preserve customer-written fields during asynchronous lookup.
+Moving a point invalidates older reverse/confirmation responses.
+
+Promotion reservation/payment races, full checkout integration and live Maps
+acceptance remain subsequent requirements. Identity or mocked browser tests do
+not establish their readiness. Production activation remains blocked.

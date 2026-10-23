@@ -1,5 +1,6 @@
 "use client";
 import type { DeliveryAddressInput } from "@yubie/domain";
+import type { Dispatch, SetStateAction } from "react";
 import { LocationPicker } from "./location-picker";
 
 export function emptyDeliveryAddress(): DeliveryAddressInput {
@@ -13,9 +14,9 @@ const fields = [
   ["building", "Rumah / gedung / unit", "text", 120, false, "off"], ["rt", "RT", "text", 3, false, "off"], ["rw", "RW", "text", 3, false, "off"],
 ] as const;
 /** Shared fields only, so checkout and account never create nested forms. */
-export function AddressEditor({ value, onChange, prefix, mapsAvailable }: { value: DeliveryAddressInput; onChange(value: DeliveryAddressInput): void; prefix: string; mapsAvailable: boolean }) {
+export function AddressEditor({ value, onChange, prefix, mapsAvailable }: { value: DeliveryAddressInput; onChange: Dispatch<SetStateAction<DeliveryAddressInput>>; prefix: string; mapsAvailable: boolean }) {
   return <fieldset className="delivery-editor"><legend>Alamat pengiriman</legend>
-    <LocationPicker available={mapsAvailable} pin={value.pin} manualId={prefix + "-fullAddress"} onConfirm={pin => onChange({ ...value, pin })} />
+    <LocationPicker available={mapsAvailable} pin={value.pin} manualId={prefix + "-fullAddress"} onConfirm={pin => onChange(current => ({ ...current, pin }))} />
     <p className="checkout-note">Pengiriman tersedia untuk alamat Indonesia. Lengkapi alamat sesuai tempat penerimaan; lokasi peta hanya membantu memilih titik.</p>
     <div className="address-fields">
       {fields.map(([key, text, type, max, required, autoComplete]) => <label key={key} htmlFor={prefix + "-" + key}>{text}{!required && key !== "label" ? " (opsional)" : ""}
