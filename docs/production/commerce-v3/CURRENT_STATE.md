@@ -54,5 +54,16 @@ Specification/security review findings were fixed and re-reviewed. Local full
 repository and DB gates pass. PR CI is tracked separately in TEST_MATRIX.md;
 real Google/device/key/quota acceptance remains BLOCKED_EXTERNAL.
 
-Promotions and phone-first checkout remain subsequent milestones. V3 is not a
-complete commerce candidate or production GO. Neither draft PR has been merged.
+PR C implements approved campaigns, phone-owned entitlements and transactional
+promotion reservation/consumption/release. Migration0019 seeds an unapproved
+**draft** campaign; it is not activated. Public offers omit the code. Code-only
+arithmetic grants no discount; verified claims and checkout authorization use
+persistent identity independently of preview payments. Yubi promotion guidance
+remains neutral and respects website capabilities. Recovery now preserves unknown
+payment outcomes and locks fresh records across provider/callback races. Separate
+specification/security reviews identified three financial lifecycle/race blockers;
+all were reproduced with PostgreSQL regressions, fixed and re-reviewed. Final
+full-suite and CI receipts are tracked in TEST_MATRIX.md.
+
+Phone-first checkout/UI and final acceptance remain subsequent milestones. V3 is
+not a complete commerce candidate or production GO. No V3 PR has been merged.

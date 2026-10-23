@@ -73,7 +73,6 @@ const CART = {
   cancelReturnUrl: "https://staging.example/checkout/cancel",
   inventoryMode: "lots",
   provider: "ipaymu",
-  promoCode: "YUBIE15",
 };
 
 async function seedLot(database, id, quantity) {

@@ -15,8 +15,12 @@ No OTP, Maps, carrier, payment or production delivery receipt has been fabricate
 | PR B browser | Manual save, permission denial, late GPS/new editor, deferred map/latest point/stale reverse | PASS eight desktop/mobile Chromium cases; SDK/API interception only |
 | Responsive/accessibility | Open editor widths320/375/768/1440; screenshot375; Axe on account flow | PASS in the focused browser matrix |
 | PR B complete repository/DB gates | `npm run check`; full persistence and API suites after bootstrap/upgrade | PASS; persistence48/API50 before the additional upgrade case, which also passes locally |
-| PR B CI | CI39994647030 for d353eb3 | Quality/persistence/security/containers PASS; browser RUNNING. New documentation/upgrade-test commit requires its own CI receipt |
-| Promotions, V3 checkout, final candidate | Dependent PR C/D/E requirements | Not accepted by PR A/B evidence |
+| PR B CI | CI39995880748 at 6aabd810ce87a70c9225fd4df53696ca939676b8 | PASS all five gates |
+| PR C promotion lifecycle | Real PostgreSQL claims, eligibility, server pricing, reservation/consumption/refund, concurrency, audit rollback, unknown outcomes | Focused tests pass; final full-suite receipt pending |
+| PR C financial races | Accepted attach cancellation releases eligibility; completion before provider return; coordinated duplicate orphan callbacks | Reproduced failures before fixes, PostgreSQL regressions pass; synthetic PSP only |
+| PR C API/browser | Durable preview identity/claim, forged proof/discount rejection, CSRF; nonblocking approved offer and inactive offer | Focused API and four desktop/mobile browser cases PASS; no provider receipt |
+| PR C review | Separate specification and security review, including focused rereviews | Three blocking financial lifecycle/race findings fixed and cleared |
+| V3 checkout, final candidate | Dependent PR D/E requirements | Not accepted by PR A/B/C evidence |
 | Real SMSGate / Google / PSP | Protected infrastructure, approved identities, quota/billing and provider-specific staging receipts | BLOCKED_EXTERNAL |
 | Production / named operator UAT | Exact artifact, operator acceptance, release authorization | NO-GO |
 

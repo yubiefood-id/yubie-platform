@@ -50,3 +50,9 @@ Checkout preview cannot grant a payable promotional session. Customer checkout
 and claim endpoints remain launch-profile gated. Rollback disables customer
 writes and preserves compatible reservation/reconciliation code plus additive
 tables. The unrestricted legacy promotion backend is not a safe rollback image.
+
+Financial callbacks and post-provider recovery writes lock and reread the payment
+before mutation. Orphan callbacks attach only to that locked record. Duplicate
+callbacks cannot restore stale pending state after consumption. Accepted
+attach-failure cancellation uses the same financial transition as an authoritative
+callback, including promotion, inventory, audit and outbox settlement.

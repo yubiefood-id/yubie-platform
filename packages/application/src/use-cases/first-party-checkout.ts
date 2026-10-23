@@ -176,6 +176,25 @@ async function openIntentOutcome(repos: TransactionalRepositories, principalKey:
   };
 }
 
+/** Provider calls race verified callbacks: always merge into a locked fresh record. */
+async function lockCheckout(repos: TransactionalRepositories, paymentId: string, orderId: string) {
+  const payment = await repos.payments.lockById(paymentId);
+  const order = await repos.orders.findById(orderId);
+  if (!payment.ok || !payment.value || !order.ok || !order.value) throw new Error("Checkout persistence unavailable");
+  return { payment: payment.value, order: order.value };
+}
+
+function confirmedOutcome(order: OrderRecord, payment: PaymentRecord, successReturnUrl: string): StoredCheckoutOutcome | null {
+  if (payment.status === "pending") return null;
+  if (payment.status === "succeeded" || payment.status === "refunded") {
+    return { kind: "success", result: { mode: "live", checkoutToken: order.checkoutPublicToken, checkoutRef: order.checkoutRef,
+      redirectUrl: `${successReturnUrl}${successReturnUrl.includes("?") ? "&" : "?"}checkout=${order.checkoutPublicToken}`,
+      expiresAt: payment.expiresAt, subtotalAmount: order.totals.subtotalAmount, shippingAmount: order.totals.shippingAmount,
+      totalAmount: order.totalAmount, currency: "IDR" } };
+  }
+  return { kind: "failure", error: { code: "validation", message: "Payment attempt is already closed. Start a new checkout.", retryable: false } };
+}
+
 /**
  * Line items sent to the payment provider. iPaymu requires the lines to sum
  * to the charged amount and has no discount or shipping field, so it gets one
@@ -439,14 +458,19 @@ export async function createFirstPartyCheckout(
         kind: "failure",
         error: { code: "validation", message: "Payment provider rejected the checkout request.", retryable: false },
       };
-      await deps.tx.run("checkout.provider_failed", async (repos) => {
-        await repos.orders.save({ ...draftOrder, status: "cancelled", updatedAt: deps.clock.now() });
-        await repos.payments.save({ ...paymentIntent, status: "failed", reconciliationState: "provider_create_failed", updatedAt: deps.clock.now() });
+      const confirmed = await deps.tx.run("checkout.provider_failed", async (repos) => {
+        const fresh = await lockCheckout(repos, paymentIntent.id, orderId);
+        const outcome = confirmedOutcome(fresh.order, fresh.payment, input.successReturnUrl);
+        if (outcome) { if (idempotencyKey) await attachOutcome(repos, outcome); return outcome; }
+        await repos.orders.save({ ...fresh.order, status: "cancelled", updatedAt: deps.clock.now() });
+        await repos.payments.save({ ...fresh.payment, status: "failed", reconciliationState: "provider_create_failed", updatedAt: deps.clock.now() });
         await repos.inventory.releaseForOrder(orderId, "provider_create_failed", deps.clock.now());
         await settlePromotionForPayment(repos, orderId, "failed", deps.clock.now());
         await repos.audit.append({ action: "order.provider_create_failed", resourceType: "order", resourceId: orderId, actor: auditActor, occurredAt: deps.clock.now() });
         if (idempotencyKey) await attachOutcome(repos, failure);
+        return null;
       });
+      if (confirmed) return outcomeResult(confirmed);
       return err({ code: "validation", message: "Payment provider rejected the checkout request; nothing was charged. Retry with a new Idempotency-Key.", retryable: false, requestId: "checkout" });
     }
 
@@ -456,11 +480,16 @@ export async function createFirstPartyCheckout(
     // reconciliation and answer retryable-unavailable. A late webhook for the
     // orphan session can still land: it attaches by reference.
     const pendingMessage = "Payment provider outcome unknown. Retry this same attempt; a second payable session will not be created.";
-    await deps.tx.run("checkout.provider_ambiguous", async (repos) => {
-      await repos.payments.save({ ...paymentIntent, reconciliationState: "ambiguous_create", updatedAt: deps.clock.now() });
+    const confirmed = await deps.tx.run("checkout.provider_ambiguous", async (repos) => {
+      const fresh = await lockCheckout(repos, paymentIntent.id, orderId);
+      const outcome = confirmedOutcome(fresh.order, fresh.payment, input.successReturnUrl);
+      if (outcome) { if (idempotencyKey) await attachOutcome(repos, outcome); return outcome; }
+      await repos.payments.save({ ...fresh.payment, reconciliationState: "ambiguous_create", updatedAt: deps.clock.now() });
       await repos.audit.append({ action: "order.provider_create_ambiguous", resourceType: "order", resourceId: orderId, actor: auditActor, occurredAt: deps.clock.now() });
       if (idempotencyKey) await attachOutcome(repos, { kind: "pending", message: pendingMessage });
+      return null;
     });
+    if (confirmed) return outcomeResult(confirmed);
     return err({
       code: session.error.code === "timeout" ? "timeout" : "unavailable",
       message: pendingMessage,
@@ -483,9 +512,12 @@ export async function createFirstPartyCheckout(
   };
 
   try {
-    await deps.tx.run("checkout.attach_session", async (repos) => {
+    const confirmed = await deps.tx.run("checkout.attach_session", async (repos) => {
+      const fresh = await lockCheckout(repos, paymentIntent.id, orderId);
+      const outcome = confirmedOutcome(fresh.order, fresh.payment, input.successReturnUrl);
+      if (outcome) { if (idempotencyKey) await attachOutcome(repos, outcome); return outcome; }
       await repos.payments.save({
-        ...paymentIntent,
+        ...fresh.payment,
         providerSessionId: session.value.providerSessionId,
         reconciliationState: null,
         redirectUrl: session.value.redirectUrl,
@@ -493,7 +525,7 @@ export async function createFirstPartyCheckout(
         ...(session.value.providerBusinessId !== undefined ? { providerBusinessId: session.value.providerBusinessId } : {}),
         updatedAt: deps.clock.now(),
       });
-      await repos.orders.save({ ...draftOrder, status: "pending_payment", updatedAt: deps.clock.now() });
+      await repos.orders.save({ ...fresh.order, status: "pending_payment", updatedAt: deps.clock.now() });
       await repos.audit.append({ action: "order.pending_payment", resourceType: "order", resourceId: orderId, actor: auditActor, occurredAt: deps.clock.now() });
       await repos.outbox.enqueue({
         eventType: "order.pending_payment",
@@ -504,7 +536,9 @@ export async function createFirstPartyCheckout(
         availableAt: deps.clock.now(),
       });
       if (idempotencyKey) await attachOutcome(repos, { kind: "success", result });
+      return null;
     });
+    if (confirmed) return outcomeResult(confirmed);
   } catch (tx2Error) {
     // The provider session EXISTS but could not be attached. Compensation,
     // in order of importance: (1) never lose the session id — persist it onto
@@ -513,16 +547,21 @@ export async function createFirstPartyCheckout(
     // never be paid. The order stays a recoverable draft.
     let cancelAccepted: boolean | null = null;
     try {
-      await deps.tx.run("checkout.attach_failed", async (repos) => {
+      const confirmed = await deps.tx.run("checkout.attach_failed", async (repos) => {
+        const fresh = await lockCheckout(repos, paymentIntent.id, orderId);
+        const outcome = confirmedOutcome(fresh.order, fresh.payment, input.successReturnUrl);
+        if (outcome) { if (idempotencyKey) await attachOutcome(repos, outcome); return outcome; }
         await repos.payments.save({
-          ...paymentIntent,
+          ...fresh.payment,
           providerSessionId: session.value.providerSessionId,
           redirectUrl: session.value.redirectUrl,
           reconciliationState: "attach_failed",
           updatedAt: deps.clock.now(),
         });
         await repos.audit.append({ action: "order.attach_failed", resourceType: "order", resourceId: orderId, actor: auditActor, occurredAt: deps.clock.now() });
+        return null;
       });
+      if (confirmed) return outcomeResult(confirmed);
       // Cancel OUTSIDE any transaction; a network failure here leaves the
       // session live — reconciliation still has the persisted session id.
       const cancelled = await deps.provider.cancelPaymentSession(session.value.providerSessionId);

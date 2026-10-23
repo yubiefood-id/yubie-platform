@@ -220,8 +220,7 @@ export async function processPaymentWebhook(
         const intents = await repos.payments.findByOrderId(order.id);
         const intent = intents.ok ? intents.value.find((candidate) => candidate.providerSessionId === null) ?? null : null;
         if (!intent) throw new WebhookRejection({ result: "rejected", code: "unknown_payment_session", status: 404 });
-        payment = { ...intent, providerSessionId, reconciliationState: "reconciled_by_webhook" };
-        await repos.payments.save(payment);
+        payment = intent;
       }
 
       // Serialize concurrent webhook/poll transitions on the payment row.
@@ -229,7 +228,18 @@ export async function processPaymentWebhook(
       if (!locked.ok || !locked.value) {
         throw new WebhookRejection({ result: "rejected", code: "unknown_payment_session", status: 404 });
       }
-      const lockedPayment = locked.value;
+      let lockedPayment = locked.value;
+      // Another callback may have attached and settled this orphan while we
+      // waited. Never write the candidate snapshot read before the row lock.
+      if (lockedPayment.providerSessionId && lockedPayment.providerSessionId !== providerSessionId) {
+        throw new WebhookRejection({ result: "rejected", code: "unknown_payment_session", status: 404 });
+      }
+      if (!lockedPayment.providerSessionId) {
+        lockedPayment = { ...lockedPayment, providerSessionId, reconciliationState: "reconciled_by_webhook" };
+        requireWrite(await repos.payments.save(lockedPayment));
+      }
+      const freshOrder = await repos.orders.findById(order.id);
+      if (!freshOrder.ok || !freshOrder.value) throw new Error("Payment order persistence unavailable");
 
       // Only a COMPLETED event asserts captured money. Expiry deliveries
       // describe an unpaid session and may omit amount/currency, so the
@@ -260,7 +270,7 @@ export async function processPaymentWebhook(
       } satisfies PaymentEventRecord);
       if (!appended.ok || appended.value === "duplicate") return { result: "duplicate" } as WebhookOutcome;
 
-      const effect = await applyPaymentStatus({ ...repos, clock: deps.clock, ids: deps.ids }, lockedPayment, order, paymentStatus);
+      const effect = await applyPaymentStatus({ ...repos, clock: deps.clock, ids: deps.ids }, lockedPayment, freshOrder.value, paymentStatus);
       if (effect === "stale") {
         // Genuinely new delivery, but the payment already holds an
         // authoritative terminal state: record the event, change nothing.
