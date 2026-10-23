@@ -20,3 +20,4 @@ export * from "./engine/router.js";
 export * from "./engine/deterministic-engine.js";
 export * from "./deterministic/v2.js";
 export * from "./deterministic/v2-flow.js";
+export { matchesFoodSafety, isPriorityEscalation } from "./deterministic/aliases.js";

@@ -36,7 +36,7 @@ const templates: Record<string, (ctx?: Record<string, unknown>) => string> = {
     `1 — Info B2B / sample\n` +
     `9 — Kembali`,
   "buy.online.v1": (ctx) =>
-    `${String(ctx?.productName ?? "Produk Yubie")} tersedia dalam varian terpilih. Tambahkan ke keranjang dan lanjutkan ke checkout di halaman Produk Yubie.\n\n` +
+    `${String(ctx?.productName ?? "Produk Yubie")} tersedia dalam varian terpilih. Informasi pembelian mengikuti layanan website yang sudah disetujui.\n\n` +
     `0 — Customer Service\n` +
     `1 — Lihat produk lain\n` +
     `9 — Kembali`,

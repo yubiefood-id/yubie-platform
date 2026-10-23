@@ -1,16 +1,11 @@
-import type { ZammadArticle, ZammadGroup, ZammadTicket, ZammadTicketState } from "./types.js";
+import type { ZammadArticle, ZammadArticleInput, ZammadGroup, ZammadTicket, ZammadTicketState } from "./types.js";
 
 export interface ZammadClient {
+  getCurrentUser?(): Promise<{id:number}>;
   getTicket(ticketId: string): Promise<ZammadTicket>;
   getArticle(articleId: string): Promise<ZammadArticle>;
   getTicketArticles(ticketId: string): Promise<ZammadArticle[]>;
-  createArticle(input: {
-    ticketId: string;
-    body: string;
-    contentType?: string;
-    type?: string;
-    internal?: boolean;
-  }): Promise<ZammadArticle>;
+  createArticle(input: ZammadArticleInput): Promise<ZammadArticle>;
   updateTicket(ticketId: string, patch: Record<string, unknown>): Promise<ZammadTicket>;
   searchTicketsUpdatedSince(sinceIso: string): Promise<Array<{ id: string; updatedAt: string }>>;
   getGroups(): Promise<ZammadGroup[]>;
@@ -42,13 +37,15 @@ export class HttpZammadClient implements ZammadClient {
       if (response.status === 401) throw new Error("zammad_unauthorized");
       if (response.status === 403) throw new Error("zammad_forbidden");
       if (response.status === 404) throw new Error("zammad_not_found");
-      if (response.status >= 500) throw new Error(`zammad_5xx_${response.status}`);
+      if (response.status === 400 || response.status === 422) throw new Error("zammad_validation");
+      if (response.status >= 500) throw new Error(init.method === "POST" ? "zammad_ambiguous" : "zammad_unavailable");
       if (!response.ok) throw new Error(`zammad_http_${response.status}`);
       return (await response.json()) as T;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         throw new Error("zammad_timeout");
       }
+      if(init.method === "POST" && !(error instanceof Error && /^zammad_/.test(error.message)))throw new Error("zammad_ambiguous");
       throw error;
     } finally {
       clearTimeout(timer);
@@ -59,6 +56,8 @@ export class HttpZammadClient implements ZammadClient {
     return this.request<ZammadTicket>(`/api/v1/tickets/${ticketId}`);
   }
 
+  async getCurrentUser() {return this.request<{id:number}>("/api/v1/users/me");}
+
   async getArticle(articleId: string) {
     return this.request<ZammadArticle>(`/api/v1/ticket_articles/${articleId}`);
   }
@@ -67,13 +66,7 @@ export class HttpZammadClient implements ZammadClient {
     return this.request<ZammadArticle[]>(`/api/v1/ticket_articles/by_ticket/${ticketId}`);
   }
 
-  async createArticle(input: {
-    ticketId: string;
-    body: string;
-    contentType?: string;
-    type?: string;
-    internal?: boolean;
-  }) {
+  async createArticle(input: ZammadArticleInput) {
     return this.request<ZammadArticle>("/api/v1/ticket_articles", {
       method: "POST",
       body: JSON.stringify({
@@ -82,6 +75,9 @@ export class HttpZammadClient implements ZammadClient {
         content_type: input.contentType ?? "text/plain",
         type: input.type ?? "web",
         internal: input.internal ?? false,
+        sender: "Agent",
+        preferences: input.preferences ?? {},
+        attachments: input.attachments ?? [],
         subject: "Reply",
         to: "",
       }),
@@ -120,6 +116,7 @@ export class HttpZammadClient implements ZammadClient {
 }
 
 export class FakeZammadClient implements ZammadClient {
+  async getCurrentUser() {return {id:1};}
   tickets = new Map<string, ZammadTicket>();
   articles = new Map<string, ZammadArticle>();
   articlesByTicket = new Map<string, ZammadArticle[]>();
@@ -141,13 +138,7 @@ export class FakeZammadClient implements ZammadClient {
     return this.articlesByTicket.get(ticketId) ?? [];
   }
 
-  async createArticle(input: {
-    ticketId: string;
-    body: string;
-    contentType?: string;
-    type?: string;
-    internal?: boolean;
-  }) {
+  async createArticle(input: ZammadArticleInput) {
     const id = this.articles.size + 1;
     const article: ZammadArticle = {
       id,
@@ -163,6 +154,8 @@ export class FakeZammadClient implements ZammadClient {
       type_id: 1,
       created_at: new Date().toISOString(),
       created_by_id: 1,
+      preferences: input.preferences ?? {},
+      attachments: input.attachments ?? [],
     };
     this.articles.set(String(id), article);
     const list = this.articlesByTicket.get(input.ticketId) ?? [];

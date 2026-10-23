@@ -9,7 +9,7 @@ export function parseZammadTriggerPayload(raw: ZammadTriggerPayload): {
   groupId?: string;
   stateId?: string;
 } | null {
-  if (!raw.ticket_id) return null;
+  if (!raw || !Number.isSafeInteger(raw.ticket_id) || Number(raw.ticket_id)<1 || (raw.article_id!==undefined && (!Number.isSafeInteger(raw.article_id) || raw.article_id<1))) return null;
   return {
     eventType: raw.event ?? "ticket_update",
     ticketId: String(raw.ticket_id),

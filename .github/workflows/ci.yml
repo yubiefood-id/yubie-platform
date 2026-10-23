@@ -72,6 +72,9 @@ jobs:
       - run: npm run db:migrate
       - run: npm run db:seed
       - run: npm run test --workspace @yubie/persistence
+      # Legacy upgrade tests intentionally leave their shared fixture on an older
+      # schema. Restore the current schema before downstream repository consumers.
+      - run: npm run db:migrate
       - run: npm run test --workspace @yubie/api
       - run: npm run test --workspace @yubie/assistant
       - run: npm run test --workspace @yubie/worker

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, isNotNull, lt } from "drizzle-orm";
+import { and, eq, isNotNull, lt, or } from "drizzle-orm";
 import { ok } from "@yubie/domain";
 import type { Database } from "../client.js";
 import { webhookInbox } from "../schema/index.js";
@@ -49,7 +49,7 @@ export class PostgresWebhookInboxRepository {
       ? new Date(Date.now() + RAW_BODY_TTL_HOURS * 60 * 60 * 1000).toISOString()
       : undefined;
 
-    await this.database.db.insert(webhookInbox).values({
+    const inserted=await this.database.db.insert(webhookInbox).values({
       id,
       provider: event.provider,
       deliveryId: event.deliveryId ?? null,
@@ -67,7 +67,12 @@ export class PostgresWebhookInboxRepository {
       status: "received",
       receivedAt: event.receivedAt,
       attemptCount: 0,
-    });
+    }).onConflictDoNothing().returning({id:webhookInbox.id});
+    if(!inserted.length) {
+      const rows=await this.database.db.select({id:webhookInbox.id}).from(webhookInbox).where(and(eq(webhookInbox.provider,event.provider),or(eq(webhookInbox.payloadHash,event.payloadHash),...(event.deliveryId?[eq(webhookInbox.deliveryId,event.deliveryId)]:[])))).limit(1);
+      if(!rows[0])throw new Error("inbox_conflict_without_identity");
+      return ok({status:"duplicate" as const,id:rows[0].id});
+    }
     return ok({ status: "inserted" as const, id });
   }
 

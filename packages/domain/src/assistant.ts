@@ -6,6 +6,8 @@ export type ConversationState =
   | "HUMAN_ACTIVE"
   | "RESOLVED";
 
+export const BOT_REENTRY_COOLDOWN_MS = 30 * 60 * 1000;
+
 export type AssistantIntent =
   | "PRODUCT_INFO"
   | "PRODUCT_DISCOVERY"

@@ -56,9 +56,9 @@
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.64.1",
-    "brace-expansion": "5.0.11",
-    "fast-uri": "3.1.7",
-    "image-size": "2.0.3",
+    "brace-expansion": "5.0.12",
+    "fast-uri": "3.1.9",
+    "image-size": "2.0.4",
     "next": "16.3.8",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -71,12 +71,15 @@
     "ws": "8.21.0"
   },
   "overrides": {
-    "brace-expansion": "$brace-expansion",
+    "vinext": {
+      "image-size": "2.0.4"
+    },
+    "brace-expansion": "5.0.12",
     "minimatch@3.1.5": {
       "brace-expansion": "1.1.20"
     },
-    "fast-uri": "3.1.7",
-    "image-size": "2.0.3",
+    "fast-uri": "3.1.9",
+    "image-size": "2.0.4",
     "next": "16.3.8",
     "react": "19.2.8",
     "react-dom": "19.2.8",

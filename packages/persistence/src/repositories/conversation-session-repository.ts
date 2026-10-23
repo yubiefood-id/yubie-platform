@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
-import { ok } from "@yubie/domain";
+import { and, eq, sql } from "drizzle-orm";
+import { ok, BOT_REENTRY_COOLDOWN_MS } from "@yubie/domain";
 import type { ConversationState } from "@yubie/domain";
 import type { Database } from "../client.js";
 import { conversationSessions } from "../schema/index.js";
@@ -49,6 +49,9 @@ export class PostgresConversationSessionRepository {
       currentIntent: row.currentIntent,
       customerType: row.customerType,
       lastActivityAt: row.lastActivityAt,
+      providerLastMessageId: row.providerLastMessageId,
+      resolvedAt: row.resolvedAt,
+      botReleasedAt: row.botReleasedAt,
     };
   }
 
@@ -104,7 +107,7 @@ export class PostgresConversationSessionRepository {
   async updateState(provider: string, providerThreadId: string, state: ConversationState, updatedAt: string) {
     await this.database.db
       .update(conversationSessions)
-      .set({ state, updatedAt })
+      .set({ state, updatedAt,...(state==="RESOLVED"?{resolvedAt:updatedAt,botReleasedAt:null}:state==="HUMAN_ACTIVE"?{resolvedAt:null,botReleasedAt:null}:{}) })
       .where(
         and(
           eq(conversationSessions.provider, provider),
@@ -112,6 +115,12 @@ export class PostgresConversationSessionRepository {
         ),
       );
     return ok(undefined);
+  }
+
+  async releaseForReentry(provider: string,threadId: string,at: string): Promise<boolean> {
+    const threshold=new Date(Date.parse(at)-BOT_REENTRY_COOLDOWN_MS).toISOString();
+    const rows=await this.database.db.update(conversationSessions).set({botReleasedAt:at}).where(and(eq(conversationSessions.provider,provider),eq(conversationSessions.providerThreadId,threadId),eq(conversationSessions.state,"RESOLVED"),sql`${conversationSessions.resolvedAt} <= ${threshold}::timestamptz`)).returning({id:conversationSessions.id});
+    return rows.length===1;
   }
 
   async updateStateByChatwootId(chatwootConversationId: string, state: ConversationState, updatedAt: string) {

@@ -20,6 +20,8 @@ const INTENT_TAGS: Partial<Record<AssistantIntent, string>> = {
 };
 
 export interface HandoffTagInput {
+  flowVersion?: "deterministic-v1" | "deterministic-v2";
+  productId?: string;
   intent: AssistantIntent;
   destination: HandoffDestination;
   handoffReason?: string;
@@ -27,7 +29,8 @@ export interface HandoffTagInput {
 }
 
 export function buildDeterministicHandoffLabels(input: HandoffTagInput): string[] {
-  const labels = new Set<string>(["human-required", FLOW_VERSION_TAG, CHANNEL_TAG]);
+  const labels = new Set<string>(["human-required", input.flowVersion?`bot:${input.flowVersion}`:FLOW_VERSION_TAG, CHANNEL_TAG]);
+  if(input.productId && /^(flour|shake|ppang|mie)$/.test(input.productId))labels.add(`product:${input.productId}`);
 
   const intentTag = INTENT_TAGS[input.intent];
   if (intentTag) labels.add(intentTag);

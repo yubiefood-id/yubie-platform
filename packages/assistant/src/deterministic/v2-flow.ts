@@ -51,6 +51,7 @@ export const V2_COPY: Record<string,string> = {
   handoff: "Permintaan bantuanmu dicatat untuk tim Customer Service Yubie. Tim akan meninjau sesuai ketersediaan layanan.",
   sales: "Permintaan bisnismu dicatat untuk tim Sales Yubie. Tim akan meninjau kebutuhanmu; harga, MOQ, dan syarat kerja sama perlu konfirmasi tim.",
   safety: "Terima kasih sudah memberi tahu. Laporan keamanan produk ini dicatat untuk penanganan prioritas tim Yubie.",
+  after_hours: "Di luar jam operasional, permintaan tetap masuk antrean. Tim akan meninjau pada jam operasional berikutnya.",
   unknown: "Aku belum mengenali pilihanmu. Pilih angka yang tersedia, ketik menu, atau ketik 0 untuk Customer Service.",
   unknown_again: "Biar lebih mudah, ketik menu untuk pilihan utama atau 0 agar tim Customer Service membantu.",
   unsupported: "Aku belum bisa membaca gambar atau pesan suara di chat ini. Ketik 0 untuk bantuan Customer Service.",
@@ -59,3 +60,5 @@ export const V2_COPY: Record<string,string> = {
 export const B2B_FIELDS = ["company","need","product","city","volume"] as const;
 export const B2B_COPY = ["Nama bisnis / brand kamu?","Kebutuhan bisnismu secara singkat?","Produk Yubie yang diminati?","Kota operasional kamu?","Perkiraan volume (opsional, ketik lewati untuk melewati)?"];
 export const navigationFooter = "\n\n9. Kembali\n0. Customer Service\nKetik menu untuk menu utama.";
+
+export const V2_ALIASES: Record<string,string>={menu:"HOME",start:"HOME",mulai:"HOME",halo:"HOME",hai:"HOME",beli:"PRODUCT_MENU",produk:"PRODUCT_MENU",belanja:"PRODUCT_MENU",pesanan:"ORDER_MENU",pengiriman:"ORDER_MENU",resi:"ORDER_MENU","cek pesanan":"ORDER_MENU","pesanan saya":"ORDER_MENU","alamat pengiriman":"ADDRESS_GUIDANCE",promo:"PROMO_MENU",diskon:"PROMO_MENU",bantuan:"SUPPORT_MENU",komplain:"SUPPORT_MENU",bisnis:"B2B_MENU",reseller:"B2B_MENU",partnership:"B2B_MENU","tentang yubie":"ABOUT_MENU"};

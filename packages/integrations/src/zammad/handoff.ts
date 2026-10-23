@@ -33,7 +33,7 @@ export function buildHandoffCommand(
   ref: SupportThreadRef,
   intent: AssistantIntent,
   handoffReason?: string,
-  config?: Partial<ZammadHandoffConfig> & { destination?: HandoffDestination; nodeId?: string },
+  config?: Partial<ZammadHandoffConfig> & { destination?: HandoffDestination; nodeId?: string; flowVersion?: "deterministic-v1" | "deterministic-v2"; productId?:string },
   env: RuntimeEnvSource = process.env,
 ): HandoffCommand {
   // Routing IDs come from validated configuration: explicit call-site values,
@@ -60,6 +60,8 @@ export function buildHandoffCommand(
   const tagInput: import("./handoff-tags.js").HandoffTagInput = { intent, destination: dest };
   if (handoffReason) tagInput.handoffReason = handoffReason;
   if (config?.nodeId) tagInput.nodeId = config.nodeId;
+  if (config?.flowVersion) tagInput.flowVersion = config.flowVersion;
+  if (config?.productId) tagInput.productId = config.productId;
   const labels = buildDeterministicHandoffLabels(tagInput);
 
   if (dest === "SALES_PARTNERSHIP") {

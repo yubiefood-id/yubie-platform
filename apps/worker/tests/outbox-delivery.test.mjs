@@ -1,13 +1,22 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, {before,after} from "node:test";
 import { ChatwootSupportProvider, FakeChatwootClient } from "@yubie/integrations";
 import { closeDatabase, createDatabase, PostgresAssistantOutboxRepository } from "@yubie/persistence";
 import { deliverSupportOutbox } from "../dist/reply-delivery-handler.js";
 
 const databaseUrl = process.env.DATABASE_URL;
+let prior;
+before(async()=>{
+ if(!databaseUrl)return;
+ const database=createDatabase(databaseUrl);
+ try {const {PostgresRuntimeConfigRepository}=await import('@yubie/persistence');const config=new PostgresRuntimeConfigRepository(database);prior=await config.getSnapshot();await config.set('mode','auto','test',new Date().toISOString());await config.set('assistant_enabled',true,'test',new Date().toISOString());} finally {await closeDatabase(database);}
+});
+after(async()=>{if(!prior)return;const database=createDatabase(databaseUrl);try{const {PostgresRuntimeConfigRepository}=await import('@yubie/persistence');const config=new PostgresRuntimeConfigRepository(database);await config.set('mode',prior.mode,'test',new Date().toISOString());await config.set('assistant_enabled',prior.assistantEnabled,'test',new Date().toISOString());}finally{await closeDatabase(database);}});
 
-test("drops reply when human has taken over in Chatwoot", { skip: !databaseUrl }, async () => {
+
+test("drops reply when human has taken over in Chatwoot", { skip: !databaseUrl }, async (t) => {
   const database = createDatabase(databaseUrl);
+  t.after(()=>closeDatabase(database));
   const chatwoot = new FakeChatwootClient();
   const support = new ChatwootSupportProvider(chatwoot);
   const outbox = new PostgresAssistantOutboxRepository(database);
@@ -31,8 +40,9 @@ test("drops reply when human has taken over in Chatwoot", { skip: !databaseUrl }
   await closeDatabase(database);
 });
 
-test("delivers reply when conversation is not human active", { skip: !databaseUrl }, async () => {
+test("delivers reply when conversation is not human active", { skip: !databaseUrl }, async (t) => {
   const database = createDatabase(databaseUrl);
+  t.after(()=>closeDatabase(database));
   const chatwoot = new FakeChatwootClient();
   const support = new ChatwootSupportProvider(chatwoot);
   const outbox = new PostgresAssistantOutboxRepository(database);
@@ -55,9 +65,10 @@ test("delivers reply when conversation is not human active", { skip: !databaseUr
   await closeDatabase(database);
 });
 
-test("marks outbox failed when local session is HUMAN_ACTIVE", { skip: !databaseUrl }, async () => {
+test("marks outbox failed when local session is HUMAN_ACTIVE", { skip: !databaseUrl }, async (t) => {
   const { PostgresConversationSessionRepository } = await import("@yubie/persistence");
   const database = createDatabase(databaseUrl);
+  t.after(()=>closeDatabase(database));
   const chatwoot = new FakeChatwootClient();
   const support = new ChatwootSupportProvider(chatwoot);
   const outbox = new PostgresAssistantOutboxRepository(database);
