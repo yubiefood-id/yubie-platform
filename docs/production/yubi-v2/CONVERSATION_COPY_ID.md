@@ -9,8 +9,8 @@ Every customer text ≤4096 UTF-16 units including footer; media caption ≤1024
 Approved fact summary ≤3900 before footer, otherwise unavailable. B2B inputs ≤256;
 they appear only in consented private Sales notes, never echoed in public copy or
 metrics. Product names, descriptions and variant rows come from the approved
-catalog resolver. Dates/eligibility for promotions come from effective approved
-knowledge and must match the existing domain campaign quote.
+catalog resolver. Yubi gives neutral promotion navigation and never reveals a code or grants
+entitlement; the website resolves approved campaign eligibility server-side.
 
 ### v2.copy.home
 

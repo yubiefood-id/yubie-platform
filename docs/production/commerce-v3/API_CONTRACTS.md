@@ -1,5 +1,9 @@
 # Customer API contracts
 
+Implementation status: identity, addresses, location previews and promotion
+claims are implemented in PR A/B/C. The checkout-quotes resource and explicit
+checkoutVersion3 below are planned PR D contracts, not operational routes yet.
+
 Existing envelope: {ok:true,data} or {ok:false,code}. All private responses no-store.
 Bounded JSON, proxy authentication, Origin/CSRF checks and launch-profile gates
 apply. Only an authenticated trusted edge supplies client-IP context. Browser
@@ -29,3 +33,13 @@ responses resume the existing checkout; do not rotate away from ambiguity. New
 proxy request headers allow CSRF plus existing bounded idempotency/correlation;
 response headers include Retry-After and multiple Set-Cookie. No PII in URL query,
 telemetry labels, structured error context or public artifacts.
+
+Promotion claim accepts only an empty JSON object, a current customer session and
+same-origin CSRF proof. It rereads the durable phone identity; a cached profile
+flag cannot authorize entitlement. GET welcome returns available/percentage/end
+and bounded eligibility fields, never the code. POST claim returns the existing
+or new entitlement ID, code and available/reserved state only for its verified
+owner. Anonymous401, ineligible403, invalid body400 and unavailable storage503
+carry no private history. Both resources are launch-gated; public catalog mode
+does not expose the transactional promotion API. Preview checkout rejects promo
+submission rather than simulating an authorized payment discount.
