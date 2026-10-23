@@ -24,6 +24,12 @@ if (!startupConfig.ok) {
   process.exit(1);
 }
 
+// Bot-off production (SUPPORT_PROVIDER=disabled): payment reconciliation,
+// identity delivery and webhook cleanup keep running while support queues stay
+// dormant. Any queued support delivery is held (never faked, never dropped) —
+// it flows again when a real support provider is configured.
+const supportDisabled = startupConfig.config.supportProvider === "disabled";
+
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   console.error("DATABASE_URL is required for worker");
@@ -55,7 +61,7 @@ async function start() {
       const inboxId = String((job.data as { inboxId?: string }).inboxId ?? "");
       if (inboxId && inboxId !== "unknown") {
         await processAssistantJob(inboxId);
-        await boss.send("support.reply", { outboxSweep: true });
+        if (!supportDisabled) await boss.send("support.reply", { outboxSweep: true });
       }
     }
   });
@@ -72,19 +78,21 @@ async function start() {
     }
   };
 
-  await boss.work("support.reply", handleReply);
-  await boss.work("chatwoot.reply", handleReply);
+  if (!supportDisabled) {
+    await boss.work("support.reply", handleReply);
+    await boss.work("chatwoot.reply", handleReply);
 
-  const handleReconcile = async (jobs: Array<{ id: string }>) => {
-    const support = createSupportProvider();
-    for (const job of jobs) {
-      const jobId = job.id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 48);
-      await reconcileSupport(repos.database, support, `worker_${jobId}`);
-    }
-  };
+    const handleReconcile = async (jobs: Array<{ id: string }>) => {
+      const support = createSupportProvider();
+      for (const job of jobs) {
+        const jobId = job.id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 48);
+        await reconcileSupport(repos.database, support, `worker_${jobId}`);
+      }
+    };
 
-  await boss.work("support.reconcile", { batchSize: 1 }, handleReconcile);
-  await boss.work("chatwoot.reconcile", { batchSize: 1 }, handleReconcile);
+    await boss.work("support.reconcile", { batchSize: 1 }, handleReconcile);
+    await boss.work("chatwoot.reconcile", { batchSize: 1 }, handleReconcile);
+  }
 
   await boss.work("webhook.cleanup", async () => {
     await purgePhoneChallenges({ tx: new PostgresTransactionManager(repos.database), clock });
@@ -130,8 +138,10 @@ async function start() {
   });
 
   await boss.send("integration.health", {}, { startAfter: 5 });
-  await boss.schedule("support.reconcile", "*/15 * * * *", {});
-  await boss.schedule("chatwoot.reconcile", "*/15 * * * *", {});
+  if (!supportDisabled) {
+    await boss.schedule("support.reconcile", "*/15 * * * *", {});
+    await boss.schedule("chatwoot.reconcile", "*/15 * * * *", {});
+  }
   await boss.schedule("webhook.cleanup", "0 * * * *", {});
   // Repair the durable inbox -> queue wakeup gap and retry only bounded failed events.
   let sweeping=false;
@@ -140,19 +150,21 @@ async function start() {
     sweeping=true;
     try {
       await boss.send("identity.delivery", {}, { singletonKey: "phone-delivery", retryLimit: 3, retryDelay: 10 });
-      const provider=process.env.SUPPORT_PROVIDER??process.env.CHAT_PROVIDER??"fake";
-      const inboxProvider=provider==="chatwoot"?"chatwoot_agentbot":provider;
-      const work=new PostgresAssistantWorkRepository(repos.database);
-      const rows=await work.backlog(inboxProvider);
-      for(const row of rows)await boss.send("assistant.process",{inboxId:row.id},{singletonKey:row.id,retryLimit:4,retryDelay:30,retryBackoff:true,deadLetter:"assistant.dead"});
-      await processPendingOutbox(repos.database,createSupportProvider());
-      await work.purgeExpiredContext();
+      if (!supportDisabled) {
+        const provider=process.env.SUPPORT_PROVIDER??process.env.CHAT_PROVIDER??"fake";
+        const inboxProvider=provider==="chatwoot"?"chatwoot_agentbot":provider;
+        const work=new PostgresAssistantWorkRepository(repos.database);
+        const rows=await work.backlog(inboxProvider);
+        for(const row of rows)await boss.send("assistant.process",{inboxId:row.id},{singletonKey:row.id,retryLimit:4,retryDelay:30,retryBackoff:true,deadLetter:"assistant.dead"});
+        await processPendingOutbox(repos.database,createSupportProvider());
+        await work.purgeExpiredContext();
+      }
     }catch{console.error(JSON.stringify({event:"assistant.sweep_failed",errorCode:"SWEEP_FAILED"}));}
-    finally{sweeping=false;}
+    finally{sweeping=false}
   },10_000);
   sweep.unref();
 
-  console.log(JSON.stringify({ level: "info", event: "worker.started", releaseSha: process.env.RELEASE_SHA ?? "dev" }));
+  console.log(JSON.stringify({ level: "info", event: "worker.started", supportDisabled, releaseSha: process.env.RELEASE_SHA ?? "dev" }));
 }
 
 const shutdown = async () => {

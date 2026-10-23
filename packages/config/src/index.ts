@@ -14,13 +14,20 @@
 
 export type YubieEnvName = "development" | "test" | "staging" | "production";
 export type BotEngineName = "deterministic" | "legacy";
-export type SupportProviderName = "fake" | "chatwoot" | "zammad";
+/**
+ * "disabled" is an explicit operator choice (e.g. bot-off production): the
+ * worker runs commerce reconciliation without any support backend, support
+ * queues stay dormant, and any attempted support delivery fails loudly.
+ * It is never inferred from an unset variable — unset still means "fake",
+ * which staging/production refuse.
+ */
+export type SupportProviderName = "fake" | "chatwoot" | "zammad" | "disabled";
 
 export type RuntimeEnvSource = Record<string, string | undefined>;
 
 const ENV_NAMES: readonly YubieEnvName[] = ["development", "test", "staging", "production"];
 const BOT_ENGINE_NAMES: readonly BotEngineName[] = ["deterministic", "legacy"];
-const SUPPORT_PROVIDER_NAMES: readonly SupportProviderName[] = ["fake", "chatwoot", "zammad"];
+const SUPPORT_PROVIDER_NAMES: readonly SupportProviderName[] = ["fake", "chatwoot", "zammad", "disabled"];
 
 const ZAMMAD_GROUP_VARS = {
   botQueue: "ZAMMAD_GROUP_BOT_QUEUE",
@@ -617,6 +624,9 @@ export function parseServiceRuntimeConfig(env: RuntimeEnvSource = process.env, s
     const webhookSecret = env.ZAMMAD_WEBHOOK_SECRET ?? "";
     const webhookBearer = env.ZAMMAD_WEBHOOK_BEARER ?? "";
     const agentbotSecret = env.CHATWOOT_AGENTBOT_SECRET ?? "";
+    if (supportProvider === "disabled") {
+      errors.push("bot service cannot run with SUPPORT_PROVIDER=disabled (no real inbound webhook to verify; simply do not deploy the bot)");
+    }
     if (supportProvider === "zammad" && !webhookSecret && !webhookBearer) {
       errors.push("bot service with SUPPORT_PROVIDER=zammad requires ZAMMAD_WEBHOOK_SECRET and/or ZAMMAD_WEBHOOK_BEARER (inbound webhook verification)");
     }
@@ -629,12 +639,19 @@ export function parseServiceRuntimeConfig(env: RuntimeEnvSource = process.env, s
   }
 
   if (service === "worker") {
-    // The worker drives Zammad replies/reconciliation: keep the full
-    // fail-closed support contract from parseRuntimeConfig.
-    try {
-      parseRuntimeConfig(env);
-    } catch (error) {
-      errors.push(configMessage(error));
+    if (supportProvider === "disabled") {
+      // Bot-off production: commerce reconciliation, identity delivery, and
+      // webhook cleanup run without any support backend. Support queues stay
+      // dormant and support deliveries fail loudly at the provider factory.
+      // An UNSET provider still fails closed below via parseRuntimeConfig.
+    } else {
+      // The worker drives Zammad replies/reconciliation: keep the full
+      // fail-closed support contract from parseRuntimeConfig.
+      try {
+        parseRuntimeConfig(env);
+      } catch (error) {
+        errors.push(configMessage(error));
+      }
     }
   }
 

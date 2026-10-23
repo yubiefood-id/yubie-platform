@@ -8,6 +8,7 @@
 #     -f infrastructure/docker-compose.prod.yml run --rm migrate
 #   docker compose --env-file /etc/yubie/staging.env \
 #     -f infrastructure/docker-compose.prod.yml up -d --remove-orphans
+#   (staging with a real support webhook additionally passes `--profile bot`)
 #
 # Contract:
 #   - Only the reverse proxy (outside this file) terminates public TLS; NO
@@ -58,6 +59,7 @@ services:
       PORT: 8787
       RELEASE_SHA: ${RELEASE_SHA}
       YUBIE_ENV: ${YUBIE_ENV}
+      YUBIE_LAUNCH_PROFILE: ${YUBIE_LAUNCH_PROFILE:-PUBLIC_CATALOG_NO_SALES}
       COMMERCE_PROVIDER: ${COMMERCE_PROVIDER:-preview}
       INVENTORY_MODE: ${INVENTORY_MODE:-lots}
       PURCHASE_OPTIONS_SOURCE: ${PURCHASE_OPTIONS_SOURCE:-database}
@@ -75,6 +77,13 @@ services:
       APP_ORIGIN: ${APP_ORIGIN:-}
       API_PROXY_TOKEN: ${API_PROXY_TOKEN:-}
       OPS_API_TOKEN: ${OPS_API_TOKEN:-}
+      OTP_PROVIDER: ${OTP_PROVIDER:-disabled}
+      OTP_HASH_SECRET: ${OTP_HASH_SECRET:-}
+      OTP_DELIVERY_ENCRYPTION_KEY: ${OTP_DELIVERY_ENCRYPTION_KEY:-}
+      OTP_ALLOWED_COUNTRIES: ${OTP_ALLOWED_COUNTRIES:-ID}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+      MAPS_PROVIDER: ${MAPS_PROVIDER:-disabled}
+      GOOGLE_MAPS_SERVER_KEY: ${GOOGLE_MAPS_SERVER_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,6 +98,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       RELEASE_SHA: ${RELEASE_SHA}
       YUBIE_ENV: ${YUBIE_ENV}
+      YUBIE_LAUNCH_PROFILE: ${YUBIE_LAUNCH_PROFILE:-PUBLIC_CATALOG_NO_SALES}
       WORKER_METRICS_ENABLED: ${WORKER_METRICS_ENABLED:-true}
       COMMERCE_PROVIDER: ${COMMERCE_PROVIDER:-preview}
       INVENTORY_MODE: ${INVENTORY_MODE:-lots}
@@ -100,6 +110,15 @@ services:
       IPAYMU_API_KEY: ${IPAYMU_API_KEY:-}
       IPAYMU_API_BASE_URL: ${IPAYMU_API_BASE_URL:-}
       IPAYMU_NOTIFY_URL: ${IPAYMU_NOTIFY_URL:-}
+      OTP_PROVIDER: ${OTP_PROVIDER:-disabled}
+      OTP_HASH_SECRET: ${OTP_HASH_SECRET:-}
+      OTP_DELIVERY_ENCRYPTION_KEY: ${OTP_DELIVERY_ENCRYPTION_KEY:-}
+      OTP_ALLOWED_COUNTRIES: ${OTP_ALLOWED_COUNTRIES:-ID}
+      SMSGATE_BASE_URL: ${SMSGATE_BASE_URL:-}
+      SMSGATE_USERNAME: ${SMSGATE_USERNAME:-}
+      SMSGATE_PASSWORD: ${SMSGATE_PASSWORD:-}
+      SMSGATE_DEVICE_ID: ${SMSGATE_DEVICE_ID:-}
+      SMSGATE_SIM_NUMBER: ${SMSGATE_SIM_NUMBER:-1}
       SUPPORT_PROVIDER: ${SUPPORT_PROVIDER}
       BOT_ENGINE: ${BOT_ENGINE:-deterministic}
       ZAMMAD_BASE_URL: ${ZAMMAD_BASE_URL:-}
@@ -121,6 +140,11 @@ services:
     restart: unless-stopped
 
   bot:
+    # Opt-in only: docker compose up does NOT start the bot. Deploy it with
+    # `--profile bot` when a real support webhook provider is configured
+    # (SUPPORT_PROVIDER=zammad|chatwoot). With SUPPORT_PROVIDER=disabled the
+    # bot has nothing to verify and must not run.
+    profiles: ["bot"]
     image: ghcr.io/yubiefood-id/yubie-bot:${RELEASE_SHA}
     environment:
       DATABASE_URL: ${DATABASE_URL}
