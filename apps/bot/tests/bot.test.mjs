@@ -84,7 +84,7 @@ test("zammad webhook accepts signed payload when database configured", async (t)
   const payload = JSON.stringify({
     event: "article_created",
     ticket_id: 10,
-    article_id: randomUUID(),
+    article_id: Date.now(),
     customer_id: 30,
     group_id: 40,
   });
@@ -100,4 +100,13 @@ test("zammad webhook accepts signed payload when database configured", async (t)
     }),
   );
   assert.equal(response.status, 202);
+});
+
+
+test('signed Zammad event still rejects a non-numeric article identity',async()=>{
+ const secret=process.env.ZAMMAD_WEBHOOK_SECRET??'zammad-secret';process.env.ZAMMAD_WEBHOOK_SECRET=secret;
+ const {handleRequest}=await import('../dist/index.js');
+ const payload=JSON.stringify({event:'article_created',ticket_id:10,article_id:'invalid-customer-input'});
+ const response=await handleRequest(new Request('http://localhost/webhooks/zammad',{method:'POST',headers:{'x-hub-signature':`sha1=${createHmac('sha1',secret).update(payload).digest('hex')}`},body:payload}));
+ assert.equal(response.status,400);
 });

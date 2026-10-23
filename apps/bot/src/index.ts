@@ -26,7 +26,7 @@ function zammadBearerToken() {
 }
 
 let bossInstance: PgBoss | null = null;
-const databaseInstances = new Set<Database>();
+let databaseInstance: Database | null = null;
 
 async function getBoss(): Promise<PgBoss> {
   if (!databaseUrl) throw new Error("DATABASE_URL required");
@@ -38,9 +38,13 @@ async function getBoss(): Promise<PgBoss> {
   return bossInstance;
 }
 
-async function readRawBody(request: Request): Promise<Buffer> {
-  const arrayBuffer = await request.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+async function readRawBody(request: Request): Promise<Buffer | null> {
+  const max=256*1024;
+  if(Number(request.headers.get("content-length"))>max)return null;
+  const reader=request.body?.getReader();if(!reader)return Buffer.alloc(0);
+  const chunks: Uint8Array[]=[];let size=0;
+  try {while(true){const {value,done}=await reader.read();if(done)break;size+=value.byteLength;if(size>max){await reader.cancel();return null;}chunks.push(value);}}finally{reader.releaseLock();}
+  return Buffer.concat(chunks,size);
 }
 
 async function acceptInboxEvent(input: {
@@ -60,11 +64,12 @@ async function acceptInboxEvent(input: {
     return Response.json({ error: "database_unavailable" }, { status: 503 });
   }
 
-  const database = createDatabase(databaseUrl);
-  databaseInstances.add(database);
+  const database = databaseInstance ??= createDatabase(databaseUrl);
   const inbox = new PostgresWebhookInboxRepository(database);
   const receivedAt = new Date().toISOString();
-  const insert = await inbox.insert({
+  let insert: Awaited<ReturnType<PostgresWebhookInboxRepository["insert"]>>;
+  try {
+    insert = await inbox.insert({
     provider: input.provider,
     ...(input.deliveryId ? { deliveryId: input.deliveryId, dedupeKey: input.deliveryId } : {}),
     eventType: input.eventType,
@@ -77,7 +82,11 @@ async function acceptInboxEvent(input: {
     ...(input.inboxRef ? { inboxRef: input.inboxRef } : {}),
     ...(input.providerTimestamp ? { providerTimestamp: input.providerTimestamp } : {}),
     receivedAt,
-  });
+    });
+  } catch {
+    increment("bot_database_unavailable_total");
+    return Response.json({ error: "database_unavailable" }, { status: 503 });
+  }
 
   if (insert.ok && insert.value.status === "duplicate") {
     increment("bot_webhook_duplicate_total");
@@ -86,8 +95,8 @@ async function acceptInboxEvent(input: {
   }
 
   if (insert.ok && insert.value.status === "inserted") {
-    const boss = await getBoss();
-    await boss.send("assistant.process", { inboxId: insert.value.id });
+    try {const boss = await getBoss();await boss.send("assistant.process", { inboxId: insert.value.id });}
+    catch {increment("bot_queue_wakeup_failed_total");} // Durable inbox sweep repairs a lost wakeup.
   }
 
   return Response.json({ status: "accepted" }, { status: 202 });
@@ -122,6 +131,7 @@ export async function handleRequest(request: Request): Promise<Response> {
   if (request.method === "POST" && url.pathname === "/webhooks/chatwoot-agentbot") {
     increment("bot_webhook_received_total");
     const rawBody = await readRawBody(request);
+    if(!rawBody)return Response.json({error:"body_too_large"},{status:413});
     const verify = verifyChatwootWebhook({
       rawBody,
       signature: request.headers.get("x-chatwoot-signature"),
@@ -174,6 +184,7 @@ export async function handleRequest(request: Request): Promise<Response> {
   if (request.method === "POST" && url.pathname === "/webhooks/zammad") {
     increment("zammad_webhook_received_total");
     const rawBody = await readRawBody(request);
+    if(!rawBody)return Response.json({error:"body_too_large"},{status:413});
     const verify = verifyZammadWebhook({
       rawBody,
       signature: request.headers.get("x-hub-signature"),
@@ -196,6 +207,7 @@ export async function handleRequest(request: Request): Promise<Response> {
     try {
       const parsed = JSON.parse(rawBody.toString("utf8")) as import("@yubie/integrations").ZammadTriggerPayload;
       const refs = parseZammadTriggerPayload(parsed);
+      if(!refs)return Response.json({error:"invalid_event"},{status:400});
       if (refs) {
         eventType = refs.eventType;
         conversationRef = refs.ticketId;
@@ -240,8 +252,8 @@ export async function shutdownBotRuntime() {
     await bossInstance.stop({ graceful: true, timeout: 5000 });
     bossInstance = null;
   }
-  for (const database of databaseInstances) {
-    await closeDatabase(database);
+  if (databaseInstance) {
+    await closeDatabase(databaseInstance);
+    databaseInstance = null;
   }
-  databaseInstances.clear();
 }

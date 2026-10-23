@@ -158,6 +158,8 @@ export const webhookInbox = pgTable("webhook_inbox", {
 ]);
 
 export const conversationSessions = pgTable("conversation_sessions", {
+  resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "string" }),
+  botReleasedAt: timestamp("bot_released_at", { withTimezone: true, mode: "string" }),
   id: text("id").primaryKey(),
   provider: text("provider").notNull().default("chatwoot"),
   providerThreadId: text("provider_thread_id"),
@@ -211,6 +213,9 @@ export const assistantActions = pgTable("assistant_actions", {
 });
 
 export const assistantOutboxStatusEnum = pgEnum("assistant_outbox_status", [
+  "accepted",
+  "sent",
+  "cancelled",
   "pending",
   "delivering",
   "delivered",
@@ -220,6 +225,9 @@ export const assistantOutboxStatusEnum = pgEnum("assistant_outbox_status", [
 ]);
 
 export const assistantOutbox = pgTable("assistant_outbox", {
+  dependsOnId: text("depends_on_id"),
+  leaseUntil: timestamp("lease_until", { withTimezone: true, mode: "string" }),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: "string" }),
   id: text("id").primaryKey(),
   runId: text("run_id"),
   provider: text("provider").notNull().default("chatwoot"),

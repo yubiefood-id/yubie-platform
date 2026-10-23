@@ -141,6 +141,7 @@ test("outbound article uses the exact configured article type", async () => {
     updated_at: new Date().toISOString(),
     created_at: new Date().toISOString(),
   });
+  client.articlesByTicket.set("1", [{id:0,ticket_id:1,sender:'Customer',type:'whatsapp-message',internal:false,body:'halo',created_at:new Date().toISOString()}]);
   const provider = new ZammadSupportProvider(client, "whatsapp-message");
   const result = await provider.sendReply({
     threadRef: { provider: "zammad", threadId: "1" },

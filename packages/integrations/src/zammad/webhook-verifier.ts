@@ -73,6 +73,7 @@ export function buildZammadDedupeKey(parts: {
   articleId?: string;
   payloadHash: string;
 }): string {
+  if(parts.ticketId && parts.articleId)return `${parts.provider}:${parts.ticketId}:${parts.articleId}`;
   if (parts.deliveryId) return parts.deliveryId;
   return `${parts.provider}:${parts.ticketId ?? "na"}:${parts.articleId ?? "na"}:${parts.payloadHash}`;
 }

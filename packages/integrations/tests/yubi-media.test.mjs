@@ -15,6 +15,8 @@ test('approved final PNG is a native article attachment with stable delivery mar
     const fileName=digest+'.png';await writeFile(join(root,fileName),bytes);
     const asset={assetId:'flour-final-test',productId:'flour',kind:'final-photograph',approvalStatus:'approved',approvalRef:'SYNTHETIC_TEST_ONLY',sha256:digest,fileName,mimeType:'image/png',byteLength:bytes.length,width:4,height:4};
     const client=new FakeZammadClient();
+    client.tickets.set('1',{id:1,number:'1',title:'synthetic',group_id:1,state_id:1,priority_id:1,owner_id:0,customer_id:5,created_at:new Date().toISOString(),updated_at:new Date().toISOString()});
+    client.articlesByTicket.set('1',[{id:0,ticket_id:1,sender:'Customer',type:'whatsapp message',internal:false,body:'halo',created_at:new Date().toISOString()}]);
     const provider=new ZammadSupportProvider(client,'whatsapp message',{root,assets:[asset]});
     const command={threadRef:{provider:'zammad',threadId:'1'},productId:'flour',assetId:asset.assetId,caption:'Yubie Flour',websiteUrl:'https://yubiefood.com/products/yubie-flour',idempotencyKey:'media-1',correlationId:'test-1'};
     const r=await provider.sendProductMedia(command);
