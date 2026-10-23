@@ -355,3 +355,18 @@ A	packages/validation/src/promotion.ts
 A	packages/validation/tests/checkout-v3.test.mjs
 M	playwright.config.ts
 ```
+
+
+## Final read-only production inspection
+
+Vercel deployment inspection confirms `dpl_9GSJiRbcwEgMmMJutiNRv4YuNcQs`
+currently owns BOTH `yubiefood.com` and `www.yubiefood.com` (also its project
+aliases). Its immutable URL is https://yubie-i0j3oj3wl-asyams-projects.vercel.app
+and source SHA is `fabb8c2b0b7a495867372b89d60a2af547de69cd`.
+This verifies the current production mapping only. A financially compatible,
+operator-accepted last-known-good rollback remains UNVERIFIED; do not promote or
+roll back to it merely on READY/alias status. No production state was modified.
+
+The handoff has also been persisted in Beads issue yubie-8xs.8 and memory key
+full-commerce-mandatory-release-scope. The next session must retain the full-
+commerce scope correction even if an older task brief mentions catalog launch.
