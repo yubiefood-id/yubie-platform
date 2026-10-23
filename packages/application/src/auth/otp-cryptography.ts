@@ -13,7 +13,7 @@ export class OtpCryptography {
     return /^[a-f0-9]{64}$/.test(left) && /^[a-f0-9]{64}$/.test(right) && timingSafeEqual(Buffer.from(left), Buffer.from(right));
   }
   seal(value: string): string {
-    const iv = randomBytes(12), cipher = createCipheriv("aes-256-gcm", this.encryptionKey, iv);
+    const iv = randomBytes(12), cipher = createCipheriv("aes-256-gcm", this.encryptionKey, iv, { authTagLength: 16 });
     const bytes = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
     return Buffer.concat([iv, cipher.getAuthTag(), bytes]).toString("base64url");
   }
@@ -21,7 +21,7 @@ export class OtpCryptography {
     if (value.length > 8192) throw new Error("OTP_PAYLOAD_INVALID");
     const bytes = Buffer.from(value, "base64url");
     if (bytes.length < 29) throw new Error("OTP_PAYLOAD_INVALID");
-    const cipher = createDecipheriv("aes-256-gcm", this.encryptionKey, bytes.subarray(0, 12));
+    const cipher = createDecipheriv("aes-256-gcm", this.encryptionKey, bytes.subarray(0, 12), { authTagLength: 16 });
     cipher.setAuthTag(bytes.subarray(12, 28));
     return Buffer.concat([cipher.update(bytes.subarray(28)), cipher.final()]).toString("utf8");
   }

@@ -1,5 +1,5 @@
 import { getApiOrigin } from "@/lib/api-origin";
-import { forwardableProxyHeaders } from "./proxy-headers";
+import { forwardableProxyHeaders, customerProxyHeaders } from "./proxy-headers";
 import { directCommerce } from "@/config/launch";
 
 /** Server hop timeout: a hung API must never pin the web worker. */
@@ -17,7 +17,7 @@ export async function proxyApi(request: Request, path: string): Promise<Response
   // Catalog releases have no backend dependency and accept no customer data.
   // Marketplace links come only from the reviewed static listing manifest.
   if (!directCommerce) return Response.json({ ok: false, code: "FEATURE_DISABLED" }, { status: 503, headers: { "cache-control": "no-store" } });
-  const headers: Record<string, string> = { "content-type": "application/json", ...forwardableProxyHeaders(request.headers) };
+  const headers: Record<string, string> = { "content-type": "application/json", ...forwardableProxyHeaders(request.headers), ...customerProxyHeaders(request, process.env.WEB_TRUST_CLOUDFLARE_IP === "true") };
   const cookie = request.headers.get("cookie");
   if (cookie) headers.cookie = cookie;
   if (process.env.API_PROXY_TOKEN) headers["x-api-proxy-token"] = process.env.API_PROXY_TOKEN;
@@ -45,6 +45,8 @@ export async function proxyApi(request: Request, path: string): Promise<Response
   responseHeaders.set("cache-control", "no-store");
   const contentType = upstream.headers.get("content-type");
   if (contentType) responseHeaders.set("content-type", contentType);
+  const retryAfter = upstream.headers.get("retry-after");
+  if (retryAfter && /^\d{1,5}$/.test(retryAfter)) responseHeaders.set("retry-after", retryAfter);
   const requestId = upstream.headers.get("x-request-id");
   responseHeaders.set("x-request-id", requestId && /^[A-Za-z0-9_-]{1,64}$/.test(requestId) ? requestId : correlationId);
   const setCookies = typeof upstream.headers.getSetCookie === "function" ? upstream.headers.getSetCookie() : [];

@@ -6,6 +6,7 @@ export interface CustomerProof { userId: string; authenticatedAt: string; sessio
 export interface PhoneAuthDeps {
   tx: TransactionManager; clock: Clock; ids: IdGenerator; tokens: SessionTokenService;
   crypto: OtpCryptography; allowedCountries: string[];
+  verifyNewChallengeProof?: () => Promise<boolean>;
 }
 export interface StartPhoneInput {
   phone: string; country: string; browser: string; ip: string; idempotencyKey: string;
@@ -30,7 +31,7 @@ export async function isCustomerProofValid(repos: TransactionalRepositories, act
 }
 export async function startPhoneChallenge(input: StartPhoneInput, deps: PhoneAuthDeps): Promise<UseCaseResult<{ id: string; state: string; expiresAt: string; resendAfter: string }>> {
   const phone = normalizePhone(input.phone, input.country), now = deps.clock.now(), ms = Date.parse(now);
-  if (!phone || !phone.country || !deps.allowedCountries.includes(phone.country) || !input.captchaVerified || input.browser.length < 24 || input.browser.length > 128 || input.idempotencyKey.length < 16 || input.idempotencyKey.length > 128) return fail("validation");
+  if (!phone || !phone.country || !deps.allowedCountries.includes(phone.country) || input.browser.length < 24 || input.browser.length > 128 || input.idempotencyKey.length < 16 || input.idempotencyKey.length > 128) return fail("validation");
   if (input.purpose !== "login" && (!input.actor || (input.purpose === "link_phone" && !recent(input.actor, ms)))) return fail("unauthorized");
   const browserHash = deps.crypto.hash("browser:" + input.browser), phoneHash = deps.crypto.hash("phone:" + phone.e164);
   const requestHash = deps.crypto.hash(JSON.stringify([phone.e164, input.purpose, input.actor?.userId ?? null]));
@@ -39,6 +40,9 @@ export async function startPhoneChallenge(input: StartPhoneInput, deps: PhoneAut
     if (input.purpose !== "login" && !await isCustomerProofValid(repos, input.actor, now, input.purpose === "link_phone")) return fail("unauthorized");
     const existing = await store.findRequest(browserHash, input.idempotencyKey);
     if (existing) return existing.requestHash === requestHash ? ok({ id: existing.id, state: existing.deliveryState, expiresAt: existing.expiresAt, resendAfter: new Date(Date.parse(existing.createdAt) + 60_000).toISOString() }) : fail("conflict");
+    // An exact persisted retry does not consume a single-use CAPTCHA again.
+    // New challenges always require proof while the admission lock is held.
+    if (!input.captchaVerified && !await deps.verifyNewChallengeProof?.()) return fail("forbidden");
     if (input.purpose === "reauth") {
       const own = await store.findUserIdentity(input.actor!.userId, "phone");
       if (own?.subject !== phone.e164) return fail("unauthorized");

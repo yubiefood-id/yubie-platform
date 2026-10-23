@@ -30,6 +30,8 @@ import { catalog } from "./catalog.js";
 import { createAppContext, type AppContext } from "./composition/create-app.js";
 import { createRequestId } from "./middleware/request-id.js";
 import { logEvent } from "./middleware/log.js";
+import { handleCustomerIdentity } from "./customer-identity.js";
+import { customerBootstrap } from "./customer-security.js";
 
 const commerce = new PreviewCommerceProvider();
 let appContext: AppContext | null = null;
@@ -190,6 +192,8 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
 
   const gate = proxyTrustGate(request, url.pathname);
   if (gate) return gate;
+  const identityResponse = await handleCustomerIdentity(request, ctx);
+  if (identityResponse) return identityResponse;
 
   if (request.method === "GET" && url.pathname === "/healthz") {
     return json({ ok: true, service: "yubie-api", version: "v1", releaseSha: ctx.releaseSha });
@@ -527,7 +531,8 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
   if (request.method === "GET" && url.pathname === "/v1/auth/session") {
     const user = await resolveSession(readSessionToken(request), { sessions: ctx.authSessions, users: ctx.users, tokens: ctx.tokens, clock: ctx.clock });
     if (!user.ok) return json({ ok: false, code: "CUSTOMER_STORAGE_UNAVAILABLE" }, { status: 503 });
-    return json({ ok: true, data: { authenticated: user.value !== null, user: user.value, googleClientId: ctx.googleClientId } });
+    const bootstrap = customerBootstrap(request, ctx);
+    return json({ ok: true, data: { authenticated: user.value !== null, user: user.value, googleClientId: ctx.googleClientId, csrfToken: bootstrap.csrfToken, phoneAvailable: !!ctx.phoneAuth, otpCountries: ctx.phoneAuth?.allowedCountries ?? [] } }, { headers: bootstrap.headers });
   }
 
   const accountOrderMatch = url.pathname.match(/^\/v1\/account\/orders(?:\/([^/]+))?$/);
@@ -568,7 +573,7 @@ const SESSION_COOKIE = "yubie_session";
 
 function readSessionToken(request: Request): string | null {
   const match = request.headers.get("cookie")?.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
-  return match?.[1] ? decodeURIComponent(match[1]) : null;
+  try { return match?.[1] ? decodeURIComponent(match[1]) : null; } catch { return null; }
 }
 
 function sessionCookie(token: string, expiresAt: string, secure: boolean): string {

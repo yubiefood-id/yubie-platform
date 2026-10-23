@@ -6,6 +6,7 @@ export * from "./zammad/index.js";
 export * from "./support/index.js";
 export * from "./xendit/xendit-payment-provider.js";
 export * from "./smsgate/otp-delivery.js";
+export * from "./smsgate/turnstile.js";
 export * from "./ipaymu/signature.js";
 export * from "./ipaymu/ipaymu-payment-provider.js";
 export * from "./ipaymu/sandbox-probe.js";

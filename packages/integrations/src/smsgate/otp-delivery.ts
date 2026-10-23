@@ -10,7 +10,8 @@ export class SmsgateOtpDelivery implements OtpDeliveryPort {
   private readonly fetchFn: typeof fetch;
   private readonly authorization: string;
   constructor(private readonly options: SmsgateOptions) {
-    const url = new URL(options.baseUrl);
+    let url: URL;
+    try { url = new URL(options.baseUrl); } catch { throw new Error("SMSGATE_CONFIG_INVALID"); }
     if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || !["/", "/3rdparty/v1"].includes(url.pathname) || !options.username || !options.password || !/^[A-Za-z0-9_-]{1,96}$/.test(options.deviceId) || !Number.isInteger(options.simNumber) || options.simNumber < 1 || options.simNumber > 4) throw new Error("SMSGATE_CONFIG_INVALID");
     this.base = url.origin + "/3rdparty/v1";
     this.fetchFn = options.fetchFn ?? fetch;

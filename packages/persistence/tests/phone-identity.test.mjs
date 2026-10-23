@@ -92,3 +92,18 @@ test('a phone-first customer can add Google with both proofs without changing ow
  const google=await a.googleLogin({credential:'synthetic',csrfToken:'a',csrfCookie:'a'},auth);assert.equal(google.ok,true);assert.equal(google.value.user.id,actor.userId);assert.equal(google.value.user.phoneVerified,true);
  const conflict=await a.linkGoogleIdentity({credential:'synthetic',csrfToken:'a',csrfCookie:'a',actor:{...actor,sessionHash:deps.tokens.hash(google.value.sessionToken)}},{...auth,verifier:{async verify(){return{ok:true,value:{sub:'legacy-google-sub',email:null,emailVerified:false,name:null,picture:null}};}}});assert.equal(conflict.ok,false);assert.equal(conflict.error.code,'conflict');
 });
+
+test('audit failure rolls back proof consumption, identity and session atomically',{skip:!enabled},async()=>{
+ deps=context();now+=3600_000;
+ const c=await delivered({...request('synthetic-browser-binding-00000012'),phone:'+12025550102',country:'US'});
+ const before=(await db.client`SELECT id FROM auth_sessions`).length;
+ await db.client.unsafe("CREATE FUNCTION reject_phone_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='identity.phone_verified' THEN RAISE EXCEPTION 'synthetic audit outage'; END IF; RETURN NEW; END $$");
+ await db.client.unsafe("CREATE TRIGGER reject_phone_audit BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION reject_phone_audit()");
+ try {
+  const failed=await a.verifyPhoneChallenge({id:c.id,code:c.code,browser:c.input.browser},deps);assert.equal(failed.ok,false);assert.equal(failed.error.code,'unavailable');
+  assert.equal((await db.client`SELECT id FROM auth_sessions`).length,before);
+  assert.equal((await db.client`SELECT state FROM phone_verifications WHERE id=${c.id}`)[0].state,'active');
+  assert.equal((await db.client`SELECT id FROM auth_identities WHERE provider='phone' AND subject='+12025550102'`).length,0);
+ } finally {await db.client.unsafe('DROP TRIGGER reject_phone_audit ON audit_events');await db.client.unsafe('DROP FUNCTION reject_phone_audit()');}
+ assert.equal((await a.verifyPhoneChallenge({id:c.id,code:c.code,browser:c.input.browser},deps)).ok,true);
+});

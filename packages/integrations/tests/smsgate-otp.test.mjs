@@ -15,3 +15,7 @@ test('SMS transport uncertainty and provider404 never authorize a second message
  await assert.rejects(()=>uncertain.send({id:'otp_synthetic',phone:'+12025550100',code:'012345',ttlSeconds:220}),/SMS_SEND_UNCERTAIN/);
  assert.throws(()=>new integrations.SmsgateOtpDelivery({...options,baseUrl:'http://gateway.invalid'}),/SMSGATE_CONFIG_INVALID/);
 });
+
+test('invalid gateway configuration produces only a bounded non-secret error',()=>{
+ assert.throws(()=>new integrations.SmsgateOtpDelivery({...options,baseUrl:'secret-bearing invalid URL'}),error=>error.message==='SMSGATE_CONFIG_INVALID'&&!String(error).includes('secret-bearing'));
+});

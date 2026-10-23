@@ -8,6 +8,7 @@ import { startMetricsServer } from "./metrics-server.js";
 import { reconcileSupport } from "./reconcile-handler.js";
 import { deliverSupportOutbox, processPendingOutbox } from "./reply-delivery-handler.js";
 import { runPaymentReconcile } from "./payment-reconcile-handler.js";
+import { runPhoneDelivery } from "./phone-delivery-handler.js";
 
 // Fail closed before any queue starts processing: an invalid runtime
 // configuration (unknown provider, missing Zammad values in
@@ -102,6 +103,11 @@ async function start() {
     }
   });
   await boss.schedule("payment.reconcile", "*/5 * * * *", {});
+  await boss.createQueue("identity.delivery");
+  await boss.work("identity.delivery", { batchSize: 1 }, async () => {
+    await runPhoneDelivery(repos.database);
+  });
+  await boss.schedule("identity.delivery", "* * * * *", {});
 
   await boss.work("listing.health", async (jobs) => {
     for (const job of jobs) {
@@ -131,6 +137,7 @@ async function start() {
     if(sweeping)return;
     sweeping=true;
     try {
+      await boss.send("identity.delivery", {}, { singletonKey: "phone-delivery", retryLimit: 3, retryDelay: 10 });
       const provider=process.env.SUPPORT_PROVIDER??process.env.CHAT_PROVIDER??"fake";
       const inboxProvider=provider==="chatwoot"?"chatwoot_agentbot":provider;
       const work=new PostgresAssistantWorkRepository(repos.database);

@@ -2,6 +2,7 @@ import {
   AllowlistAttributionPolicy,
   CryptoIdGenerator,
   CryptoSessionTokenService,
+  OtpCryptography,
   InMemoryAuditRepository,
   InMemoryGrowthRepository,
   InMemoryIdempotencyRepository,
@@ -34,10 +35,11 @@ import {
 } from "@yubie/application";
 import {
   inspectCommerceRuntimeConfig,
+  parseIdentityRuntimeConfig,
   parseCommerceRuntimeConfig,
   type CommerceRuntimeConfig,
 } from "@yubie/config";
-import { DefaultRedirectAllowlistPolicy, GoogleIdTokenVerifier, createCommercePaymentProvider } from "@yubie/integrations";
+import { DefaultRedirectAllowlistPolicy, GoogleIdTokenVerifier, createCommercePaymentProvider, TurnstileVerifier } from "@yubie/integrations";
 import {
   createDatabase,
   PostgresHealthProbe,
@@ -85,6 +87,8 @@ export interface AppContext {
   googleClientId: string | null;
   tx: TransactionManager;
   identityTransactions?: TransactionManager;
+  database?: ReturnType<typeof createDatabase>;
+  phoneAuth?: { crypto: OtpCryptography; allowedCountries: string[]; verifyCaptcha(token: string, ip: string): Promise<boolean> };
 }
 
 const STATIC_ACTIVE_LISTING: MarketplaceListing = {
@@ -146,6 +150,9 @@ export function createAppContext(): AppContext {
   const clock: Clock = new SystemClock();
   const ids: IdGenerator = new CryptoIdGenerator();
   const tokens = new CryptoSessionTokenService();
+  const phoneConfig = parseIdentityRuntimeConfig(process.env, "api");
+  const captcha = phoneConfig ? new TurnstileVerifier(phoneConfig.turnstileSecretKey, new URL(phoneConfig.appOrigin).hostname) : null;
+  const phoneAuth = phoneConfig ? { crypto: new OtpCryptography({ hashKey: phoneConfig.hashSecret, encryptionKey: phoneConfig.encryptionKey }), allowedCountries: phoneConfig.allowedCountries, verifyCaptcha: (token: string, ip: string) => captcha!.verify(token, ip) } : undefined;
 
   const paymentMode = commerce.provider === "xendit" || commerce.provider === "ipaymu" ? commerce.provider : "preview";
   const paymentProvider = paymentMode === "preview" ? null : createCommercePaymentProvider(process.env);
@@ -204,6 +211,8 @@ export function createAppContext(): AppContext {
       verifier,
       googleClientId,
       identityTransactions,
+      database,
+      ...(phoneAuth ? { phoneAuth } : {}),
       tx: transactional
         ? new PostgresTransactionManager(database)
         : new InMemoryTransactionManager({

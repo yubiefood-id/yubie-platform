@@ -21,6 +21,22 @@ export function forwardableProxyHeaders(headers: Headers): Record<string, string
   return forwarded;
 }
 
+/** Enable IP trust only on an ingress that overwrites CF-Connecting-IP and
+ * prevents direct origin access. Arbitrary browser-provided internal headers
+ * are never forwarded. Without that operator setup phone auth fails closed. */
+export function customerProxyHeaders(request: Request, trustedCloudflareIngress: boolean): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const csrf = request.headers.get("x-csrf-token");
+  if (csrf && /^[a-f0-9]{64}$/.test(csrf)) headers["x-csrf-token"] = csrf;
+  const origin = request.headers.get("origin");
+  if (origin) headers["x-yubie-browser-origin"] = origin;
+  const site = request.headers.get("sec-fetch-site");
+  if (site) headers["sec-fetch-site"] = site;
+  const ip = trustedCloudflareIngress ? request.headers.get("cf-connecting-ip") : null;
+  if (ip && ip.length <= 45 && /^[0-9a-fA-F:.]+$/.test(ip)) headers["x-yubie-client-ip"] = ip;
+  return headers;
+}
+
 /**
  * One logical checkout attempt = one idempotency key.
  *

@@ -598,6 +598,7 @@ export function parseServiceRuntimeConfig(env: RuntimeEnvSource = process.env, s
     } catch (error) {
       errors.push(configMessage(error));
     }
+    try { parseIdentityRuntimeConfig(env, service); } catch (error) { errors.push(configMessage(error)); }
   }
 
   if (service === "api" && deployment && !env.API_PROXY_TOKEN) {
@@ -648,4 +649,6 @@ export function inspectServiceRuntimeConfig(env: RuntimeEnvSource = process.env,
   }
 }
 export * from "./yubi-capabilities.js";
+export * from "./identity-runtime.js";
 export * from "./launch.js";
+import { parseIdentityRuntimeConfig } from "./identity-runtime.js";
