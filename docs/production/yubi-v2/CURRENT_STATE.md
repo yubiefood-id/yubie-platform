@@ -33,3 +33,19 @@ preserved. Work occurs on feat/yubi-v2 in a dedicated persistent worktree.
 
 Initial verdict: Yubi production NO-GO; website transactional commerce separately
 NO-GO. PUBLIC_CATALOG_NO_SALES and payment disabled remain unchanged.
+
+## Engineering delta
+
+The dedicated implementation adds an opt-in deterministic-v2 flow, server catalog
+and immutable photo resolver, native Zammad image article support, capability-aware
+website navigation, atomic durable turns and ordered/reconciled outbound effects.
+V1 remains the default until an audited version selection. Human ownership is
+separate from navigation; closure does not release it. OFF still routes internal
+food-safety reports without customer replies. PostgreSQL outage returns 503 before
+acknowledgment; queue restart and replay are covered with real local pg-boss.
+
+All existing catalog illustrations fail the final-photograph requirement, so the
+approved photo manifest is empty. Honest text fallback is implemented. This does
+not meet R2 or real image delivery acceptance. No live deployment, product/media
+approval or operator acceptance occurred. See TEST_AND_ACCEPTANCE.md and the
+candidate RELEASE_RECEIPT.json for scoped test and release status.
