@@ -31,9 +31,10 @@ import { createAppContext, type AppContext } from "./composition/create-app.js";
 import { createRequestId } from "./middleware/request-id.js";
 import { logEvent } from "./middleware/log.js";
 import { handleCustomerIdentity } from "./customer-identity.js";
-import { customerBootstrap } from "./customer-security.js";
+import { customerBootstrap, currentCustomerProof } from "./customer-security.js";
 import { handleCustomerAddresses } from "./customer-addresses.js";
 import { handleCustomerLocations } from "./customer-locations.js";
+import { handleCustomerPromotions } from "./customer-promotions.js";
 
 const commerce = new PreviewCommerceProvider();
 let appContext: AppContext | null = null;
@@ -157,6 +158,8 @@ function checkoutError(code: string): { status: number; code: string } {
   switch (code) {
     case "validation":
       return { status: 400, code: "INVALID_REQUEST" };
+    case "forbidden":
+      return { status: 403, code: "PROMOTION_NOT_ELIGIBLE" };
     case "out_of_stock":
       return { status: 409, code: "INSUFFICIENT_INVENTORY" };
     case "conflict":
@@ -200,6 +203,8 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
   if (addressResponse) return addressResponse;
   const locationResponse = await handleCustomerLocations(request, ctx);
   if (locationResponse) return locationResponse;
+  const promotionResponse = await handleCustomerPromotions(request, ctx);
+  if (promotionResponse) return promotionResponse;
 
   if (request.method === "GET" && url.pathname === "/healthz") {
     return json({ ok: true, service: "yubie-api", version: "v1", releaseSha: ctx.releaseSha });
@@ -344,6 +349,7 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     }
     const parsed = checkoutRequestSchema.safeParse(parsedJson);
     if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    if (ctx.paymentMode === "preview" && parsed.data.promoCode?.trim()) return json({ ok: false, code: "PROMOTION_UNAVAILABLE" }, { status: 503 });
     if (ctx.paymentMode !== "preview" && ctx.paymentProvider) {
       // First-party flow (ADR-012): server re-prices every line from the
       // canonical catalog, creates the order + Xendit payment session, and
@@ -357,6 +363,7 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
       const principal = checkoutPrincipalKey({ userId: sessionUser.value?.id ?? null, guestToken: guest.token });
       if (!principal) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
       const cookieHeaders: Record<string, string> = guestCookie ? { "set-cookie": guestCookie } : {};
+      const customerProof = parsed.data.promoCode && sessionUser.value ? await currentCustomerProof(request, ctx) : undefined;
       const result = await createFirstPartyCheckout({
         lines: parsed.data.lines,
         customerEmail: parsed.data.customerEmail,
@@ -372,6 +379,8 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
         idempotencyKey: request.headers.get("idempotency-key"),
         idempotencyPrincipal: principal,
         ...(parsed.data.promoCode ? { promoCode: parsed.data.promoCode } : {}),
+        ...(customerProof ? { customerProof } : {}),
+        ...(guest.existing ? { possessedGuestPrincipal: checkoutPrincipalKey({ guestToken: guest.token })! } : {}),
       }, { tx: ctx.tx, provider: ctx.paymentProvider, clock: ctx.clock, ids: ctx.ids });
       if (!result.ok) {
         logEvent("api.checkout_failed", { requestId, errorCode: result.error.code });

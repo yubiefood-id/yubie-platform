@@ -197,7 +197,7 @@ export function CheckoutView() {
         <div><span>Subtotal</span><span>{formatRupiah(subtotal)}</span></div>
         <form className="promo-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); applyPromo(String(data.get("promo") ?? "")); }}>
           <label htmlFor="checkout-promo">Kode promo</label>
-          <div><input id="checkout-promo" name="promo" defaultValue={promoCode ?? ""} placeholder="YUBIE15" autoCapitalize="characters" /><button type="submit">Terapkan</button></div>
+          <div><input id="checkout-promo" name="promo" defaultValue={promoCode ?? ""} placeholder="Masukkan kode promo" autoCapitalize="characters" /><button type="submit">Terapkan</button></div>
         </form>
         {promotion && <div className="discount-row"><span>Promo {promotion.code} <button type="button" onClick={clearPromo}>Hapus</button></span><span>−{formatRupiah(promotion.discountAmount)}</span></div>}
         <div className="total"><span>Total</span><span>{formatRupiah(total)}</span></div>

@@ -4,7 +4,7 @@ before(async()=>{
  if(!enabled)return;admin=p.createDatabase(process.env.DATABASE_URL);name='promotions_v3_'+randomUUID().replaceAll('-','');await admin.client.unsafe(`CREATE DATABASE "${name}"`);const url=new URL(process.env.DATABASE_URL);url.pathname='/'+name;db=p.createDatabase(url.toString());
  const dir=new URL('../migrations/',import.meta.url);for(const f of(await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())await db.client.begin(async s=>s.unsafe(await readFile(new URL(f,dir),'utf8')));
  now=Date.parse('2026-10-23T12:00:00Z');deps={tx:new p.PostgresTransactionManager(db),clock:{now:()=>new Date(now).toISOString()},ids:{nextId:()=>randomUUID()},tokens:new a.CryptoSessionTokenService()};actors=[];
- for(let i=0;i<6;i++){
+ for(let i=0;i<7;i++){
   const id='promo_user_'+i,time=deps.clock.now(),issued=deps.tokens.issue();await db.client`INSERT INTO users(id,created_at,updated_at) VALUES(${id},${time},${time})`;
   await db.client`INSERT INTO auth_sessions(id,user_id,token_hash,created_at,expires_at) VALUES(${id},${id},${issued.tokenHash},${time},${new Date(now+86400_000).toISOString()})`;
   if(i!==2)await db.client`INSERT INTO auth_identities(id,user_id,provider,subject,verified_at,created_at) VALUES(${'phone_'+id},${id},'phone',${'+1202555010'+i},${time},${time})`;
@@ -70,4 +70,31 @@ test('crash window during provider create is marked before sending and cannot re
  assert.equal((await db.client`SELECT state FROM promotion_redemptions WHERE user_id=${actors[5].userId}`)[0].state,'reserved');
  finish({ok:false,error:{code:'validation',message:'synthetic definitive rejection',retryable:false,requestId:'synthetic'}});await running;
  assert.equal((await db.client`SELECT state FROM promotion_redemptions WHERE user_id=${actors[5].userId}`)[0].state,'released');
+});
+
+test('a pending promotional checkout blocks a competing full-price attempt',{skip:!enabled},async()=>{
+ let calls=0;const provider={async createPaymentSession(){calls++;throw Error('must not create');}};
+ const result=await a.createFirstPartyCheckout({lines:[{productId:'shake',sizeId:'sachet',quantity:1}],customerEmail:'synthetic@example.invalid',userId:actors[4].userId,idempotencyPrincipal:'user:'+actors[4].userId,idempotencyKey:randomUUID(),successReturnUrl:'https://local.test/success',cancelReturnUrl:'https://local.test/cancel'},{...deps,provider});
+ assert.equal(result.ok,false);assert.equal(result.error.code,'pending_reconciliation');assert.equal(calls,0);
+});
+test('parallel payable attempts share one reservation and provider create',{skip:!enabled},async()=>{
+ let calls=0;const provider={async createPaymentSession(input){calls++;await new Promise(resolve=>setTimeout(resolve,20));return{ok:true,value:{providerSessionId:'synthetic_'+input.referenceId,redirectUrl:'https://payments.invalid/synthetic',rawStatus:'ACTIVE',expiresAt:null}};}};
+ const input={lines:[{productId:'flour',sizeId:'250g',quantity:1}],customerEmail:'synthetic@example.invalid',userId:actors[3].userId,customerProof:actors[3],promoCode:'YUBIE15',idempotencyPrincipal:'user:'+actors[3].userId,successReturnUrl:'https://local.test/success',cancelReturnUrl:'https://local.test/cancel'};
+ const results=await Promise.all(Array.from({length:8},()=>a.createFirstPartyCheckout({...input,idempotencyKey:randomUUID()},{...deps,provider})));
+ assert.equal(calls,1);assert.equal(results.every(result=>result.ok||result.error.code==='pending_reconciliation'),true);assert.equal((await db.client`SELECT id FROM promotion_redemptions WHERE user_id=${actors[3].userId} AND state='reserved'`).length,1);
+});
+test('grant and consumption audit failures roll back their complete business transactions',{skip:!enabled},async()=>{
+ await db.client.unsafe("CREATE FUNCTION reject_promotion_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action IN('promotion.entitled','promotion.consumed') THEN RAISE EXCEPTION 'synthetic promotion audit outage'; END IF; RETURN NEW; END $$");
+ await db.client.unsafe("CREATE TRIGGER reject_promotion_audit BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION reject_promotion_audit()");
+ const [redemption]=await db.client`SELECT * FROM promotion_redemptions WHERE user_id=${actors[3].userId} AND state='reserved'`;
+ try{
+  const failed=await a.claimWelcomePromotion({actor:actors[6]},deps);assert.equal(failed.ok,false);assert.equal(failed.error.code,'unavailable');assert.equal((await db.client`SELECT id FROM promotion_entitlements WHERE user_id=${actors[6].userId}`).length,0);
+  await assert.rejects(()=>transition(redemption.order_id,'succeeded'));assert.equal((await db.client`SELECT status FROM order_payments WHERE order_id=${redemption.order_id}`)[0].status,'pending');assert.equal((await db.client`SELECT state FROM promotion_redemptions WHERE id=${redemption.id}`)[0].state,'reserved');
+ }finally{await db.client.unsafe('DROP TRIGGER reject_promotion_audit ON audit_events');await db.client.unsafe('DROP FUNCTION reject_promotion_audit()');}
+ assert.equal((await a.claimWelcomePromotion({actor:actors[6]},deps)).ok,true);await transition(redemption.order_id,'succeeded');assert.equal((await db.client`SELECT state FROM promotion_redemptions WHERE id=${redemption.id}`)[0].state,'consumed');
+});
+test('campaign and local payment expiry do not release an unknown financial outcome',{skip:!enabled},async()=>{
+ now+=2*86400_000;const provider={async getPaymentSession(){return{ok:true,value:null};},async cancelPaymentSession(){return{ok:true,value:{accepted:false}};}};
+ await a.reconcilePayments({...deps,provider,orders:new p.PostgresOrderRepository(db),payments:new p.PostgresPaymentRepository(db)});
+ assert.equal((await a.getWelcomePromotion({},deps)).value.available,false);assert.equal((await db.client`SELECT state FROM promotion_redemptions WHERE user_id=${actors[4].userId}`)[0].state,'reserved');
 });

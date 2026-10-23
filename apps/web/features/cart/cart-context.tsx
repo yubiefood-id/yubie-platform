@@ -102,8 +102,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
     dispatch({ type: "hydrate", lines });
     try {
-      const promoCode = window.localStorage.getItem(PROMO_STORAGE_KEY);
-      if (promoCode) dispatch({ type: "applyPromo", code: promoCode });
+      window.localStorage.removeItem(PROMO_STORAGE_KEY);
     } catch {
       // Storage unavailable: promotion remains session-only.
     }
@@ -121,8 +120,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!state.hydrated) return;
     try {
-      if (state.promoCode) window.localStorage.setItem(PROMO_STORAGE_KEY, state.promoCode);
-      else window.localStorage.removeItem(PROMO_STORAGE_KEY);
+      window.localStorage.removeItem(PROMO_STORAGE_KEY);
     } catch {
       // Storage unavailable: promotion remains session-only.
     }

@@ -1,5 +1,4 @@
 import type { AssistantIntent } from "@yubie/domain";
-import { quotePromotion } from "@yubie/domain";
 import type { KnowledgeLookup } from "../knowledge-tools.js";
 import { isHumanAlias, matchesFoodSafety, matchesHealthEscalation, matchSupportEscalation } from "./aliases.js";
 import { normalizeInput } from "./normalizer.js";
@@ -123,10 +122,7 @@ export async function processV2(input: DeterministicTurnInput, deps: V2Deps): Pr
   if(target==="ORDER_PORTAL")text=V2_COPY[caps.account_available&&caps.order_portal_available?"order_available":"order_unavailable"]!;
   if(target==="PAYMENT_GUIDANCE")text=V2_COPY[caps.checkout_available?"payment_available":"payment_unavailable"]!;
   if(target==="PROMO_MENU") {
-    const approved=await deps.knowledge.getEffectivePublicKnowledge("promotion","brand:yubie");
-    const promo=approved?.data as {code?:string;percentage?:number;startsAt?:string;endsAt?:string;eligibility?:string}|undefined;
-    const quote=promo && typeof promo.code==="string"?quotePromotion(promo.code,100):null;
-    if(quote && promo?.percentage===quote.percentage && Date.parse(promo?.startsAt??"")<=Date.now() && Date.parse(promo?.endsAt??"")>Date.now() && typeof promo?.eligibility==="string" && promo.eligibility.length>0 && promo.eligibility.length<=800)text=`Promo ${quote.code}: diskon ${promo.percentage}%.\n${promo.eligibility}\nKonfirmasi ketentuan melalui website resmi atau tim Yubie.`;
+    text=caps.account_available?"Kelayakan promo diperiksa melalui akun di website resmi Yubie. Verifikasi nomor diperlukan; Yubi tidak menerbitkan kode atau menjanjikan diskon lewat chat.":"Verifikasi promo melalui akun website belum tersedia untuk layanan ini. Yubi tidak menerbitkan kode atau menjanjikan diskon lewat chat.";
     if(caps.catalog_available)text+="\nhttps://yubiefood.com/products";
   }
   if(target==="B2B_COLLECT")text=B2B_COPY[Number(s.context.collectIndex)]??V2_COPY.unavailable!;
