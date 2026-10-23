@@ -36,10 +36,11 @@ import {
 import {
   inspectCommerceRuntimeConfig,
   parseIdentityRuntimeConfig,
+  parseDeliveryMapsConfig,
   parseCommerceRuntimeConfig,
   type CommerceRuntimeConfig,
 } from "@yubie/config";
-import { DefaultRedirectAllowlistPolicy, GoogleIdTokenVerifier, createCommercePaymentProvider, TurnstileVerifier } from "@yubie/integrations";
+import { DefaultRedirectAllowlistPolicy, GoogleIdTokenVerifier, createCommercePaymentProvider, TurnstileVerifier, GoogleDeliveryLocationProvider } from "@yubie/integrations";
 import {
   createDatabase,
   PostgresHealthProbe,
@@ -89,6 +90,7 @@ export interface AppContext {
   identityTransactions?: TransactionManager;
   database?: ReturnType<typeof createDatabase>;
   phoneAuth?: { crypto: OtpCryptography; allowedCountries: string[]; verifyCaptcha(token: string, ip: string): Promise<boolean> };
+  deliveryLocations?: import("@yubie/application").DeliveryLocationProvider;
 }
 
 const STATIC_ACTIVE_LISTING: MarketplaceListing = {
@@ -151,6 +153,8 @@ export function createAppContext(): AppContext {
   const ids: IdGenerator = new CryptoIdGenerator();
   const tokens = new CryptoSessionTokenService();
   const phoneConfig = parseIdentityRuntimeConfig(process.env, "api");
+  const mapsConfig = parseDeliveryMapsConfig(process.env);
+  const deliveryLocations = mapsConfig ? new GoogleDeliveryLocationProvider(mapsConfig) : undefined;
   const captcha = phoneConfig ? new TurnstileVerifier(phoneConfig.turnstileSecretKey, new URL(phoneConfig.appOrigin).hostname) : null;
   const phoneAuth = phoneConfig ? { crypto: new OtpCryptography({ hashKey: phoneConfig.hashSecret, encryptionKey: phoneConfig.encryptionKey }), allowedCountries: phoneConfig.allowedCountries, verifyCaptcha: (token: string, ip: string) => captcha!.verify(token, ip) } : undefined;
 
@@ -213,6 +217,7 @@ export function createAppContext(): AppContext {
       identityTransactions,
       database,
       ...(phoneAuth ? { phoneAuth } : {}),
+      ...(deliveryLocations ? { deliveryLocations } : {}),
       tx: transactional
         ? new PostgresTransactionManager(database)
         : new InMemoryTransactionManager({

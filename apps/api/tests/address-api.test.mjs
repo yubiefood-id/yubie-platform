@@ -30,5 +30,9 @@ test('address APIs require a live customer session and CSRF, hide other owners a
  assert.equal((await call('/v1/account/default-address','PUT',{addressId:address.id},headers)).status,200);
  assert.equal((await call('/v1/account/addresses/'+address.id,'DELETE',undefined,headers)).status,200);
  assert.equal((await call('/v1/account/addresses/'+address.id,'PATCH',input,headers)).status,404);
- process.env.YUBIE_LAUNCH_PROFILE='PUBLIC_CATALOG_NO_SALES';assert.equal((await call('/v1/account/addresses','GET',undefined,headers)).status,503);
+ ctx.deliveryLocations={async autocomplete(){return[{id:'ChIJ_synthetic',label:'Lokasi uji'}];},async details(){return null;},async reverse(){return null;}};
+ const located=await call('/v1/locations/autocomplete','POST',{query:'Alamat uji',sessionToken:randomUUID()},{...headers,'x-yubie-client-ip':'127.0.0.1'});assert.equal(located.status,200);assert.equal((await located.json()).data[0].id,'ChIJ_synthetic');
+ for(let i=0;i<19;i++)await call('/v1/locations/autocomplete','POST',{query:'Alamat uji',sessionToken:randomUUID()},{...headers,'x-yubie-client-ip':'127.0.0.1'});
+ assert.equal((await call('/v1/locations/autocomplete','POST',{query:'Alamat uji',sessionToken:randomUUID()},{...headers,'x-yubie-client-ip':'127.0.0.1'})).status,429);assert.equal((await db.client`SELECT id FROM customer_addresses`).length,0);
+ process.env.YUBIE_LAUNCH_PROFILE='PUBLIC_CATALOG_NO_SALES';assert.equal((await call('/v1/locations/autocomplete','POST',{query:'Alamat uji',sessionToken:randomUUID()},headers)).status,503);assert.equal((await call('/v1/account/addresses','GET',undefined,headers)).status,503);
 });

@@ -362,3 +362,4 @@ export interface TransactionManager {
 export * from "./ports/support-conversation-provider.js";
 export * from "./ports/customer-identity.js";
 export * from "./ports/customer-address.js";
+export * from "./ports/delivery-location.js";
