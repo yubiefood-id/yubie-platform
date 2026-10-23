@@ -605,3 +605,9 @@ export const promotionRedemptions = pgTable("promotion_redemptions", {
   uniqueIndex("promotion_one_qualifying_redemption").on(table.entitlementId).where(sql`${table.state} IN('reserved','consumed')`), index("promotion_redemptions_customer_state").on(table.userId, table.state),
   foreignKey({ columns: [table.entitlementId, table.campaignId, table.userId], foreignColumns: [promotionEntitlements.id, promotionEntitlements.campaignId, promotionEntitlements.userId] }),
 ]);
+
+// Cookie possession and authenticated session associate recovery only, never delivery phone.
+export const checkoutGuestBindings = pgTable("checkout_guest_bindings", {
+  guestPrincipal: text("guest_principal").primaryKey(), userId: text("user_id").notNull().references(() => users.id),
+  linkedAt: timestamp("linked_at", { withTimezone: true, mode: "string" }).notNull(),
+}, table => [index("checkout_guest_bindings_user").on(table.userId)]);

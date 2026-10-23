@@ -87,6 +87,13 @@ export interface OrderRepository {
 }
 
 export interface PaymentRepository {
+  findCheckoutGuestOwner(guestPrincipal: string): Promise<string | null>;
+  listCheckoutGuestPrincipals(userId: string): Promise<string[]>;
+  bindCheckoutGuest(guestPrincipal: string, userId: string, now: string): Promise<boolean>;
+  /** Transaction-scoped, sorted advisory locks across owned checkout principals. */
+  lockCheckoutPrincipals(principals: string[]): Promise<void>;
+  /** At most two unresolved rows: multiple historical attempts must fail closed. */
+  findUnresolvedByPrincipals(principals: string[]): Promise<UseCaseResult<PaymentRecord[]>>;
   findById(id: string): Promise<UseCaseResult<PaymentRecord | null>>;
   /**
    * Loads a payment WITH a row lock inside the caller's transaction (Postgres

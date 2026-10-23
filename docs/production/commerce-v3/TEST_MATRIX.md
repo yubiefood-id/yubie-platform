@@ -54,3 +54,13 @@ PostgreSQL persistence64/API51 pass without skips. Separate standards/security
 and specification review cleared this foundation. Public
 phone-first routes/UI, ownership aliases, quotes and final acceptance remain
 unaccepted; no end-to-end V3 or real provider pass is claimed.
+
+
+D recovery follow-up: full disposable PostgreSQL persistence73/API52 PASS without
+skips; `npm run check` PASS. Ten focused checkout cases cover phone-only persistence,
+16 concurrent changed-cart submissions creating one session, proved guest login,
+cookie-absent recovery/history, cross-owner rejection, audit rollback, multiple
+historical unresolved attempts, withdrawn-SKU new-key/login recovery and retention
+of proof after promotional-checkout rejection. Fourteen promotion regressions
+also pass. Reviewer findings were reproduced before fixes; both review axes clear.
+No real OTP, Maps, payment or customer WhatsApp acceptance is implied.

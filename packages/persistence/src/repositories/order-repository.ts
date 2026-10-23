@@ -1,10 +1,10 @@
-import { and, asc, desc, eq, isNotNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, lt, inArray, or, sql } from "drizzle-orm";
 import { ok, type UseCaseResult } from "@yubie/domain";
 import type { OrderLineRecord, OrderRecord, OrderShipping, PaymentEventRecord, PaymentRecord } from "@yubie/domain";
 import { DuplicatePaymentIntentError } from "@yubie/application";
 import type { OrderRepository, PaymentEventAppendOutcome, PaymentEventRepository, PaymentRepository } from "@yubie/application";
 import type { Database } from "../client.js";
-import { firstPartyOrders, orderPayments, paymentEvents } from "../schema/index.js";
+import { checkoutGuestBindings, firstPartyOrders, orderPayments, paymentEvents } from "../schema/index.js";
 
 export class PostgresOrderRepository implements OrderRepository {
   constructor(private readonly database: Database) {}
@@ -83,6 +83,34 @@ export class PostgresOrderRepository implements OrderRepository {
 
 export class PostgresPaymentRepository implements PaymentRepository {
   constructor(private readonly database: Database) {}
+
+  async findCheckoutGuestOwner(guestPrincipal: string): Promise<string | null> {
+    const [row] = await this.database.db.select().from(checkoutGuestBindings).where(eq(checkoutGuestBindings.guestPrincipal, guestPrincipal)).limit(1);
+    return row?.userId ?? null;
+  }
+  async listCheckoutGuestPrincipals(userId: string): Promise<string[]> {
+    const rows = await this.database.db.select().from(checkoutGuestBindings).where(eq(checkoutGuestBindings.userId, userId)).limit(101);
+    return rows.map(row => row.guestPrincipal);
+  }
+  async bindCheckoutGuest(guestPrincipal: string, userId: string, now: string): Promise<boolean> {
+    await this.database.db.insert(checkoutGuestBindings).values({ guestPrincipal, userId, linkedAt: now }).onConflictDoNothing();
+    return await this.findCheckoutGuestOwner(guestPrincipal) === userId;
+  }
+
+  async lockCheckoutPrincipals(principals: string[]): Promise<void> {
+    for (const principal of [...new Set(principals)].sort()) {
+      await this.database.db.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"checkout:" + principal},0))`);
+    }
+  }
+
+  async findUnresolvedByPrincipals(principals: string[]): Promise<UseCaseResult<PaymentRecord[]>> {
+    if (!principals.length) return ok([]);
+    const rows = await this.database.db.select().from(orderPayments).where(and(
+      inArray(orderPayments.principalKey, principals),
+      or(eq(orderPayments.status, "pending"), inArray(orderPayments.reconciliationState, ["late_success_after_terminal", "multiple_successful_transactions"])),
+    )).limit(2);
+    return ok(rows.map(mapPaymentRow));
+  }
 
   async findById(id: string) {
     const rows = await this.database.db.select().from(orderPayments).where(eq(orderPayments.id, id)).limit(1);

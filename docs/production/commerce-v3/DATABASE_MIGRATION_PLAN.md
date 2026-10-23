@@ -8,7 +8,8 @@ Recheck main/migration numbering at each PR. PR A/B/C allocate0017–0019; PR D 
 |0018 addresses | customer_addresses owner FK, bounded address fields/provenance, one active default per user; provider coordinate-cache TTL separate from durable addresses |
 |0019 promotions | campaigns, unique customer/phone entitlements and redemption history; one reserved/consumed slot per entitlement, order FK, phone-identity ownership FK, customer/state indexes; draft/unapproved welcome seed |
 |0020 contact | nullable customer_email and nullable canonical customer_phone with E.164 check; existing monetary and identity values unchanged |
-|Subsequent checkout migration (planned) | address snapshots, hash version and principal aliases for one unresolved attempt; allocate after rechecking migration history |
+|0021 recovery binding | hashed guest checkout principal uniquely bound to an authenticated account, user FK/index; no inferred historical ownership backfill |
+|Subsequent checkout migration (planned) | richer order address snapshots and persisted hash version; allocate after rechecking migration history |
 
 Do not rewrite historical email, ownership, lines or money. users.id and session
 tokens remain stable. New Google writes dual-write the retained legacy subject.
@@ -39,3 +40,12 @@ migration intentionally leaves it draft. Composite entitlement keys prevent
 cross-owner redemption, and the partial unique index prevents two reserved or
 consumed redemptions for the same entitlement. Retain financial redemption
 history with orders; do not delete it as an OTP retention operation.
+
+
+Recovery binding is a durable identity-proof association, not order reassignment.
+Authenticate the customer and prove possession of the server-issued checkout
+cookie; never bind by recipient phone or email. User scope locks precede sorted
+guest scope locks. New order/payment/stock/promotion writes recheck unresolved
+attempts under those locks. Multiple existing attempts produce reconciliation
+required, never a selected financial winner. Retain bindings with attributable
+purchase history; privacy/retention acceptance is required before activation.

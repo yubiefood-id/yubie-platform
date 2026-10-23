@@ -67,3 +67,26 @@ full-suite and CI receipts are tracked in TEST_MATRIX.md.
 
 Phone-first checkout/UI and final acceptance remain subsequent milestones. V3 is
 not a complete commerce candidate or production GO. No V3 PR has been merged.
+
+
+## Merge checkpoint — 24 October 2026
+
+PR C head `a1316b3302082ae6545178b36332d6733d56f7ea` passes all five CI
+gates in run40004479478. D foundation `498e879` adds versioned V3 request/hash
+contracts, internal nullable contact, migration0020 and historical replay.
+The reviewed follow-up adds migration0021, durable proved guest/account recovery
+bindings, principal-wide serialization and fail-closed multiple-attempt handling.
+Proof association commits with audit/outbox before purchase eligibility, so a
+rejected checkout cannot erase attributable purchase history. Neither delivery
+phone nor email establishes historical order ownership.
+
+Local `npm run check` passes. Full disposable PostgreSQL persistence73/API52
+pass without skips. Separate specification/security review cleared both D slices
+after fixing and reproducing recovery/eligibility regressions. These are source
+and synthetic-provider results, not staging or live-provider acceptance.
+
+The user authorized merging this engineering checkpoint. Public phone-first
+checkout/login/claim UI, authoritative quote route, V3 HTTP checkout adaptation,
+and final browser/provider/UAT acceptance remain unfinished. Catalog-only
+production and transactional Commerce V3 have separate release decisions in
+RELEASE_GO_NO_GO.md. Merge authorization does not manufacture missing evidence.

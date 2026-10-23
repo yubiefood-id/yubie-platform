@@ -23,7 +23,9 @@ export class PostgresPromotionRepository implements PromotionRepository {
     const guest = guestPrincipal ?? null;
     const rows = await this.database.db.execute(sql`
       SELECT id FROM orders o WHERE
-      (o.user_id=${userId} OR (${guest}::text IS NOT NULL AND EXISTS(SELECT 1 FROM order_payments own WHERE own.order_id=o.id AND own.principal_key=${guest})))
+      (o.user_id=${userId}
+       OR EXISTS(SELECT 1 FROM order_payments own JOIN checkout_guest_bindings binding ON binding.guest_principal=own.principal_key WHERE own.order_id=o.id AND binding.user_id=${userId})
+       OR (${guest}::text IS NOT NULL AND EXISTS(SELECT 1 FROM order_payments own WHERE own.order_id=o.id AND own.principal_key=${guest})))
       AND (o.status IN('draft','pending_payment','paid','processing','shipped','completed') OR EXISTS(
         SELECT 1 FROM order_payments p WHERE p.order_id=o.id AND (p.status IN('succeeded','refunded') OR p.reconciliation_state IN('late_success_after_terminal','multiple_successful_transactions'))
       )) LIMIT 1`);

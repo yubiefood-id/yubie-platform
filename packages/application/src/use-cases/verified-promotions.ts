@@ -1,3 +1,4 @@
+import { lockCheckoutScope, CheckoutScopeError } from "./checkout-principals.js";
 import { err, ok, isPromotionCampaignActive, quoteApprovedCampaign, type AppError, type ErrorCode, type ApprovedPromotionQuote, type PromotionEntitlement, type PaymentStatus, type UseCaseResult } from "@yubie/domain";
 import type { Clock, IdGenerator, TransactionManager, TransactionalRepositories } from "../ports.js";
 import { isCustomerProofValid, type CustomerProof } from "./phone-auth.js";
@@ -31,6 +32,7 @@ export async function claimWelcomePromotion(input: { actor: CustomerProof; guest
     const promotions = store(repos); await promotions.lockCustomer(input.actor.userId);
     const now = deps.clock.now(), phone = await phoneIdentity(repos, input.actor, now);
     if (!phone) return failure("forbidden");
+    await lockCheckoutScope({ principal: `user:${input.actor.userId}`, ...(input.guestPrincipal ? { guest: input.guestPrincipal } : {}) }, repos, now);
     const campaign = await promotions.findWelcomeCampaign(); if (!campaign || !isPromotionCampaignActive(campaign, now)) return failure("forbidden");
     let entitlement = await promotions.findEntitlement(input.actor.userId, campaign.id);
     if (entitlement && entitlement.phoneIdentityId !== phone.id) return failure("forbidden");
@@ -44,7 +46,7 @@ export async function claimWelcomePromotion(input: { actor: CustomerProof; guest
       await requireWrite(repos.outbox.enqueue({ eventType: "promotion.entitled", aggregateType: "promotion_entitlement", aggregateId: entitlement.id, dedupeKey: "promotion:entitled:" + entitlement.id, payloadJson: JSON.stringify({ entitlementId: entitlement.id, campaignId: campaign.id }), availableAt: now }));
     }
     return ok({ entitlementId: entitlement.id, code: campaign.code, percentage: campaign.basisPoints / 100, endsAt: campaign.endsAt!, state: current?.state === "reserved" ? "reserved" as const : "available" as const });
-  }); } catch { return failure("unavailable"); }
+  }); } catch (error) { return failure(error instanceof CheckoutScopeError ? "forbidden" : "unavailable"); }
 }
 
 export class PromotionAuthorizationError extends Error {

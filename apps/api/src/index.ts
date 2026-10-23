@@ -156,6 +156,8 @@ function integerField(value: unknown): number | null {
  */
 function checkoutError(code: string): { status: number; code: string } {
   switch (code) {
+    case "unauthorized":
+      return { status: 401, code: "CHECKOUT_SESSION_REQUIRED" };
     case "validation":
       return { status: 400, code: "INVALID_REQUEST" };
     case "forbidden":

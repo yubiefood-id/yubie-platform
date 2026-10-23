@@ -34,6 +34,7 @@ import { checkoutIntentHash, checkoutRequestHash, checkoutIntentHashV3, checkout
 import { applyPaymentStatus } from "./process-payment-webhook.js";
 import { authorizeCheckoutPromotion, reserveCheckoutPromotion, settlePromotionForPayment, PromotionAuthorizationError } from "./verified-promotions.js";
 import type { CustomerProof } from "./phone-auth.js";
+import { lockCheckoutScope, CheckoutScopeError } from "./checkout-principals.js";
 class CheckoutTotalError extends Error {}
 
 export interface CheckoutLineInput {
@@ -156,11 +157,14 @@ function outcomeResult(outcome: StoredCheckoutOutcome): CheckoutResult {
 }
 
 /** The unresolved intent for this principal and cart, as a replayable outcome. */
-async function openIntentOutcome(repos: TransactionalRepositories, principalKey: string, intentHash: string): Promise<StoredCheckoutOutcome | null> {
-  const payment = await repos.payments.findUnresolvedByPrincipalHash(principalKey, intentHash);
-  if (!payment.ok || !payment.value) return null;
+async function openIntentOutcome(repos: TransactionalRepositories, principalKey: string, intentHash: string, principals = [principalKey]): Promise<StoredCheckoutOutcome | null> {
+  const pending = await repos.payments.findUnresolvedByPrincipals(principals);
+  if (!pending.ok) throw new Error("Checkout recovery storage unavailable");
+  if (!pending.value.length) return null;
+  if (pending.value.length !== 1 || pending.value[0]!.requestHash !== intentHash || pending.value[0]!.status !== "pending") return { kind: "pending", message: OPEN_INTENT_PENDING_MESSAGE };
+  const payment = { value: pending.value[0]! };
   const order = await repos.orders.findById(payment.value.orderId);
-  if (!order.ok || !order.value) return null;
+  if (!order.ok || !order.value) throw new Error("Checkout recovery order unavailable");
   // A flagged intent (ambiguous create, attach failure, pending reconciliation)
   // may point at a cancelled or unknown session; only a clean one is reused.
   if (!payment.value.redirectUrl || payment.value.reconciliationState) return { kind: "pending", message: OPEN_INTENT_PENDING_MESSAGE };
@@ -262,6 +266,10 @@ export async function createFirstPartyCheckout(
   if ((input.checkoutVersion === 3 && !phone) || (input.checkoutVersion !== 3 && !input.customerEmail)) {
     return err({ code: "validation", message: "Checkout contact is invalid.", retryable: false, requestId: "checkout" });
   }
+  if (input.possessedGuestPrincipal && (!/^guest:[0-9a-f]{64}$/.test(input.possessedGuestPrincipal)
+    || (input.idempotencyPrincipal !== input.possessedGuestPrincipal && input.idempotencyPrincipal !== `user:${input.userId}`))) {
+    return err({ code: "validation", message: "Invalid checkout recovery principal.", retryable: false, requestId: "checkout" });
+  }
   const idempotencyKey = input.idempotencyKey ?? null;
   const claimInput = {
     scope: IDEMPOTENCY_SCOPE,
@@ -293,24 +301,33 @@ export async function createFirstPartyCheckout(
     ? checkoutRequestHashV3(intentHash, { phone: phone!.e164, email: input.customerEmail, name: input.customerName ?? null })
     : checkoutRequestHash(intentHash, input.customerEmail!, input.customerName);
 
-  // Read stored outcomes before catalog availability, current prices or campaign
-  // eligibility. A replay is recovery of an existing financial attempt.
-  const recovered = await deps.tx.run("checkout.replay", async repos => {
-    if (idempotencyKey) {
-      const stored = await repos.idempotency.lookup({ ...claimInput, requestHash });
-      if (!stored.ok) return stored;
-      if (stored.value) return replayStored(stored.value.responseJson);
-    }
-    const open = await openIntentOutcome(repos, input.idempotencyPrincipal, intentHash);
-    if (!open) return null;
-    if (idempotencyKey) {
-      const claim = await repos.idempotency.claim({ ...claimInput, requestHash, createdAt: now });
-      if (!claim.ok) return claim;
-      if (claim.value.status === "duplicate") return replayStored(claim.value.responseJson);
-      await attachOutcome(repos, open);
-    }
-    return outcomeResult(open);
-  });
+  // Authenticate recovery scope and commit proved cookie association separately
+  // from purchase eligibility. A rejected purchase must not erase that proof.
+  // Recover existing attempts before today's catalog/shipping rules, then lock
+  // and recheck again in TX1 before any new payable order can be created.
+  let recovered: CheckoutResult | null;
+  try {
+    recovered = await deps.tx.run("checkout.replay", async repos => {
+      const principals = await lockCheckoutScope({ principal: input.idempotencyPrincipal, ...(input.possessedGuestPrincipal ? { guest: input.possessedGuestPrincipal } : {}) }, repos, now);
+      if (idempotencyKey) {
+        const stored = await repos.idempotency.lookup({ ...claimInput, requestHash });
+        if (!stored.ok) return stored;
+        if (stored.value) return replayStored(stored.value.responseJson);
+      }
+      const open = await openIntentOutcome(repos, input.idempotencyPrincipal, intentHash, principals);
+      if (!open) return null;
+      if (idempotencyKey) {
+        const claim = await repos.idempotency.claim({ ...claimInput, requestHash, createdAt: now });
+        if (!claim.ok) return claim;
+        if (claim.value.status === "duplicate") return replayStored(claim.value.responseJson);
+        if (!(await attachOutcome(repos, open)).ok) throw new Error("Checkout recovery persistence unavailable");
+      }
+      return outcomeResult(open);
+    });
+  } catch (error) {
+    if (error instanceof CheckoutScopeError) return err({ code: error.code, message: error.message, retryable: error.code === "pending_reconciliation", requestId: "checkout" });
+    throw error;
+  }
   if (recovered) return recovered;
 
   const priced: OrderLineRecord[] = [];
@@ -391,14 +408,15 @@ export async function createFirstPartyCheckout(
   let claimed = false;
   try {
     const tx1 = await deps.tx.run("checkout.draft", async (repos) => {
+      if (input.userId && repos.promotions) await repos.promotions.lockCustomer(input.userId);
+      const checkoutPrincipals = await lockCheckoutScope({ principal: input.idempotencyPrincipal, ...(input.possessedGuestPrincipal ? { guest: input.possessedGuestPrincipal } : {}) }, repos, now);
       if (idempotencyKey) {
         const claim = await repos.idempotency.claim({ ...claimInput, requestHash, createdAt: now });
         if (!claim.ok) return claim;
         if (claim.value.status === "duplicate") return replayStored(claim.value.responseJson);
         claimed = true;
       }
-      if (input.userId && repos.promotions) await repos.promotions.lockCustomer(input.userId);
-      const open = await openIntentOutcome(repos, input.idempotencyPrincipal, intentHash);
+      const open = await openIntentOutcome(repos, input.idempotencyPrincipal, intentHash, checkoutPrincipals);
       if (open) {
         if (idempotencyKey) await attachOutcome(repos, open);
         return outcomeResult(open);
@@ -435,6 +453,7 @@ export async function createFirstPartyCheckout(
     });
     if (tx1 !== null) return tx1; // duplicate replay outcome
   } catch (error) {
+    if (error instanceof CheckoutScopeError) return err({ code: error.code, message: error.message, retryable: error.code === "pending_reconciliation", requestId: "checkout" });
     if (error instanceof PromotionAuthorizationError || error instanceof CheckoutTotalError) {
       if (claimed && idempotencyKey) await deps.tx.run("checkout.idempotency.release", repos => repos.idempotency.releaseClaim(claimInput)).catch(() => undefined);
       return error instanceof PromotionAuthorizationError ? err(error.safeError) : err({ code: "validation", message: `Order total must be between 1 and ${MAX_CHECKOUT_TOTAL_IDR} IDR for web checkout. Contact us on WhatsApp for larger orders.`, retryable: false, requestId: "checkout" });

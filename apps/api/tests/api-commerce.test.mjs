@@ -275,3 +275,12 @@ test("checkout as a logged-in user attaches the order to the account", async () 
   const guestDetail = await get(`/v1/account/orders/ord_nonexistent`, { cookie: `yubie_session=${token}` });
   assert.equal(guestDetail.status, 404);
 });
+
+test('a recovery cookie bound to an account requires sign-in before a new checkout',async()=>{
+ const {checkoutPrincipalKey}=await import('@yubie/application');
+ const token=randomBytes(32).toString('base64url'),principal=checkoutPrincipalKey({guestToken:token});
+ await stubPayments.bindCheckoutGuest(principal,'synthetic_bound_user',context.clock.now());
+ const before=stubProvider.created;
+ const response=await post('/v1/checkouts',{lines:[{productId:'flour',sizeId:'250g',quantity:1}],customerEmail:'synthetic@example.invalid'},{cookie:'yubie_checkout='+token,'idempotency-key':'bound-account-'+randomBytes(8).toString('hex')});
+ assert.equal(response.status,401);assert.equal((await response.json()).code,'CHECKOUT_SESSION_REQUIRED');assert.equal(stubProvider.created,before);
+});
