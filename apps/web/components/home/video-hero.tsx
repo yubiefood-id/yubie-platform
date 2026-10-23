@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { trackEvent } from "@/lib/analytics";
 import { directCommerce } from "@/config/launch";
+import { siteConfig } from "@/config/site";
+import { WhatsAppIcon } from "@/components/layout/social-links";
 
 export interface HeroVideoSource {
   src: string;
@@ -41,7 +43,7 @@ export function VideoHero({ poster, posterAlt, videoSources }: VideoHeroProps) {
       ? <video className="hero-video" ref={videoRef} poster={poster} muted loop playsInline preload="none" aria-hidden="true">{videoSources.map((source) => <source key={source.src} src={source.src} media={source.media} />)}</video>
       : <Image className="hero-image" src={poster} alt={posterAlt} fill priority sizes="100vw" unoptimized />}
     <div className="hero-scrim" />
-    <div className="hero-copy"><span className="eyebrow light-text">INDONESIAN ROOTS. MODERN NOURISHMENT.</span><h1 id="hero-title">ROOTED HERE.<br /><em>MADE FOR NOW.</em></h1><p>Temui cara baru menikmati ubi Indonesia—berbahan lokal, dibuat praktis untuk baking, breakfast, dan kreasi sehari-hari.</p><div className="hero-actions"><Link className="button gold" href="/products" onClick={() => trackEvent("hero_cta_click", { target: "products" })}>{directCommerce ? "Shop Products" : "Lihat Katalog"} <span>↗</span></Link><Link className="text-link light-text" href="/our-roots" onClick={() => trackEvent("hero_cta_click", { target: "our-roots" })}>Discover Our Roots <span>→</span></Link></div></div>
+    <div className="hero-copy"><span className="eyebrow light-text">INDONESIAN ROOTS. MODERN NOURISHMENT.</span><h1 id="hero-title">ROOTED HERE.<br /><em>MADE FOR NOW.</em></h1><p>Temui cara baru menikmati ubi Indonesia—berbahan lokal, dibuat praktis untuk baking, breakfast, dan kreasi sehari-hari.</p><div className="hero-actions"><Link className="button gold" href="/products" onClick={() => trackEvent("hero_cta_click", { target: "products" })}>{directCommerce ? "Shop Products" : "Lihat Katalog"} <span>↗</span></Link><a className="button whatsapp" href={siteConfig.social.whatsappCommunity} target="_blank" rel="noopener noreferrer" onClick={() => trackEvent("hero_cta_click", { target: "whatsapp-community" })}>Join Community! <WhatsAppIcon /></a><Link className="text-link light-text" href="/our-roots" onClick={() => trackEvent("hero_cta_click", { target: "our-roots" })}>Discover Our Roots <span>→</span></Link></div></div>
     <div className="hero-index"><span>01</span><i /><small>SCROLL TO DISCOVER</small></div>
   </section>;
 }

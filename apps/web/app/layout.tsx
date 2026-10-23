@@ -15,6 +15,13 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteConfig.origin),
   title: { default: "Yubie — Rooted here. Made for now.", template: "%s · Yubie" },
   description: "Yubie mengubah ubi Indonesia menjadi produk pangan modern untuk baking, breakfast, dan everyday creations.",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "48x48" },
+      { url: "/favicon.png", type: "image/png", sizes: "512x512" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
   openGraph: { title: "Yubie — Rooted here. Made for now.", description: "Modern Indonesian sweet-potato food, made for now.", images: ["/photography/context/lifestyle-breakfast.webp"] },
 };
 
