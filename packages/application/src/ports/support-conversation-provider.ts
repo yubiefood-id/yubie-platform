@@ -38,12 +38,34 @@ export type ProviderSendResult =
   | { ok: false; code: Exclude<ProviderResultCode, "SUCCESS">; message?: string };
 
 export interface SendReplyCommand {
+  /** Rebuilt by the worker; never deserialized from customer/provider input. */
+  authorizeDispatch?: () => Promise<boolean>;
+  handoffReceipt?: boolean;
   threadRef: SupportThreadRef;
   content: string;
   idempotencyKey: string;
 }
 
+export interface SendProductMediaCommand {
+  authorizeDispatch?: () => Promise<boolean>;
+  threadRef: SupportThreadRef;
+  productId: string;
+  assetId: string;
+  caption: string;
+  websiteUrl: string;
+  idempotencyKey: string;
+  correlationId: string;
+}
+export interface OutboundDeliveryStatus {
+  state: "accepted" | "sent" | "delivered" | "failed" | "unknown";
+  providerMessageId?: string;
+}
+
 export interface HandoffCommand {
+  /** Worker authorization, checked before each routine remote mutation. Safety routing is internal. */
+  authorizeDispatch?: () => Promise<boolean>;
+  summary?: Record<string,unknown>;
+  idempotencyKey?: string;
   threadRef: SupportThreadRef;
   labels: string[];
   groupId?: string;
@@ -52,7 +74,11 @@ export interface HandoffCommand {
 }
 
 export interface HumanControlState {
+  lifecycle?: "open" | "closed" | "unknown";
   humanActive: boolean;
+  automationDisabled?: boolean;
+  lastCustomerAt?: string;
+  serviceWindowOpen?: boolean;
   reason?: string;
 }
 
@@ -61,7 +87,11 @@ export interface SupportConversationProvider {
   getThread(ref: SupportThreadRef): Promise<SupportThread>;
   getRecentMessages(ref: SupportThreadRef, options?: { limit?: number }): Promise<SupportMessage[]>;
   sendReply(command: SendReplyCommand): Promise<ProviderSendResult>;
+  sendProductMedia?(command: SendProductMediaCommand): Promise<ProviderSendResult>;
+  getOutboundStatus?(ref: SupportThreadRef, deliveryKey: string): Promise<OutboundDeliveryStatus>;
   getCurrentHumanState(ref: SupportThreadRef): Promise<HumanControlState>;
+  /** Resolves an opaque signed event state reference using the provider's state catalog. */
+  resolveLifecycleState?(stateRef: string): Promise<"open" | "closed" | "unknown">;
   handoff(command: HandoffCommand): Promise<ProviderSendResult>;
   listThreadsUpdatedSince(sinceIso: string): Promise<Array<{ threadId: string; updatedAt: string }>>;
   getArticle?(ref: SupportThreadRef, articleId: string): Promise<SupportMessage | null>;

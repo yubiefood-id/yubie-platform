@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { withAssistantTransaction } from "../assistant-work.js";
 import { ok } from "@yubie/domain";
 import type { Database } from "../client.js";
 import { assistantRuntimeConfig, assistantRuntimeConfigAudit } from "../schema/index.js";
 
 export interface RuntimeConfigSnapshot {
+  flowVersion: "deterministic-v1" | "deterministic-v2";
+  websiteRelease: unknown;
+  supportAcceptance: unknown;
   assistantEnabled: boolean;
   mode: "off" | "shadow" | "suggestion" | "auto";
   allowedGreenIntents: string[];
@@ -14,6 +18,9 @@ export interface RuntimeConfigSnapshot {
 }
 
 const DEFAULT_CONFIG: RuntimeConfigSnapshot = {
+  flowVersion: "deterministic-v1",
+  websiteRelease: null,
+  supportAcceptance: null,
   assistantEnabled: true,
   mode: "shadow",
   allowedGreenIntents: ["PRODUCT_INFO", "PRODUCT_DISCOVERY", "USAGE_RECIPE", "WHERE_TO_BUY", "BUSINESS_HOURS", "B2B_INTRO"],
@@ -39,6 +46,9 @@ export class PostgresRuntimeConfigRepository {
       }
     };
     return {
+      flowVersion: parse<string>("deterministic_flow_version", "deterministic-v1") === "deterministic-v2" ? "deterministic-v2" : "deterministic-v1",
+      websiteRelease: parse("website_release", null),
+      supportAcceptance: parse("support_acceptance", null),
       assistantEnabled: parse("assistant_enabled", DEFAULT_CONFIG.assistantEnabled),
       mode: parse("mode", DEFAULT_CONFIG.mode),
       allowedGreenIntents: parse("allowed_green_intents", DEFAULT_CONFIG.allowedGreenIntents),
@@ -49,6 +59,18 @@ export class PostgresRuntimeConfigRepository {
   }
 
   async set(key: string, value: unknown, changedBy: string, changedAt: string) {
+    return this.setMany([{key,value}],changedBy,changedAt);
+  }
+
+  async setMany(entries: Array<{key:string;value:unknown}>, changedBy: string, changedAt: string) {
+    return withAssistantTransaction(this.database,async bound=>{
+      const repo=new PostgresRuntimeConfigRepository(bound);
+      for(const entry of entries)await repo.setLocked(entry.key,entry.value,changedBy,changedAt);
+      return ok(undefined);
+    },"yubi:runtime-config");
+  }
+
+  private async setLocked(key: string, value: unknown, changedBy: string, changedAt: string) {
     const valueJson = JSON.stringify(value);
     const existing = await this.database.db
       .select()

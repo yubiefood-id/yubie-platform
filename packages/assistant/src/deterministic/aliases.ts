@@ -26,7 +26,7 @@ const FOOD_SAFETY_PATTERNS = [
   /busuk/i,
   /jamur/i,
   /\bmold\b/i,
-  /bau (aneh|tidak biasa)/i,
+  /bau (aneh|tidak biasa|tidak wajar)/i,
   /benda asing/i,
   /kemasan (terbuka|rusak|terkontaminasi)/i,
   /tercatat busuk/i,
@@ -65,13 +65,24 @@ export function isBackAlias(text: string): boolean {
 }
 
 export function matchesFoodSafety(text: string): boolean {
-  const n = text.trim();
+  const n = normalizeInput(text);
   return FOOD_SAFETY_PATTERNS.some((p) => p.test(n));
 }
 
 export function matchesHealthEscalation(text: string): boolean {
-  const n = text.trim();
+  const n = normalizeInput(text);
   return HEALTH_PATTERNS.some((p) => p.test(n));
+}
+
+export function matchSupportEscalation(text: string): {intent:"REFUND_OR_COMPENSATION"|"COMPLAINT";reason:string}|null {
+  const n=normalizeInput(text);
+  if(/\b(refund|retur|pengembalian dana)\b/.test(n))return {intent:"REFUND_OR_COMPENSATION",reason:"refund_request"};
+  if(/\b(barang salah|pesanan salah|pesanan terlambat|pesanan belum sampai|barang belum diterima|pembayaran bermasalah|gagal bayar)\b/.test(n))return {intent:"COMPLAINT",reason:"order_problem"};
+  return null;
+}
+
+export function isPriorityEscalation(text: string): boolean {
+  return matchesFoodSafety(text)||isHumanAlias(text)||matchesHealthEscalation(text)||!!matchSupportEscalation(text);
 }
 
 export function matchChoice(input: string, choices: Array<{ key: string; aliases?: string[] }>): string | null {

@@ -1,4 +1,5 @@
 import type { KnowledgeLookup } from "../knowledge-tools.js";
+import { processV2, type V2Deps } from "./v2.js";
 import { V1_FLOW } from "./flows.js";
 import {
   isSensitiveNode,
@@ -30,6 +31,9 @@ export interface PurchaseOptionView {
 
 export interface DeterministicEngineDeps {
   knowledge: KnowledgeLookup;
+  flowVersion?: string;
+  capabilities?: V2Deps["capabilities"];
+  resolveProduct?: V2Deps["resolveProduct"];
   getPurchaseOptions?: (productSlug: string) => Promise<{ options: PurchaseOptionView[] } | null>;
 }
 
@@ -93,9 +97,10 @@ async function renderNode(
     const marketplace = nodeId.endsWith("shopee") ? "shopee" : "tokopedia";
     const options = deps.getPurchaseOptions ? await deps.getPurchaseOptions("yubie-flour") : null;
     const match = options?.options.find((o) => o.marketplace === marketplace);
+    if (!match) return { text: "Informasi tujuan pembelian yang disetujui belum tersedia. Ketik 0 untuk Customer Service." };
     templateCtx = {
       marketplaceLabel: match?.label ?? (marketplace === "shopee" ? "Shopee" : "Tokopedia"),
-      redirectPath: match?.redirectPath ?? `/go/${marketplace}/yubie-flour`,
+      redirectPath: match.redirectPath,
     };
   }
 
@@ -163,6 +168,7 @@ export class DeterministicConversationEngine {
   constructor(private readonly deps: DeterministicEngineDeps) {}
 
   async processTurn(input: DeterministicTurnInput): Promise<DeterministicTurnResult> {
+    if (this.deps.flowVersion === "deterministic-v2") return processV2(input, this.deps);
     const metrics: string[] = ["deterministic_message_total"];
     let state: PersistedFlowState = { ...input.persisted, flowVersion: FLOW_VERSION };
     const route = preRoute(V1_FLOW, state, input.text, input.conversationState);

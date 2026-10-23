@@ -18,6 +18,7 @@
   "dependencies": {
     "@yubie/application": "*",
     "@yubie/config": "*",
-    "@yubie/domain": "*"
+    "@yubie/domain": "*",
+    "sharp": "0.35.5"
   }
 }

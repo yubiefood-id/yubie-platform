@@ -16,17 +16,23 @@ if (!startupConfig.ok) {
 const port = Number(process.env.PORT ?? 8788);
 
 createServer(async (incoming, outgoing) => {
-  const origin = `http://${incoming.headers.host ?? `localhost:${port}`}`;
-  const body = incoming.method === "GET" || incoming.method === "HEAD" ? undefined : Readable.toWeb(incoming);
-  const request = new Request(new URL(incoming.url ?? "/", origin), {
-    method: incoming.method,
-    headers: incoming.headers as HeadersInit,
-    body,
-    duplex: body ? "half" : undefined,
-  } as RequestInit);
-  const response = await handleRequest(request);
-  outgoing.writeHead(response.status, Object.fromEntries(response.headers));
-  outgoing.end(Buffer.from(await response.arrayBuffer()));
+  try {
+    const origin = `http://${incoming.headers.host ?? `localhost:${port}`}`;
+    const body = incoming.method === "GET" || incoming.method === "HEAD" ? undefined : Readable.toWeb(incoming);
+    const request = new Request(new URL(incoming.url ?? "/", origin), {
+      method: incoming.method,
+      headers: incoming.headers as HeadersInit,
+      body,
+      duplex: body ? "half" : undefined,
+    } as RequestInit);
+    const response = await handleRequest(request);
+    outgoing.writeHead(response.status, Object.fromEntries(response.headers));
+    outgoing.end(Buffer.from(await response.arrayBuffer()));
+  } catch {
+    console.error(JSON.stringify({ event: "bot.request_failed", errorCode: "REQUEST_FAILED" }));
+    if (!outgoing.headersSent) outgoing.writeHead(503, { "content-type": "application/json" });
+    outgoing.end(JSON.stringify({ error: "service_unavailable" }));
+  }
 }).listen(port, () => {
   console.log(`Yubie Bot listening on http://localhost:${port}`);
 });
