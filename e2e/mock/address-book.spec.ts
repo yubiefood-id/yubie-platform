@@ -3,6 +3,8 @@ import AxeBuilder from '@axe-core/playwright';
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
 test.beforeEach(async({page})=>{await page.addInitScript(()=>sessionStorage.setItem('yubie.promo.dismissed.v1','1'));});
 test('account address book keeps manual entry usable without Maps and saves only explicit submission',async({page})=>{
+ // Four viewport transitions, a full-page capture and Axe are one visual scenario.
+ test.slow();
  let saved:Record<string,unknown>|null=null;
  await page.route('**/api/auth/session',route=>route.fulfill({json:{ok:true,data:{authenticated:true,user:{id:'usr_synthetic',name:'Pengguna uji',email:null,picture:null},csrfToken:'a'.repeat(64),mapsAvailable:false}}}));
  await page.route('**/api/account/orders',route=>route.fulfill({json:{ok:true,data:[]}}));
