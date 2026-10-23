@@ -125,5 +125,7 @@ export * from "./assistant.js";
 export * from "./orders.js";
 export * from "./inventory.js";
 export * from "./identity.js";
+export * from "./phone.js";
+export * from "./phone-identity.js";
 export * from "./promotions.js";
 export * from "./yubi-discovery.js";

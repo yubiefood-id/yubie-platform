@@ -7,6 +7,8 @@ import { PostgresInventoryRepository } from "./repositories/inventory-repository
 import { PostgresOrderRepository, PostgresPaymentEventRepository, PostgresPaymentRepository } from "./repositories/order-repository.js";
 import { PostgresOutboxRepository } from "./repositories/outbox-repository.js";
 import { PostgresPaymentWebhookInboxRepository } from "./repositories/payment-webhook-inbox-repository.js";
+import { PostgresCustomerIdentityRepository } from "./repositories/customer-identity-repository.js";
+import { PostgresUserRepository, PostgresSessionRepository } from "./repositories/identity-repository.js";
 
 /**
  * PostgreSQL implementation of the application transaction boundary. All work
@@ -23,6 +25,9 @@ export class PostgresTransactionManager implements TransactionManager {
     return this.database.db.transaction(async (tx) => {
       const txDatabase = { db: tx, client: this.database.client } as unknown as Database;
       return work({
+        customerIdentity: new PostgresCustomerIdentityRepository(txDatabase),
+        users: new PostgresUserRepository(txDatabase),
+        authSessions: new PostgresSessionRepository(txDatabase),
         orders: new PostgresOrderRepository(txDatabase),
         payments: new PostgresPaymentRepository(txDatabase),
         paymentEvents: new PostgresPaymentEventRepository(txDatabase),

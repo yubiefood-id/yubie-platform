@@ -25,6 +25,7 @@ export * from "./repositories/payment-webhook-inbox-repository.js";
 export * from "./repositories/inventory-repository.js";
 export * from "./repositories/growth-repository.js";
 export * from "./repositories/identity-repository.js";
+export * from "./repositories/customer-identity-repository.js";
 export * from "./repositories/admin-readers.js";
 export * from "./schema/index.js";
 export * from "./repositories/admin-session-repository.js";

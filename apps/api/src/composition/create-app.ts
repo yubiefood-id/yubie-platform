@@ -15,6 +15,8 @@ import {
   InMemorySessionRepository,
   InMemoryTransactionManager,
   InMemoryUserRepository,
+  UnavailableUserRepository,
+  UnavailableSessionRepository,
   InMemoryWebhookInboxRepository,
   InMemoryWhatsAppIntentRepository,
   SystemClock,
@@ -82,6 +84,7 @@ export interface AppContext {
   verifier: GoogleCredentialVerifier | null;
   googleClientId: string | null;
   tx: TransactionManager;
+  identityTransactions?: TransactionManager;
 }
 
 const STATIC_ACTIVE_LISTING: MarketplaceListing = {
@@ -160,10 +163,11 @@ export function createAppContext(): AppContext {
   // flag into memory. parseCommerceRuntimeConfig guarantees DATABASE_URL is
   // present before this branch is taken in xendit mode.
   const listingsFromDatabase = commerce.purchaseOptionsSource === "database";
-  const transactionalFromDatabase = paymentMode !== "preview" || listingsFromDatabase;
+  const transactionalFromDatabase = Boolean(databaseUrl);
 
   if (databaseUrl && (listingsFromDatabase || transactionalFromDatabase)) {
     const database = createDatabase(databaseUrl);
+    const identityTransactions = new PostgresTransactionManager(database);
     const transactional = transactionalFromDatabase;
     const transactionalOrders = transactional ? new PostgresOrderRepository(database) : new InMemoryOrderRepository();
     const transactionalPayments = transactional ? new PostgresPaymentRepository(database) : new InMemoryPaymentRepository();
@@ -199,6 +203,7 @@ export function createAppContext(): AppContext {
       appOrigin: commerce.appOrigin,
       verifier,
       googleClientId,
+      identityTransactions,
       tx: transactional
         ? new PostgresTransactionManager(database)
         : new InMemoryTransactionManager({
@@ -234,8 +239,8 @@ export function createAppContext(): AppContext {
     orders,
     payments,
     paymentEvents,
-    users: new InMemoryUserRepository(),
-    authSessions: new InMemorySessionRepository(),
+    users: new UnavailableUserRepository(),
+    authSessions: new UnavailableSessionRepository(),
     tokens,
     paymentMode,
     paymentProvider,

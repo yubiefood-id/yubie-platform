@@ -1,5 +1,6 @@
 import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { PhoneChallenge, AuthIdentity } from "@yubie/domain";
 
 export const listingStatusEnum = pgEnum("listing_status", ["draft", "active", "paused", "broken", "retired"]);
 export const marketplaceEnum = pgEnum("marketplace", ["shopee", "tokopedia"]);
@@ -356,7 +357,9 @@ export const conversationFlowEvents = pgTable("conversation_flow_events", {
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
-  googleSub: text("google_sub").notNull(),
+  googleSub: text("google_sub"),
+  phone: text("phone"),
+  phoneVerifiedAt: timestamp("phone_verified_at", { withTimezone: true, mode: "string" }),
   email: text("email"),
   name: text("name"),
   picture: text("picture"),
@@ -549,4 +552,24 @@ export const consentLedger = pgTable("consent_ledger", {
   consentVersion: text("consent_version").notNull(),
   source: text("source").notNull(),
   occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "string" }).notNull(),
+});
+
+const identityTime = (name: string) => timestamp(name, { withTimezone: true, mode: "string" });
+export const authIdentities = pgTable("auth_identities", {
+  id: text("id").primaryKey(), userId: text("user_id").notNull().references(() => users.id),
+  provider: text("provider").$type<AuthIdentity["provider"]>().notNull(), subject: text("subject").notNull(),
+  verifiedAt: identityTime("verified_at").notNull(), createdAt: identityTime("created_at").notNull(),
+}, t => [uniqueIndex("auth_identities_provider_subject").on(t.provider, t.subject), uniqueIndex("auth_identities_user_provider").on(t.userId, t.provider)]);
+export const phoneVerifications = pgTable("phone_verifications", {
+  id: text("id").primaryKey(), browserHash: text("browser_hash").notNull(), phoneHash: text("phone_hash").notNull(),
+  requestKey: text("request_key").notNull(), requestHash: text("request_hash").notNull(),
+  purpose: text("purpose").$type<PhoneChallenge["purpose"]>().notNull(), targetUserId: text("target_user_id").references(() => users.id),
+  state: text("state").$type<PhoneChallenge["state"]>().notNull(), attempts: integer("attempts").notNull().default(0),
+  verifier: text("verifier"), phoneCiphertext: text("phone_ciphertext"), deliveryCiphertext: text("delivery_ciphertext"),
+  deliveryState: text("delivery_state").$type<PhoneChallenge["deliveryState"]>().notNull(), deliveryAttempts: integer("delivery_attempts").notNull().default(0),
+  leaseUntil: identityTime("lease_until"), nextAttemptAt: identityTime("next_attempt_at").notNull(),
+  createdAt: identityTime("created_at").notNull(), updatedAt: identityTime("updated_at").notNull(), expiresAt: identityTime("expires_at").notNull(),
+}, t => [uniqueIndex("phone_verifications_browser_request").on(t.browserHash, t.requestKey), index("phone_verifications_phone_created").on(t.phoneHash, t.createdAt)]);
+export const identityRateBuckets = pgTable("identity_rate_buckets", {
+  key: text("key").primaryKey(), count: integer("count").notNull(), expiresAt: identityTime("expires_at").notNull(),
 });

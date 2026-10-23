@@ -340,6 +340,7 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
       // returns only {checkoutToken, redirectUrl, ...} to the browser. The
       // Idempotency-Key makes duplicate submits replay the first response.
       const sessionUser = await resolveSession(readSessionToken(request), { sessions: ctx.authSessions, users: ctx.users, tokens: ctx.tokens, clock: ctx.clock });
+      if (!sessionUser.ok) return json({ ok: false, code: "CUSTOMER_STORAGE_UNAVAILABLE" }, { status: 503 });
       const appOrigin = ctx.appOrigin ?? url.origin;
       const guest = guestCheckoutToken(request);
       const guestCookie = sessionUser.value || guest.existing ? null : checkoutCookie(guest.token, appOrigin.startsWith("https://"));
@@ -501,8 +502,11 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
       credential: parsed.data.credential,
       csrfToken: parsed.data.g_csrf_token,
       csrfCookie,
-    }, { verifier: ctx.verifier, users: ctx.users, sessions: ctx.authSessions, tokens: ctx.tokens, clock: ctx.clock, ids: ctx.ids });
-    if (!result.ok) return json({ ok: false, code: "AUTH_FAILED" }, { status: 401 });
+    }, { verifier: ctx.verifier, users: ctx.users, sessions: ctx.authSessions, tokens: ctx.tokens, clock: ctx.clock, ids: ctx.ids,
+      ...(ctx.identityTransactions ? { tx: ctx.identityTransactions } : {}),
+      ...(readSessionToken(request) ? { previousSessionHash: ctx.tokens.hash(readSessionToken(request)!) } : {}),
+    });
+    if (!result.ok) return json({ ok: false, code: result.error.code === "unavailable" ? "CUSTOMER_STORAGE_UNAVAILABLE" : "AUTH_FAILED" }, { status: result.error.code === "unavailable" ? 503 : 401 });
     // Secure follows the CONFIGURED origin, not the per-request protocol
     // reconstruction: behind a TLS-terminating proxy (Caddy) the incoming
     // scheme can look plain and would silently drop the Secure attribute.
@@ -514,14 +518,15 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
   }
 
   if (request.method === "POST" && url.pathname === "/v1/auth/logout") {
-    await logout(readSessionToken(request), { sessions: ctx.authSessions, tokens: ctx.tokens, clock: ctx.clock });
+    const revoked = await logout(readSessionToken(request), { sessions: ctx.authSessions, tokens: ctx.tokens, clock: ctx.clock });
+    if (!revoked.ok) return json({ ok: false, code: "CUSTOMER_STORAGE_UNAVAILABLE" }, { status: 503 });
     const secure = (ctx.appOrigin ?? url.origin).startsWith("https://");
     return json({ ok: true, data: { revoked: true } }, { headers: { "set-cookie": clearSessionCookie(secure) } });
   }
 
   if (request.method === "GET" && url.pathname === "/v1/auth/session") {
     const user = await resolveSession(readSessionToken(request), { sessions: ctx.authSessions, users: ctx.users, tokens: ctx.tokens, clock: ctx.clock });
-    if (!user.ok) return json({ ok: false, code: "AUTH_FAILED" }, { status: 500 });
+    if (!user.ok) return json({ ok: false, code: "CUSTOMER_STORAGE_UNAVAILABLE" }, { status: 503 });
     return json({ ok: true, data: { authenticated: user.value !== null, user: user.value, googleClientId: ctx.googleClientId } });
   }
 

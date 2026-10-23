@@ -14,5 +14,8 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "libphonenumber-js": "1.13.15"
   }
 }
