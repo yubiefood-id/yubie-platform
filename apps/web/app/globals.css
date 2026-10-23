@@ -57,7 +57,7 @@ h1, h2, h3, p { margin-top: 0; }
 .button.primary { background: var(--purple); color: white; border-color: var(--purple); }
 .button.gold { background: var(--gold); color: var(--ink); border-color: var(--gold); }
 .button.warm { background: var(--warm); color: var(--purple); border-color: var(--warm); }
-.button.whatsapp { background: #25d366; color: white; border-color: #25d366; }
+.button.whatsapp { background: #25d366; color: var(--ink); border-color: #25d366; }
 .button.whatsapp svg { flex-shrink: 0; }
 .button.full { width: 100%; }
 .text-link { display: inline-flex; gap: 2.5rem; align-items: center; padding: .7rem 0; border-bottom: 1px solid currentColor; font-size: .78rem; font-weight: 800; }
