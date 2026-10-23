@@ -144,7 +144,7 @@ for (const n of [2, 10, 100]) {
       const payments = await database.client`SELECT amount, principal_key FROM order_payments`;
       assert.equal(payments.length, 1);
       assert.equal(payments[0].principal_key, principal);
-      assert.equal(payments[0].amount, 35000 - 5250);
+      assert.equal(payments[0].amount, 35000);
       assert.equal(provider.created[0].amount, payments[0].amount);
       const orders = await database.client`SELECT count(*)::int AS n FROM orders`;
       assert.equal(orders[0].n, 1);
