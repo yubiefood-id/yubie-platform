@@ -1,3 +1,11 @@
+> SCOPE CORRECTION — 24 October 2026: the mandatory deliverable is FULL COMMERCE,
+> including live payment/Finance acceptance, ERPNext production, protected admin,
+> fulfillment and finance. Catalog-only promotion is not the final deliverable and
+> is not authorized as a substitute. Preserve the current website/DNS/payments.
+> Release owner/on-call and accepted rollback are unconfirmed. The earlier
+> catalog-only path below is historical context, not an action to execute.
+> Resume from [FULL_COMMERCE_HANDOFF.md](FULL_COMMERCE_HANDOFF.md).
+
 # Commerce V3 release decision
 
 24 October 2026 merge checkpoint: **NO-GO for transactional Commerce V3**.
