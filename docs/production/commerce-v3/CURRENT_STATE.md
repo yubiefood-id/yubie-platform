@@ -43,8 +43,16 @@ passes all five gates. Thirteen final API/identity regressions used real disposa
 PostgreSQL and synthetic delivery. Separate standards/security and spec reviews
 found five gaps, all fixed and re-reviewed. No live SMS/provider acceptance.
 
-PR B is in progress: owner-scoped saved-address/default CRUD and migration0018
-have local PostgreSQL/API coverage. Expired pins are hidden/cleared independently
-from customer-authored addresses. Maps adapter, shared editor and browser
-acceptance are not yet complete. Promotions and phone-first checkout remain
-subsequent milestones. V3 is not a complete commerce candidate or production GO.
+PR B: [draft PR30](https://github.com/yubiefood-id/yubie-platform/pull/30) contains
+owner-scoped saved-address/default CRUD, migration0018, Maps previews and shared
+editor/account UI. New pins require a short-lived browser/point-bound receipt
+after server country validation; expired pins are hidden/cleared independently
+from customer-authored addresses. Six focused real-PostgreSQL/API cases and eight
+mocked browser cases pass, including populated upgrade, unchanged historical
+orders, callback races, manual fallback, responsive widths and accessibility.
+Specification/security review findings were fixed and re-reviewed. Local full
+repository and DB gates pass. PR CI is tracked separately in TEST_MATRIX.md;
+real Google/device/key/quota acceptance remains BLOCKED_EXTERNAL.
+
+Promotions and phone-first checkout remain subsequent milestones. V3 is not a
+complete commerce candidate or production GO. Neither draft PR has been merged.

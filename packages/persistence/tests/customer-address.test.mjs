@@ -10,7 +10,16 @@ before(async()=>{
  if(!enabled)return;
  admin=p.createDatabase(process.env.DATABASE_URL);name='address_v3_'+randomUUID().replaceAll('-','');await admin.client.unsafe(`CREATE DATABASE "${name}"`);
  const u=new URL(process.env.DATABASE_URL);u.pathname='/'+name;db=p.createDatabase(u.toString());
- const dir=new URL('../migrations/',import.meta.url);for(const f of(await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())await db.client.begin(async s=>s.unsafe(await readFile(new URL(f,dir),'utf8')));
+ const dir=new URL('../migrations/',import.meta.url);
+ for(const f of(await readdir(dir)).filter(f=>f.endsWith('.sql')).sort()){
+  if(f.startsWith('0018_')){
+   const time='2026-10-23T12:00:00.000Z';
+   await db.client`INSERT INTO users(id,google_sub,created_at,updated_at) VALUES('legacy_0018','synthetic_google_0018',${time},${time})`;
+   await db.client`INSERT INTO auth_sessions(id,user_id,token_hash,created_at,expires_at) VALUES('legacy_session_0018','legacy_0018','synthetic_session_0018',${time},'2026-11-22T12:00:00.000Z')`;
+   await db.client`INSERT INTO orders(id,checkout_ref,checkout_public_token,user_id,customer_email,delivery_jsonb,subtotal_amount,grand_total_amount,total_amount,created_at,updated_at) VALUES('legacy_order_0018','legacy_ref_0018','synthetic_token_0018','legacy_0018','synthetic@example.invalid','{"address":"Alamat historis sintetis","city":"Bandung"}'::jsonb,10000,10000,10000,${time},${time})`;
+  }
+  await db.client.begin(async s=>s.unsafe(await readFile(new URL(f,dir),'utf8')));
+ }
  now=Date.now();
 });
 after(async()=>{if(db)await p.closeDatabase(db);if(admin){await admin.client.unsafe(`DROP DATABASE "${name}" WITH(FORCE)`);await p.closeDatabase(admin);}});
@@ -72,4 +81,10 @@ test('saved address edits and deletion do not alter an existing order address or
  await a.deleteCustomerAddress({actor:owner,id:saved.value.id},deps);
  const [row]=await db.client`SELECT delivery_jsonb,grand_total_amount,total_amount FROM orders WHERE id=${id}`;
  assert.deepEqual(row.delivery_jsonb,snapshot);assert.equal(row.grand_total_amount,10000);assert.equal(row.total_amount,10000);
+});
+
+test('0018 upgrades populated identity/order storage without changing historical records',{skip:!enabled},async()=>{
+ const [user]=await db.client`SELECT google_sub FROM users WHERE id='legacy_0018'`;assert.equal(user.google_sub,'synthetic_google_0018');
+ const [session]=await db.client`SELECT token_hash,revoked_at FROM auth_sessions WHERE id='legacy_session_0018'`;assert.equal(session.token_hash,'synthetic_session_0018');assert.equal(session.revoked_at,null);
+ const [order]=await db.client`SELECT delivery_jsonb,grand_total_amount FROM orders WHERE id='legacy_order_0018'`;assert.deepEqual(order.delivery_jsonb,{address:'Alamat historis sintetis',city:'Bandung'});assert.equal(order.grand_total_amount,10000);
 });
