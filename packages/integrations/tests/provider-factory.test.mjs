@@ -152,3 +152,14 @@ test("outbound article uses the exact configured article type", async () => {
   const created = [...client.articles.values()].at(-1);
   assert.equal(created.type, "whatsapp-message");
 });
+
+test("createSupportProvider fails loudly under SUPPORT_PROVIDER=disabled instead of faking a delivery", () => {
+  assert.throws(
+    () => createSupportProvider({ YUBIE_ENV: "production", SUPPORT_PROVIDER: "disabled", BOT_ENGINE: "deterministic" }),
+    /SUPPORT_PROVIDER=disabled — support delivery is intentionally disabled/,
+  );
+  assert.equal(
+    resolveSupportProviderName({ YUBIE_ENV: "production", SUPPORT_PROVIDER: "disabled", BOT_ENGINE: "deterministic" }),
+    "disabled",
+  );
+});

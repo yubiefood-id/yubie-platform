@@ -61,3 +61,46 @@ test("api scope never requires support-provider secrets; worker scope does", () 
   );
   assert.equal(api.supportProvider, "fake", "api defaults without any ZAMMAD_* present");
 });
+
+test("SUPPORT_PROVIDER=disabled lets the worker run bot-off production without any support secrets", () => {
+  // Production worker with commerce enabled and no Zammad/Chatwoot values at all.
+  const worker = parseServiceRuntimeConfig(
+    {
+      YUBIE_ENV: "production",
+      SUPPORT_PROVIDER: "disabled",
+      COMMERCE_PROVIDER: "preview",
+      INVENTORY_MODE: "lots",
+      DATABASE_URL: "postgresql://localhost/yubie",
+      PURCHASE_OPTIONS_SOURCE: "database",
+      YUBIE_LAUNCH_PROFILE: "DIRECT_COMMERCE_PRODUCTION",
+    },
+    "worker",
+  );
+  assert.equal(worker.supportProvider, "disabled");
+  assert.equal(worker.commerce.provider, "preview");
+
+  // The same shape with the provider merely UNSET still fails closed.
+  const unset = inspectServiceRuntimeConfig(
+    {
+      YUBIE_ENV: "production",
+      COMMERCE_PROVIDER: "preview",
+      DATABASE_URL: "postgresql://localhost/yubie",
+    },
+    "worker",
+  );
+  assert.equal(unset.ok, false);
+  assert.ok(unset.errors.join(" ").includes("SUPPORT_PROVIDER=fake is not allowed"));
+
+  // A typo'd provider name must never be treated as disabled.
+  assert.throws(
+    () => parseServiceRuntimeConfig({ YUBIE_ENV: "production", SUPPORT_PROVIDER: "disbled" }, "worker"),
+    /SUPPORT_PROVIDER must be one of/,
+  );
+});
+
+test("bot service refuses to run when support is disabled", () => {
+  assert.throws(
+    () => parseServiceRuntimeConfig({ YUBIE_ENV: "production", SUPPORT_PROVIDER: "disabled" }, "bot"),
+    /bot service cannot run with SUPPORT_PROVIDER=disabled/,
+  );
+});
