@@ -336,6 +336,7 @@ export interface GrowthRepository {
 export interface TransactionalRepositories {
   customerIdentity?: import("./ports/customer-identity.js").CustomerIdentityRepository;
   customerAddresses?: import("./ports/customer-address.js").CustomerAddressRepository;
+  promotions?: import("./ports/promotions.js").PromotionRepository;
   users?: UserRepository;
   authSessions?: SessionRepository;
   orders: OrderRepository;
@@ -363,3 +364,4 @@ export * from "./ports/support-conversation-provider.js";
 export * from "./ports/customer-identity.js";
 export * from "./ports/customer-address.js";
 export * from "./ports/delivery-location.js";
+export * from "./ports/promotions.js";

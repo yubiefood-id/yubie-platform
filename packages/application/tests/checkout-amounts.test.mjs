@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   MAX_CHECKOUT_TOTAL_IDR,
   buildOrderTotals,
-  quotePromotion,
+  quoteApprovedCampaign,
 } from "@yubie/domain";
 import {
   buildProviderLineItems,
@@ -73,23 +73,12 @@ const promoCases = [
 ];
 
 for (const scenario of promoCases) {
-  test(`iPaymu checkout charges the discounted grand total: ${scenario.name}`, async () => {
+  test(`unverified iPaymu promotion is rejected before charging: ${scenario.name}`, async () => {
     const deps = makeDeps();
     const result = await createFirstPartyCheckout({ ...BASE, lines: scenario.lines, promoCode: "YUBIE15" }, deps);
-    assert.equal(result.ok, true, JSON.stringify(result.error ?? null));
-    const discount = Math.floor((scenario.subtotal * 15) / 100);
-    const expected = scenario.subtotal - discount;
-    assert.equal(result.value.totalAmount, expected);
-
-    const sent = deps.provider.created[0];
-    assert.equal(sent.amount, expected);
-    assert.deepEqual(sent.items, [{ referenceId: result.value.checkoutRef, name: `Pesanan Yubie ${result.value.checkoutRef}`, quantity: 1, netUnitAmount: expected }]);
-
-    const order = [...deps.orders.items.values()][0];
-    const payment = (await deps.payments.findByOrderId(order.id)).value[0];
-    assert.equal(order.totals.grandTotalAmount, expected);
-    assert.equal(payment.amount, expected, "provider amount equals order_payments.amount");
-    assert.equal(order.status, "pending_payment");
+    assert.equal(result.ok, false);
+    assert.equal(deps.provider.created.length, 0, 'unverified code never reaches a payment provider');
+    assert.equal(deps.orders.items.size, 0);
   });
 }
 
@@ -102,7 +91,7 @@ test("iPaymu line builder includes shipping and discount in the single aggregate
 
 test("rounding remainder from the 15% discount is floored and the line still equals the grand total", () => {
   const subtotal = 33333;
-  const promotion = quotePromotion("yubie15", subtotal);
+  const promotion = quoteApprovedCampaign({id:'synthetic',code:'YUBIE15',status:'active',basisPoints:1500,eligibleProductIds:['flour'],startsAt:'2026-10-01T00:00:00Z',endsAt:'2026-11-01T00:00:00Z',approvedAt:'2026-09-30T00:00:00Z',approvedBy:'synthetic',approvalRef:'synthetic',refundPolicy:'retain_consumed'},[{productId:'flour',unitPrice:subtotal,quantity:1}],'2026-10-23T12:00:00Z');
   assert.equal(promotion.discountAmount, 4999);
   const totals = buildOrderTotals(subtotal, 0, 0, promotion.discountAmount);
   const items = buildProviderLineItems("ipaymu", "co_r", [], totals);
@@ -137,4 +126,11 @@ test("a cart above the checkout cap is refused before any order, intent, or prov
   assert.equal(result.error.code, "validation");
   assert.equal(deps.provider.created.length, 0);
   assert.equal(deps.orders.items.size, 0);
+});
+
+test('Xendit discounted basket item sum equals the authoritative grand total',()=>{
+ const totals=buildOrderTotals(70000,0,0,10500);
+ const lines=[{id:'flour-250g',productId:'flour',productName:'Yubie Flour',sizeId:'250g',sizeLabel:'250 g',quantity:2,unitPrice:35000}];
+ const items=buildProviderLineItems('xendit','co_synthetic',lines,totals);
+ assert.equal(items.reduce((sum,item)=>sum+item.netUnitAmount*item.quantity,0),59500);
 });

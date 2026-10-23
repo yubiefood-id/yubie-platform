@@ -1,6 +1,6 @@
-import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb, boolean } from "drizzle-orm/pg-core";
+import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb, boolean, foreignKey } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import type { PhoneChallenge, AuthIdentity, AddressDetails, DeliveryPin } from "@yubie/domain";
+import type { PhoneChallenge, AuthIdentity, AddressDetails, DeliveryPin, PromotionCampaign, PromotionRedemption } from "@yubie/domain";
 
 export const listingStatusEnum = pgEnum("listing_status", ["draft", "active", "paused", "broken", "retired"]);
 
@@ -566,7 +566,7 @@ export const authIdentities = pgTable("auth_identities", {
   id: text("id").primaryKey(), userId: text("user_id").notNull().references(() => users.id),
   provider: text("provider").$type<AuthIdentity["provider"]>().notNull(), subject: text("subject").notNull(),
   verifiedAt: identityTime("verified_at").notNull(), createdAt: identityTime("created_at").notNull(),
-}, t => [uniqueIndex("auth_identities_provider_subject").on(t.provider, t.subject), uniqueIndex("auth_identities_user_provider").on(t.userId, t.provider)]);
+}, t => [uniqueIndex("auth_identities_provider_subject").on(t.provider, t.subject), uniqueIndex("auth_identities_user_provider").on(t.userId, t.provider), uniqueIndex("auth_identities_owner_provider").on(t.id, t.userId, t.provider)]);
 export const phoneVerifications = pgTable("phone_verifications", {
   id: text("id").primaryKey(), browserHash: text("browser_hash").notNull(), phoneHash: text("phone_hash").notNull(),
   requestKey: text("request_key").notNull(), requestHash: text("request_hash").notNull(),
@@ -580,3 +580,26 @@ export const phoneVerifications = pgTable("phone_verifications", {
 export const identityRateBuckets = pgTable("identity_rate_buckets", {
   key: text("key").primaryKey(), count: integer("count").notNull(), expiresAt: identityTime("expires_at").notNull(),
 });
+
+export const promotionCampaigns = pgTable("promotion_campaigns", {
+  id: text("id").primaryKey(), kind: text("kind").notNull().default("welcome"), code: text("code").notNull().unique(),
+  status: text("status").$type<PromotionCampaign["status"]>().notNull().default("draft"), basisPoints: integer("basis_points").notNull().default(1500),
+  eligibleProductIds: text("eligible_product_ids").array().notNull(), startsAt: timestamp("starts_at", { withTimezone: true, mode: "string" }), endsAt: timestamp("ends_at", { withTimezone: true, mode: "string" }),
+  approvedAt: timestamp("approved_at", { withTimezone: true, mode: "string" }), approvedBy: text("approved_by"), approvalRef: text("approval_ref"), refundPolicy: text("refund_policy").$type<"retain_consumed">().notNull().default("retain_consumed"),
+}, table => [uniqueIndex("promotion_one_active_welcome").on(table.kind).where(sql`${table.status}='active'`)]);
+export const promotionEntitlements = pgTable("promotion_entitlements", {
+  id: text("id").primaryKey(), campaignId: text("campaign_id").notNull().references(() => promotionCampaigns.id), userId: text("user_id").notNull().references(() => users.id),
+  phoneIdentityId: text("phone_identity_id").notNull(), phoneProvider: text("phone_provider").notNull().default("phone"), claimedAt: timestamp("claimed_at", { withTimezone: true, mode: "string" }).notNull(),
+}, table => [
+  uniqueIndex("promotion_entitlements_customer").on(table.campaignId, table.userId), uniqueIndex("promotion_entitlements_phone").on(table.campaignId, table.phoneIdentityId),
+  uniqueIndex("promotion_entitlements_owner").on(table.id, table.campaignId, table.userId),
+  foreignKey({ columns: [table.phoneIdentityId, table.userId, table.phoneProvider], foreignColumns: [authIdentities.id, authIdentities.userId, authIdentities.provider] }),
+]);
+export const promotionRedemptions = pgTable("promotion_redemptions", {
+  id: text("id").primaryKey(), entitlementId: text("entitlement_id").notNull(), campaignId: text("campaign_id").notNull(), userId: text("user_id").notNull(), orderId: text("order_id").notNull().unique().references(() => firstPartyOrders.id),
+  state: text("state").$type<PromotionRedemption["state"]>().notNull(), eligibleSubtotalAmount: integer("eligible_subtotal_amount").notNull(), discountAmount: integer("discount_amount").notNull(), basisPoints: integer("basis_points").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(), updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(), consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "string" }), releasedAt: timestamp("released_at", { withTimezone: true, mode: "string" }),
+}, table => [
+  uniqueIndex("promotion_one_qualifying_redemption").on(table.entitlementId).where(sql`${table.state} IN('reserved','consumed')`), index("promotion_redemptions_customer_state").on(table.userId, table.state),
+  foreignKey({ columns: [table.entitlementId, table.campaignId, table.userId], foreignColumns: [promotionEntitlements.id, promotionEntitlements.campaignId, promotionEntitlements.userId] }),
+]);

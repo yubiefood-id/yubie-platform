@@ -9,7 +9,6 @@ import {
   orderStatusForPayment,
   paymentStatusFromProviderSession,
   productFamilies,
-  quotePromotion,
   resolveShippingPolicy,
   type AppError,
   type OrderLineRecord,
@@ -32,6 +31,9 @@ import { DuplicatePaymentIntentError, InsufficientInventoryError } from "../port
 import { erpStockWriteDecision } from "../policies/erp-authority.js";
 import { checkoutIntentHash, checkoutRequestHash, isCheckoutPrincipalKey } from "./checkout-intent.js";
 import { applyPaymentStatus } from "./process-payment-webhook.js";
+import { authorizeCheckoutPromotion, reserveCheckoutPromotion, settlePromotionForPayment, PromotionAuthorizationError } from "./verified-promotions.js";
+import type { CustomerProof } from "./phone-auth.js";
+class CheckoutTotalError extends Error {}
 
 export interface CheckoutLineInput {
   productId: string;
@@ -63,6 +65,9 @@ export interface CreateFirstPartyCheckoutInput {
   idempotencyPrincipal: string;
   /** Public promotion identifier. The server is always the pricing authority. */
   promoCode?: string;
+  customerProof?: CustomerProof;
+  /** Server-derived possession of an existing guest checkout cookie only. */
+  possessedGuestPrincipal?: string;
   /** Adapter selected by commerce config. Existing callers stay on xendit. */
   provider?: PaymentProviderKind;
 }
@@ -174,7 +179,8 @@ async function openIntentOutcome(repos: TransactionalRepositories, principalKey:
 /**
  * Line items sent to the payment provider. iPaymu requires the lines to sum
  * to the charged amount and has no discount or shipping field, so it gets one
- * aggregate line at the grand total. Xendit keeps per-product lines.
+ * aggregate line at the grand total. Xendit keeps per-product lines when
+ * their sum matches; discounted/shipping baskets also use the final aggregate.
  */
 export function buildProviderLineItems(
   provider: PaymentProviderKind | undefined,
@@ -185,7 +191,8 @@ export function buildProviderLineItems(
   if (!isPayableTotal(totals.grandTotalAmount)) {
     throw new RangeError(`Grand total ${totals.grandTotalAmount} is not a payable amount`);
   }
-  if (provider === "ipaymu") {
+  const lineTotal = priced.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
+  if (provider === "ipaymu" || lineTotal !== totals.grandTotalAmount) {
     return [{ referenceId: checkoutRef, name: `Pesanan Yubie ${checkoutRef}`, quantity: 1, netUnitAmount: totals.grandTotalAmount }];
   }
   return priced.map((line) => ({ referenceId: line.id, name: `${line.productName} ${line.sizeLabel}`, quantity: line.quantity, netUnitAmount: line.unitPrice }));
@@ -257,16 +264,7 @@ export async function createFirstPartyCheckout(
     return err({ code: "validation", message: String(error), retryable: false, requestId: "checkout" });
   }
   const subtotalAmount = priced.reduce((total, line) => total + line.unitPrice * line.quantity, 0);
-  const promotion = quotePromotion(input.promoCode, subtotalAmount);
-  const totals = buildOrderTotals(subtotalAmount, shipping.amount, 0, promotion?.discountAmount ?? 0);
-  if (!isPayableTotal(totals.grandTotalAmount)) {
-    return err({
-      code: "validation",
-      message: `Order total must be between 1 and ${MAX_CHECKOUT_TOTAL_IDR} IDR for web checkout. Contact us on WhatsApp for larger orders.`,
-      retryable: false,
-      requestId: "checkout",
-    });
-  }
+  let totals = buildOrderTotals(subtotalAmount, shipping.amount, 0, 0);
 
   const idempotencyKey = input.idempotencyKey ?? null;
   const claimInput = {
@@ -330,6 +328,7 @@ export async function createFirstPartyCheckout(
     currency: "IDR",
     amount: totals.grandTotalAmount,
     status: "pending",
+    reconciliationState: "create_in_flight",
     expiresAt: orderExpiresAt,
     createdAt: now,
     updatedAt: now,
@@ -348,13 +347,23 @@ export async function createFirstPartyCheckout(
         if (claim.value.status === "duplicate") return replayStored(claim.value.responseJson);
         claimed = true;
       }
+      if (input.userId && repos.promotions) await repos.promotions.lockCustomer(input.userId);
       const open = await openIntentOutcome(repos, input.idempotencyPrincipal, intentHash);
       if (open) {
         if (idempotencyKey) await attachOutcome(repos, open);
         return outcomeResult(open);
       }
+      const promotion = await authorizeCheckoutPromotion({
+        lines: priced, ...(input.userId === undefined ? {} : { userId: input.userId }),
+        ...(input.customerProof ? { actor: input.customerProof } : {}), ...(input.promoCode ? { code: input.promoCode } : {}),
+        ...(input.possessedGuestPrincipal ? { guestPrincipal: input.possessedGuestPrincipal } : {}),
+      }, repos, deps.clock.now());
+      totals = buildOrderTotals(subtotalAmount, shipping.amount, 0, promotion?.quote.discountAmount ?? 0);
+      if (!isPayableTotal(totals.grandTotalAmount)) throw new CheckoutTotalError();
+      draftOrder.totals = totals; draftOrder.totalAmount = totals.grandTotalAmount; paymentIntent.amount = totals.grandTotalAmount;
       await repos.orders.save(draftOrder);
       await repos.payments.save(paymentIntent);
+      if (promotion) await reserveCheckoutPromotion(promotion, orderId, repos, deps);
       if ((input.inventoryMode ?? "none") === "lots") {
         await repos.inventory.reserveForOrder({
           orderId,
@@ -376,6 +385,10 @@ export async function createFirstPartyCheckout(
     });
     if (tx1 !== null) return tx1; // duplicate replay outcome
   } catch (error) {
+    if (error instanceof PromotionAuthorizationError || error instanceof CheckoutTotalError) {
+      if (claimed && idempotencyKey) await deps.tx.run("checkout.idempotency.release", repos => repos.idempotency.releaseClaim(claimInput)).catch(() => undefined);
+      return error instanceof PromotionAuthorizationError ? err(error.safeError) : err({ code: "validation", message: `Order total must be between 1 and ${MAX_CHECKOUT_TOTAL_IDR} IDR for web checkout. Contact us on WhatsApp for larger orders.`, retryable: false, requestId: "checkout" });
+    }
     if (error instanceof InsufficientInventoryError) {
       // PostgreSQL rolled the whole transaction back (claim included). The
       // in-memory manager cannot roll back, so release the claim explicitly
@@ -430,6 +443,7 @@ export async function createFirstPartyCheckout(
         await repos.orders.save({ ...draftOrder, status: "cancelled", updatedAt: deps.clock.now() });
         await repos.payments.save({ ...paymentIntent, status: "failed", reconciliationState: "provider_create_failed", updatedAt: deps.clock.now() });
         await repos.inventory.releaseForOrder(orderId, "provider_create_failed", deps.clock.now());
+        await settlePromotionForPayment(repos, orderId, "failed", deps.clock.now());
         await repos.audit.append({ action: "order.provider_create_failed", resourceType: "order", resourceId: orderId, actor: auditActor, occurredAt: deps.clock.now() });
         if (idempotencyKey) await attachOutcome(repos, failure);
       });
@@ -473,6 +487,7 @@ export async function createFirstPartyCheckout(
       await repos.payments.save({
         ...paymentIntent,
         providerSessionId: session.value.providerSessionId,
+        reconciliationState: null,
         redirectUrl: session.value.redirectUrl,
         expiresAt: session.value.expiresAt ?? orderExpiresAt,
         ...(session.value.providerBusinessId !== undefined ? { providerBusinessId: session.value.providerBusinessId } : {}),

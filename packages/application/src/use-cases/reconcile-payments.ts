@@ -1,6 +1,7 @@
 import { paymentStatusFromProviderSession, type AppError } from "@yubie/domain";
 import type { Clock, IdGenerator, OrderRepository, PaymentProviderPort, PaymentRepository, TransactionManager } from "../ports.js";
 import { applyPaymentStatus } from "./process-payment-webhook.js";
+import { settlePromotionForPayment } from "./verified-promotions.js";
 
 export interface ReconcilePaymentsDeps {
   tx: TransactionManager;
@@ -31,9 +32,9 @@ const BATCH_LIMIT = 50;
  * webhook path:
  *  - a still-pending payment past expiry is polled once at the provider and
  *    transitions exactly like the webhook would (never from a redirect);
- *  - a draft order older than the stale window could never have been paid
- *    (its link was never returned to a browser), so it is cancelled and its
- *    reservations released;
+ *  - an old draft is cancelled only without a chargeable/unknown payment;
+ *    missing provider IDs on pending payments are held for reconciliation,
+ *    including a crash before the create acknowledgment was persisted;
  *  - anything the provider cannot answer stays flagged "ambiguous" for an
  *    operator — reconciliation never guesses and never re-creates sessions.
  *
@@ -99,7 +100,7 @@ export async function reconcilePayments(deps: ReconcilePaymentsDeps): Promise<{ 
         const freshOrder = await repos.orders.findById(order.id);
         if (!freshOrder.ok || freshOrder.value?.status !== "draft") return null;
         if (!payment || !payment.providerSessionId) {
-          if (payment && (payment.reconciliationState === "ambiguous_create" || payment.reconciliationState === "pending_reconciliation")) {
+          if (payment && !["failed", "expired", "cancelled"].includes(payment.status)) {
             return { kind: "ambiguous" as const, orderId: order.id, payment };
           }
           return { kind: "no_session" as const, orderId: order.id };
@@ -178,18 +179,20 @@ export async function reconcilePayments(deps: ReconcilePaymentsDeps): Promise<{ 
         continue;
       }
 
-      // No session id anywhere: the payment link was never delivered, so the
-      // draft can never be paid. Cancel it and release its reservations.
+      // No chargeable/unknown payment exists. Recheck before cancellation:
+      // an acknowledgment or authoritative callback may have arrived meanwhile.
       const cancelled = await deps.tx.run("reconcile.cancel_stale_draft", async (repos) => {
         const freshOrder = await repos.orders.findById(order.id);
         const payments = await repos.payments.findByOrderId(order.id);
         const payment = payments.ok ? payments.value[0] ?? null : null;
         if (!freshOrder.ok || freshOrder.value?.status !== "draft") return false;
+        if (!payments.ok || (payment && (payment.providerSessionId || !["failed", "expired", "cancelled"].includes(payment.status)))) return false;
         await repos.orders.save({ ...freshOrder.value, status: "cancelled", updatedAt: deps.clock.now() });
         if (payment && payment.status === "pending") {
           await repos.payments.save({ ...payment, status: "expired", reconciliationState: "stale_draft_cancelled", updatedAt: deps.clock.now() });
         }
         await repos.inventory.releaseForOrder(order.id, "stale_draft_cancelled", deps.clock.now());
+        await settlePromotionForPayment(repos, order.id, "expired", deps.clock.now());
         await repos.audit.append({ action: "order.stale_draft_cancelled", resourceType: "order", resourceId: order.id, actor: "reconcile", occurredAt: deps.clock.now() });
         return true;
       });

@@ -19,6 +19,7 @@ export * from "./auth/otp-cryptography.js";
 export * from "./use-cases/phone-auth.js";
 export * from "./use-cases/customer-address.js";
 export * from "./use-cases/delivery-location.js";
+export * from "./use-cases/verified-promotions.js";
 export * from "./system-clock.js";
 export * from "./crypto-id-generator.js";
 export * from "./memory/in-memory-repos.js";

@@ -10,7 +10,7 @@ test("calculateSubtotal totals Indonesian rupiah line items", () => {
 });
 
 test("launch promotion is case-insensitive and server-calculated", () => {
-  assert.deepEqual(quotePromotion("yubie15", 129000), { code: "YUBIE15", percentage: 15, discountAmount: 19350 });
+  assert.equal(quotePromotion("yubie15", 129000), null);
   assert.equal(quotePromotion("other", 129000), null);
   assert.equal(quotePromotion("YUBIE15", 0), null);
 });

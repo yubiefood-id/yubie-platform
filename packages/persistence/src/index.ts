@@ -27,6 +27,7 @@ export * from "./repositories/growth-repository.js";
 export * from "./repositories/identity-repository.js";
 export * from "./repositories/customer-identity-repository.js";
 export * from "./repositories/customer-address-repository.js";
+export * from "./repositories/promotion-repository.js";
 export * from "./repositories/admin-readers.js";
 export * from "./schema/index.js";
 export * from "./repositories/admin-session-repository.js";

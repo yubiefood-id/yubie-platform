@@ -13,7 +13,8 @@ import {
   type PaymentStatus,
   type UseCaseResult,
 } from "@yubie/domain";
-import type { AuditRepository, Clock, IdGenerator, InventoryRepository, OrderRepository, OutboxRepository, PaymentEventRepository, PaymentRepository, TransactionManager, TransactionalRepositories } from "../ports.js";
+import type { AuditRepository, Clock, IdGenerator, InventoryRepository, OrderRepository, OutboxRepository, PaymentEventRepository, PaymentRepository, PromotionRepository, TransactionManager, TransactionalRepositories } from "../ports.js";
+import { settlePromotionForPayment } from "./verified-promotions.js";
 
 /** Constant-time comparison for the Xendit x-callback-token. */
 export function tokensMatch(a: string, b: string): boolean {
@@ -38,7 +39,7 @@ function requireWrite(result: UseCaseResult<unknown>): void {
  * so state, audit, outbox and inventory effects commit together.
  */
 export async function applyPaymentStatus(
-  deps: { orders: OrderRepository; payments: PaymentRepository; paymentEvents: PaymentEventRepository; audit?: AuditRepository; outbox?: OutboxRepository; inventory?: InventoryRepository; clock: Clock; ids: IdGenerator },
+  deps: { orders: OrderRepository; payments: PaymentRepository; paymentEvents: PaymentEventRepository; audit?: AuditRepository; outbox?: OutboxRepository; inventory?: InventoryRepository; promotions?: PromotionRepository; clock: Clock; ids: IdGenerator },
   payment: PaymentRecord,
   order: OrderRecord,
   status: PaymentStatus,
@@ -76,6 +77,7 @@ export async function applyPaymentStatus(
       requireWrite(await deps.inventory.releaseForOrder(order.id, `payment_${status}`, now));
     }
   }
+  await settlePromotionForPayment(deps, order.id, status, now);
   return "applied";
 }
 

@@ -9,6 +9,7 @@ import { PostgresOutboxRepository } from "./repositories/outbox-repository.js";
 import { PostgresPaymentWebhookInboxRepository } from "./repositories/payment-webhook-inbox-repository.js";
 import { PostgresCustomerIdentityRepository } from "./repositories/customer-identity-repository.js";
 import { PostgresCustomerAddressRepository } from "./repositories/customer-address-repository.js";
+import { PostgresPromotionRepository } from "./repositories/promotion-repository.js";
 import { PostgresUserRepository, PostgresSessionRepository } from "./repositories/identity-repository.js";
 
 /**
@@ -28,6 +29,7 @@ export class PostgresTransactionManager implements TransactionManager {
       return work({
         customerIdentity: new PostgresCustomerIdentityRepository(txDatabase),
         customerAddresses: new PostgresCustomerAddressRepository(txDatabase),
+        promotions: new PostgresPromotionRepository(txDatabase),
         users: new PostgresUserRepository(txDatabase),
         authSessions: new PostgresSessionRepository(txDatabase),
         orders: new PostgresOrderRepository(txDatabase),
