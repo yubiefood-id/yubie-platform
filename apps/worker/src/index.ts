@@ -2,7 +2,7 @@ import PgBoss from "pg-boss";
 import { inspectServiceRuntimeConfig } from "@yubie/config";
 import { checkListingHealth, SystemClock } from "@yubie/application";
 import { createSupportProvider, HttpLinkHealthChecker } from "@yubie/integrations";
-import { closeDatabase, createWorkerRepositories } from "@yubie/persistence";
+import { closeDatabase, createWorkerRepositories, PostgresAssistantWorkRepository } from "@yubie/persistence";
 import { processAssistantJob } from "./assistant-handler.js";
 import { startMetricsServer } from "./metrics-server.js";
 import { reconcileSupport } from "./reconcile-handler.js";
@@ -42,6 +42,7 @@ async function start() {
   await boss.createQueue("listing.health");
   await boss.createQueue("integration.health");
   await boss.createQueue("assistant.process");
+  await boss.createQueue("assistant.dead");
   await boss.createQueue("support.reply");
   await boss.createQueue("support.reconcile");
   await boss.createQueue("chatwoot.reply");
@@ -124,6 +125,23 @@ async function start() {
   await boss.schedule("support.reconcile", "*/15 * * * *", {});
   await boss.schedule("chatwoot.reconcile", "*/15 * * * *", {});
   await boss.schedule("webhook.cleanup", "0 * * * *", {});
+  // Repair the durable inbox -> queue wakeup gap and retry only bounded failed events.
+  let sweeping=false;
+  const sweep=setInterval(async()=>{
+    if(sweeping)return;
+    sweeping=true;
+    try {
+      const provider=process.env.SUPPORT_PROVIDER??process.env.CHAT_PROVIDER??"fake";
+      const inboxProvider=provider==="chatwoot"?"chatwoot_agentbot":provider;
+      const work=new PostgresAssistantWorkRepository(repos.database);
+      const rows=await work.backlog(inboxProvider);
+      for(const row of rows)await boss.send("assistant.process",{inboxId:row.id},{singletonKey:row.id,retryLimit:4,retryDelay:30,retryBackoff:true,deadLetter:"assistant.dead"});
+      await processPendingOutbox(repos.database,createSupportProvider());
+      await work.purgeExpiredContext();
+    }catch{console.error(JSON.stringify({event:"assistant.sweep_failed",errorCode:"SWEEP_FAILED"}));}
+    finally{sweeping=false;}
+  },10_000);
+  sweep.unref();
 
   console.log(JSON.stringify({ level: "info", event: "worker.started", releaseSha: process.env.RELEASE_SHA ?? "dev" }));
 }

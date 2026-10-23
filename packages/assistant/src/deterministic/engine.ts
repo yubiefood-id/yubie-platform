@@ -97,9 +97,10 @@ async function renderNode(
     const marketplace = nodeId.endsWith("shopee") ? "shopee" : "tokopedia";
     const options = deps.getPurchaseOptions ? await deps.getPurchaseOptions("yubie-flour") : null;
     const match = options?.options.find((o) => o.marketplace === marketplace);
+    if (!match) return { text: "Informasi tujuan pembelian yang disetujui belum tersedia. Ketik 0 untuk Customer Service." };
     templateCtx = {
       marketplaceLabel: match?.label ?? (marketplace === "shopee" ? "Shopee" : "Tokopedia"),
-      redirectPath: match?.redirectPath ?? `/go/${marketplace}/yubie-flour`,
+      redirectPath: match.redirectPath,
     };
   }
 

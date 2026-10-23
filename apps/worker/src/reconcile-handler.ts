@@ -51,8 +51,12 @@ export async function reconcileSupport(
       const humanState = await support.getCurrentHumanState(ref);
       const session = await sessions.getByProviderThreadId(provider, thread.threadId);
       const localState = session.ok && session.value ? session.value.state : "BOT_ELIGIBLE";
+      const currentThread=await support.getThread(ref);
+      if(currentThread.stateLabel.toLowerCase()==="closed" && localState!=="RESOLVED") {
+        await sessions.updateState(provider,thread.threadId,"RESOLVED",new Date().toISOString());changed+=1;continue;
+      }
 
-      if (humanState.humanActive && localState !== "HUMAN_ACTIVE") {
+      if (humanState.humanActive && localState !== "HUMAN_ACTIVE" && localState !== "RESOLVED") {
         await sessions.updateState(provider, thread.threadId, "HUMAN_ACTIVE", new Date().toISOString());
         changed += 1;
       }

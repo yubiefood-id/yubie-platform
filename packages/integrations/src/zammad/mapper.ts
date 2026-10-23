@@ -10,13 +10,13 @@ export function stripHtml(html: string): string {
     .trim();
 }
 
-export function mapArticle(article: ZammadArticle): SupportMessage {
+export function mapArticle(article: ZammadArticle, botUserId?: number): SupportMessage {
   const text = article.content_type === "text/html" ? stripHtml(article.body) : article.body;
   const role =
     article.sender === "Customer"
       ? "customer"
       : article.sender === "Agent"
-        ? "bot"
+        ? article.created_by_id === botUserId ? "bot" : "agent"
         : article.sender === "System"
           ? "system"
           : "agent";
@@ -29,23 +29,22 @@ export function mapArticle(article: ZammadArticle): SupportMessage {
   };
 }
 
-export function isHumanActiveTicket(ticket: ZammadTicket, states: ZammadTicketState[]): boolean {
-  const state = states.find((s) => s.id === ticket.state_id);
-  if (!state) return ticket.owner_id > 0;
-  if (HUMAN_STATE_NAMES.has(state.name.toLowerCase())) return true;
-  return ticket.owner_id > 0 && state.state_type_id === 2;
+export function isHumanActiveTicket(ticket: ZammadTicket, states: ZammadTicketState[], botUserId?: number): boolean {
+  // Zammad's system/unassigned owner is id 1. Ticket lifecycle alone is not ownership.
+  return ticket.owner_id > 1 && ticket.owner_id !== botUserId;
 }
 
 export function mapTicket(
   ref: SupportThreadRef,
   ticket: ZammadTicket,
   states: ZammadTicketState[],
+  botUserId?: number,
 ): SupportThread {
   return {
     ref,
     customerId: String(ticket.customer_id),
     inboxOrChannelId: String(ticket.group_id),
-    humanActive: isHumanActiveTicket(ticket, states),
+    humanActive: isHumanActiveTicket(ticket, states, botUserId),
     stateLabel: states.find((s) => s.id === ticket.state_id)?.name ?? "unknown",
     groupId: String(ticket.group_id),
   };

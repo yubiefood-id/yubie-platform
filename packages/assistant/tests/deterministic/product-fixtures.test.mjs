@@ -13,7 +13,7 @@ test("shake purchase points to the approved online catalog", async () => {
     persisted: { nodeId: "buy", flowVersion: "deterministic-v1", context: {}, fallbackCount: 0 },
   });
   assert.match(toShake.action.text, /tersedia/i);
-  assert.match(toShake.action.text, /checkout/i);
+  assert.doesNotMatch(toShake.action.text, /lanjutkan ke checkout/i);
 });
 
 test("flour shopee uses marketplace registry path", async () => {
