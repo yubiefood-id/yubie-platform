@@ -335,6 +335,7 @@ export interface GrowthRepository {
 /** Repositories sharing one transaction, handed to TransactionManager work. */
 export interface TransactionalRepositories {
   customerIdentity?: import("./ports/customer-identity.js").CustomerIdentityRepository;
+  customerAddresses?: import("./ports/customer-address.js").CustomerAddressRepository;
   users?: UserRepository;
   authSessions?: SessionRepository;
   orders: OrderRepository;
@@ -360,3 +361,4 @@ export interface TransactionManager {
 
 export * from "./ports/support-conversation-provider.js";
 export * from "./ports/customer-identity.js";
+export * from "./ports/customer-address.js";

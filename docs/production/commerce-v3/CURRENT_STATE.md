@@ -5,6 +5,8 @@ Baseline audited 2026-10-23: local/remote main
 `/home/ubuntu/project/yubie-commerce-v3`. The original dirty website checkout and
 ERP worktree remain untouched. No deployment or real customer/provider operation.
 
+The table below records the R0 baseline, before V3 changes.
+
 | Axis | Source evidence | Acceptance |
 | --- | --- | --- |
 | Baseline CI | Rerun39916788355 on exact SHA: quality,persistence,security,browser,containers | PASS all5; no provider/live acceptance implied |
@@ -29,3 +31,20 @@ External dependencies: private SMSGate device/SIM and approved carrier use,
 protected endpoint/keys, Turnstile, restricted Google Maps keys and billing/quota,
 approved campaign dates/scope, real PSP sandbox testing, named operators and
 privacy/retention/recovery acceptance. Production payments remain disabled.
+
+## Implementation evidence
+
+PR A: [draft PR29](https://github.com/yubiefood-id/yubie-platform/pull/29), exact
+head `0e3efbbe4a9f90c6562ae387292d4747479dff7f`. Durable phone/Google identities,
+encrypted expiring OTP, abuse budgets, verified sessions, guarded API/proxy and
+worker delivery are implemented. Preview payments no longer select memory for
+customer identities. [CI39970968906](https://github.com/yubiefood-id/yubie-platform/actions/runs/39970968906)
+passes all five gates. Thirteen final API/identity regressions used real disposable
+PostgreSQL and synthetic delivery. Separate standards/security and spec reviews
+found five gaps, all fixed and re-reviewed. No live SMS/provider acceptance.
+
+PR B is in progress: owner-scoped saved-address/default CRUD and migration0018
+have local PostgreSQL/API coverage. Expired pins are hidden/cleared independently
+from customer-authored addresses. Maps adapter, shared editor and browser
+acceptance are not yet complete. Promotions and phone-first checkout remain
+subsequent milestones. V3 is not a complete commerce candidate or production GO.

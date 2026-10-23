@@ -1,6 +1,6 @@
 import PgBoss from "pg-boss";
 import { inspectServiceRuntimeConfig } from "@yubie/config";
-import { checkListingHealth, SystemClock, purgePhoneChallenges } from "@yubie/application";
+import { checkListingHealth, SystemClock, purgePhoneChallenges, purgeAddressPins } from "@yubie/application";
 import { createSupportProvider, HttpLinkHealthChecker } from "@yubie/integrations";
 import { closeDatabase, createWorkerRepositories, PostgresAssistantWorkRepository, PostgresTransactionManager } from "@yubie/persistence";
 import { processAssistantJob } from "./assistant-handler.js";
@@ -88,6 +88,7 @@ async function start() {
 
   await boss.work("webhook.cleanup", async () => {
     await purgePhoneChallenges({ tx: new PostgresTransactionManager(repos.database), clock });
+    await purgeAddressPins({ tx: new PostgresTransactionManager(repos.database), clock });
     const { PostgresWebhookInboxRepository } = await import("@yubie/persistence");
     const inbox = new PostgresWebhookInboxRepository(repos.database);
     await inbox.purgeExpiredRawBodies(new Date().toISOString());

@@ -3,17 +3,12 @@ import { startPhoneChallenge, verifyPhoneChallenge, linkGoogleIdentity } from "@
 import { normalizePhone, type AppError } from "@yubie/domain";
 import { phoneChallengeSchema, phoneVerifySchema, googleLoginSchema } from "@yubie/validation";
 import type { AppContext } from "./composition/create-app.js";
+import { readCustomerJsonBody as body } from "./customer-http.js";
 import { authorizeCustomerMutation, currentCustomerProof, customerCookie, customerSessionCookie, customerBootstrap } from "./customer-security.js";
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(data, { status, headers: { "cache-control": "no-store", ...headers } });
 function failure(error: AppError): Response {
   const status = { validation: 400, unauthorized: 401, forbidden: 403, conflict: 409, rate_limited: 429 }[error.code as "validation" | "unauthorized" | "forbidden" | "conflict" | "rate_limited"] ?? 503;
   return json({ ok: false, code: error.code === "conflict" ? "ASSISTED_IDENTITY_CONFLICT" : error.code.toUpperCase() }, status, status === 429 ? { "retry-after": "60" } : {});
-}
-async function body(request: Request): Promise<unknown> {
-  const reader = request.body?.getReader(); if (!reader) return null;
-  let length = 0; const chunks: Uint8Array[] = [];
-  for (;;) { const part = await reader.read(); if (part.done) break; length += part.value.byteLength; if (length > 8192) { await reader.cancel(); throw new Error("BODY_TOO_LARGE"); } chunks.push(part.value); }
-  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return null; }
 }
 export async function handleCustomerIdentity(request: Request, ctx: AppContext): Promise<Response | null> {
   const path = new URL(request.url).pathname;

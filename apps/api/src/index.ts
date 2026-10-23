@@ -32,6 +32,7 @@ import { createRequestId } from "./middleware/request-id.js";
 import { logEvent } from "./middleware/log.js";
 import { handleCustomerIdentity } from "./customer-identity.js";
 import { customerBootstrap } from "./customer-security.js";
+import { handleCustomerAddresses } from "./customer-addresses.js";
 
 const commerce = new PreviewCommerceProvider();
 let appContext: AppContext | null = null;
@@ -194,6 +195,8 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
   if (gate) return gate;
   const identityResponse = await handleCustomerIdentity(request, ctx);
   if (identityResponse) return identityResponse;
+  const addressResponse = await handleCustomerAddresses(request, ctx);
+  if (addressResponse) return addressResponse;
 
   if (request.method === "GET" && url.pathname === "/healthz") {
     return json({ ok: true, service: "yubie-api", version: "v1", releaseSha: ctx.releaseSha });

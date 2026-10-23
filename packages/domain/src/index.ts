@@ -127,5 +127,6 @@ export * from "./inventory.js";
 export * from "./identity.js";
 export * from "./phone.js";
 export * from "./phone-identity.js";
+export * from "./delivery-address.js";
 export * from "./promotions.js";
 export * from "./yubi-discovery.js";

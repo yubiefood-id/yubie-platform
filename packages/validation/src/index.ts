@@ -63,3 +63,4 @@ export type GoogleLoginRequest = z.infer<typeof googleLoginSchema>;
 export * from "./channel.js";
 export * from "./yubi-ops.js";
 export * from "./phone-auth.js";
+export * from "./delivery-address.js";

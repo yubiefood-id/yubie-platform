@@ -1,8 +1,15 @@
-import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb } from "drizzle-orm/pg-core";
+import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb, boolean } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import type { PhoneChallenge, AuthIdentity } from "@yubie/domain";
+import type { PhoneChallenge, AuthIdentity, AddressDetails, DeliveryPin } from "@yubie/domain";
 
 export const listingStatusEnum = pgEnum("listing_status", ["draft", "active", "paused", "broken", "retired"]);
+
+export const customerAddresses = pgTable("customer_addresses", {
+  id: text("id").primaryKey(), userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  address: jsonb("address").$type<AddressDetails>().notNull(), pin: jsonb("pin").$type<DeliveryPin>(),
+  pinExpiresAt: timestamp("pin_expires_at", { withTimezone: true, mode: "string" }), isDefault: boolean("is_default").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(), updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, table => [index("customer_addresses_owner").on(table.userId, table.createdAt, table.id), uniqueIndex("customer_addresses_one_default").on(table.userId).where(sql`${table.isDefault}`), index("customer_addresses_pin_expiry").on(table.pinExpiresAt).where(sql`${table.pin} IS NOT NULL`)]);
 export const marketplaceEnum = pgEnum("marketplace", ["shopee", "tokopedia"]);
 export const whatsappStatusEnum = pgEnum("whatsapp_status", ["active", "paused", "retired"]);
 export const outboxStatusEnum = pgEnum("outbox_status", ["pending", "published", "failed"]);
