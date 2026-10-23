@@ -134,3 +134,17 @@ test('Xendit discounted basket item sum equals the authoritative grand total',()
  const items=buildProviderLineItems('xendit','co_synthetic',lines,totals);
  assert.equal(items.reduce((sum,item)=>sum+item.netUnitAmount*item.quantity,0),59500);
 });
+
+test('explicit V3 phone-only checkout preserves null email without synthesizing an identity', async()=>{
+ const deps=makeDeps('xendit');
+ const result=await createFirstPartyCheckout({...BASE,provider:'xendit',checkoutVersion:3,customerPhone:'+6281234567890',customerEmail:null,lines:[{productId:'flour',sizeId:'250g',quantity:1}]},deps);
+ assert.equal(result.ok,true);
+ const order=[...deps.orders.items.values()][0];assert.equal(order.customerEmail,null);assert.equal(order.customerPhone,'+6281234567890');
+ assert.equal(deps.provider.created[0].customerEmail,null);assert.equal(deps.provider.created[0].customerPhone,'+6281234567890');
+});
+test('V1 still requires email and V3 contact requires a valid canonical phone', async()=>{
+ for(const input of [{customerEmail:null},{checkoutVersion:3,customerEmail:null,customerPhone:'invalid'},{checkoutVersion:3,customerEmail:null}]){
+  const deps=makeDeps();const result=await createFirstPartyCheckout({...BASE,...input,lines:[{productId:'flour',sizeId:'250g',quantity:1}]},deps);
+  assert.equal(result.ok,false);assert.equal(result.error.code,'validation');assert.equal(deps.provider.created.length,0);
+ }
+});

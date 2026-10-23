@@ -45,6 +45,7 @@ export class PostgresOrderRepository implements OrderRepository {
       status: order.status,
       userId: order.userId,
       customerEmail: order.customerEmail,
+      customerPhone: order.customerPhone ?? null,
       customerName: order.customerName,
       deliveryJsonb: order.delivery,
       currency: order.currency,
@@ -63,6 +64,7 @@ export class PostgresOrderRepository implements OrderRepository {
       set: {
         status: order.status,
         customerEmail: order.customerEmail,
+      customerPhone: order.customerPhone ?? null,
         customerName: order.customerName,
         subtotalAmount: order.totals.subtotalAmount,
         shippingAmount: order.totals.shippingAmount,
@@ -212,6 +214,7 @@ function mapOrderRow(row: typeof firstPartyOrders.$inferSelect): OrderRecord {
     status: row.status as OrderRecord["status"],
     userId: row.userId,
     customerEmail: row.customerEmail,
+    customerPhone: row.customerPhone,
     customerName: row.customerName,
     delivery: (row.deliveryJsonb as OrderRecord["delivery"]) ?? null,
     currency: "IDR",

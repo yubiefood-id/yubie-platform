@@ -32,6 +32,13 @@ function claimFilter(record: { scope: string; principalKey: string; operation: s
 export class PostgresIdempotencyRepository implements IdempotencyRepository {
   constructor(private readonly database: Database) {}
 
+  async lookup(record: Omit<IdempotencyClaim, "createdAt">): Promise<UseCaseResult<Extract<IdempotencyClaimOutcome, { status: "duplicate" }> | null>> {
+    const [row] = await this.database.db.select().from(idempotencyKeys).where(claimFilter(record)).limit(1);
+    if (!row) return ok(null);
+    if (row.requestHash !== record.requestHash) return err({ code: "conflict", message: "Idempotency key reused with different request", retryable: false, requestId: "idempotency" });
+    return ok({ status: "duplicate", responseJson: row.responseJson });
+  }
+
   async claim(record: IdempotencyClaim): Promise<UseCaseResult<IdempotencyClaimOutcome>> {
     const inserted = await this.database.db
       .insert(idempotencyKeys)

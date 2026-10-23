@@ -59,7 +59,8 @@ export class IpaymuPaymentProvider implements PaymentProviderPort {
       notifyUrl: this.options.notifyUrl,
       cancelUrl: input.cancelReturnUrl,
       referenceId: input.referenceId,
-      buyerEmail: input.customerEmail,
+      ...(input.customerEmail ? { buyerEmail: input.customerEmail } : {}),
+      ...(input.customerPhone ? { buyerPhone: input.customerPhone } : {}),
     };
     const body = JSON.stringify(payload);
     const signature = signIpaymuRequest("POST", this.options.va, body, this.options.apiKey);

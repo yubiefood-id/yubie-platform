@@ -1,13 +1,14 @@
 # Expand-only migration and compatibility
 
-Recheck main/migration numbering at each PR. PR A/B/C allocate0017–0019;0020 remains planned for PR D.
+Recheck main/migration numbering at each PR. PR A/B/C allocate0017–0019; PR D foundation adds0020 phone-first order contact. Further checkout additions require a subsequent migration.
 
 | Migration | Additions and constraints |
 | --- | --- |
 |0017 identity/OTP | auth_identities unique(provider,subject), one phone identity per user; backfill Google subjects; relax legacy google_sub nullability; durable challenges, rate buckets and encrypted delivery jobs with expiry/state indexes |
 |0018 addresses | customer_addresses owner FK, bounded address fields/provenance, one active default per user; provider coordinate-cache TTL separate from durable addresses |
 |0019 promotions | campaigns, unique customer/phone entitlements and redemption history; one reserved/consumed slot per entitlement, order FK, phone-identity ownership FK, customer/state indexes; draft/unapproved welcome seed |
-|0020 checkout | nullable customer_email, contact/identity/address/promotion snapshots and checkout hash version; principal slot aliases for one unresolved attempt |
+|0020 contact | nullable customer_email and nullable canonical customer_phone with E.164 check; existing monetary and identity values unchanged |
+|Subsequent checkout migration (planned) | address snapshots, hash version and principal aliases for one unresolved attempt; allocate after rechecking migration history |
 
 Do not rewrite historical email, ownership, lines or money. users.id and session
 tokens remain stable. New Google writes dual-write the retained legacy subject.

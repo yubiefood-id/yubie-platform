@@ -127,7 +127,8 @@ export interface CreatePaymentSessionInput {
   referenceId: string;
   amount: number;
   currency: "IDR";
-  customerEmail: string;
+  customerEmail: string | null;
+  customerPhone?: string | null;
   description: string;
   successReturnUrl: string;
   cancelReturnUrl: string;
@@ -203,6 +204,8 @@ export type IdempotencyClaimOutcome =
  * conflict, never a silent re-execute.
  */
 export interface IdempotencyRepository {
+  /** Read only: recover an existing attempt before applying today's catalog rules. */
+  lookup(record: Omit<IdempotencyClaim, "createdAt">): Promise<UseCaseResult<Extract<IdempotencyClaimOutcome, { status: "duplicate" }> | null>>;
   claim(record: IdempotencyClaim): Promise<UseCaseResult<IdempotencyClaimOutcome>>;
   /** Stores the first response so replays can return it verbatim. */
   attachResponse(record: Omit<IdempotencyClaim, "createdAt" | "requestHash">, responseJson: string): Promise<UseCaseResult<void>>;

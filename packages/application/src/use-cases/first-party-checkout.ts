@@ -9,6 +9,7 @@ import {
   orderStatusForPayment,
   paymentStatusFromProviderSession,
   productFamilies,
+  normalizePhone,
   resolveShippingPolicy,
   type AppError,
   type OrderLineRecord,
@@ -29,7 +30,7 @@ import type {
 } from "../ports.js";
 import { DuplicatePaymentIntentError, InsufficientInventoryError } from "../ports.js";
 import { erpStockWriteDecision } from "../policies/erp-authority.js";
-import { checkoutIntentHash, checkoutRequestHash, isCheckoutPrincipalKey } from "./checkout-intent.js";
+import { checkoutIntentHash, checkoutRequestHash, checkoutIntentHashV3, checkoutRequestHashV3, isCheckoutPrincipalKey } from "./checkout-intent.js";
 import { applyPaymentStatus } from "./process-payment-webhook.js";
 import { authorizeCheckoutPromotion, reserveCheckoutPromotion, settlePromotionForPayment, PromotionAuthorizationError } from "./verified-promotions.js";
 import type { CustomerProof } from "./phone-auth.js";
@@ -42,8 +43,10 @@ export interface CheckoutLineInput {
 }
 
 export interface CreateFirstPartyCheckoutInput {
+  checkoutVersion?: 3;
   lines: CheckoutLineInput[];
-  customerEmail: string;
+  customerEmail: string | null;
+  customerPhone?: string | null;
   customerName?: string;
   /** Bounded non-PII API correlation id for audit evidence. */
   requestId?: string;
@@ -116,7 +119,8 @@ export interface AccountOrderView {
   lines: OrderLineRecord[];
   delivery: OrderRecord["delivery"];
   expiresAt: string | null;
-  customerEmail: string;
+  customerEmail: string | null;
+  customerPhone?: string | null;
   createdAt: string;
 }
 
@@ -254,6 +258,61 @@ export async function createFirstPartyCheckout(
   if (!isCheckoutPrincipalKey(input.idempotencyPrincipal)) {
     return err({ code: "validation", message: "Checkout requires a user or guest checkout principal.", retryable: false, requestId: "checkout" });
   }
+  const phone = input.checkoutVersion === 3 ? normalizePhone(input.customerPhone ?? "") : null;
+  if ((input.checkoutVersion === 3 && !phone) || (input.checkoutVersion !== 3 && !input.customerEmail)) {
+    return err({ code: "validation", message: "Checkout contact is invalid.", retryable: false, requestId: "checkout" });
+  }
+  const idempotencyKey = input.idempotencyKey ?? null;
+  const claimInput = {
+    scope: IDEMPOTENCY_SCOPE,
+    principalKey: input.idempotencyPrincipal,
+    operation: IDEMPOTENCY_OPERATION,
+    idempotencyKey: idempotencyKey ?? "",
+  };
+  const attachOutcome = (repos: TransactionalRepositories, outcome: StoredCheckoutOutcome) =>
+    repos.idempotency.attachResponse(claimInput, JSON.stringify(outcome));
+
+  /** Replay semantics for a duplicate claim encountered inside TX1. */
+  const replayStored = (stored: string | null) => {
+    if (!stored) {
+      return err({ code: "pending_reconciliation", message: "This checkout attempt is still unresolved. Retry the same attempt; a second payable session will not be created.", retryable: true, requestId: "checkout" });
+    }
+    try {
+      return outcomeResult(JSON.parse(stored) as StoredCheckoutOutcome);
+    } catch {
+      return err({ code: "conflict", message: "Stored idempotent response unreadable; use a new Idempotency-Key.", retryable: false, requestId: "checkout" });
+    }
+  };
+
+  const now = deps.clock.now();
+  const auditActor = input.requestId && /^[A-Za-z0-9_-]{1,64}$/.test(input.requestId)
+    ? `checkout:${input.requestId}`
+    : "checkout";
+  const intentHash = (input.checkoutVersion === 3 ? checkoutIntentHashV3 : checkoutIntentHash)({ lines: input.lines.map(line => ({ ...line, quantity: Math.min(Math.max(Math.trunc(line.quantity) || 0, 1), MAX_CART_LINE_QUANTITY) })), promoCode: input.promoCode, delivery: input.delivery ?? null });
+  const requestHash = input.checkoutVersion === 3
+    ? checkoutRequestHashV3(intentHash, { phone: phone!.e164, email: input.customerEmail, name: input.customerName ?? null })
+    : checkoutRequestHash(intentHash, input.customerEmail!, input.customerName);
+
+  // Read stored outcomes before catalog availability, current prices or campaign
+  // eligibility. A replay is recovery of an existing financial attempt.
+  const recovered = await deps.tx.run("checkout.replay", async repos => {
+    if (idempotencyKey) {
+      const stored = await repos.idempotency.lookup({ ...claimInput, requestHash });
+      if (!stored.ok) return stored;
+      if (stored.value) return replayStored(stored.value.responseJson);
+    }
+    const open = await openIntentOutcome(repos, input.idempotencyPrincipal, intentHash);
+    if (!open) return null;
+    if (idempotencyKey) {
+      const claim = await repos.idempotency.claim({ ...claimInput, requestHash, createdAt: now });
+      if (!claim.ok) return claim;
+      if (claim.value.status === "duplicate") return replayStored(claim.value.responseJson);
+      await attachOutcome(repos, open);
+    }
+    return outcomeResult(open);
+  });
+  if (recovered) return recovered;
+
   const priced: OrderLineRecord[] = [];
   for (const line of input.lines) {
     const product = productFamilies.find((item) => item.id === line.productId && item.status === "available");
@@ -285,35 +344,6 @@ export async function createFirstPartyCheckout(
   const subtotalAmount = priced.reduce((total, line) => total + line.unitPrice * line.quantity, 0);
   let totals = buildOrderTotals(subtotalAmount, shipping.amount, 0, 0);
 
-  const idempotencyKey = input.idempotencyKey ?? null;
-  const claimInput = {
-    scope: IDEMPOTENCY_SCOPE,
-    principalKey: input.idempotencyPrincipal,
-    operation: IDEMPOTENCY_OPERATION,
-    idempotencyKey: idempotencyKey ?? "",
-  };
-  const attachOutcome = (repos: TransactionalRepositories, outcome: StoredCheckoutOutcome) =>
-    repos.idempotency.attachResponse(claimInput, JSON.stringify(outcome));
-
-  /** Replay semantics for a duplicate claim encountered inside TX1. */
-  const replayStored = (stored: string | null) => {
-    if (!stored) {
-      return err({ code: "pending_reconciliation", message: "This checkout attempt is still unresolved. Retry the same attempt; a second payable session will not be created.", retryable: true, requestId: "checkout" });
-    }
-    try {
-      return outcomeResult(JSON.parse(stored) as StoredCheckoutOutcome);
-    } catch {
-      return err({ code: "conflict", message: "Stored idempotent response unreadable; use a new Idempotency-Key.", retryable: false, requestId: "checkout" });
-    }
-  };
-
-  const now = deps.clock.now();
-  const auditActor = input.requestId && /^[A-Za-z0-9_-]{1,64}$/.test(input.requestId)
-    ? `checkout:${input.requestId}`
-    : "checkout";
-  const intentHash = checkoutIntentHash({ lines: priced, promoCode: input.promoCode, delivery: input.delivery ?? null });
-  const requestHash = checkoutRequestHash(intentHash, input.customerEmail, input.customerName);
-
   const orderId = `ord_${deps.ids.nextId()}`;
   const checkoutRef = `co_${deps.ids.nextId()}_${Date.now().toString(36)}`;
   const token = checkoutPublicToken();
@@ -326,6 +356,7 @@ export async function createFirstPartyCheckout(
     status: "draft",
     userId: input.userId ?? null,
     customerEmail: input.customerEmail,
+    customerPhone: phone?.e164 ?? null,
     customerName: input.customerName ?? null,
     delivery: input.delivery ?? null,
     currency: "IDR",
@@ -437,6 +468,7 @@ export async function createFirstPartyCheckout(
     amount: totals.grandTotalAmount,
     currency: "IDR",
     customerEmail: input.customerEmail,
+    customerPhone: phone?.e164 ?? null,
     description: `Yubie order ${checkoutRef}`,
     successReturnUrl: `${input.successReturnUrl}${separator}checkout=${token}`,
     cancelReturnUrl: input.cancelReturnUrl,
@@ -667,6 +699,7 @@ export async function getAccountOrder(
     delivery: order.delivery,
     expiresAt: payment?.expiresAt ?? null,
     customerEmail: order.customerEmail,
+    customerPhone: order.customerPhone ?? null,
     createdAt: order.createdAt,
   });
 }

@@ -1,4 +1,4 @@
-import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb, boolean, foreignKey } from "drizzle-orm/pg-core";
+import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb, boolean, foreignKey, check } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { PhoneChallenge, AuthIdentity, AddressDetails, DeliveryPin, PromotionCampaign, PromotionRedemption } from "@yubie/domain";
 
@@ -393,7 +393,8 @@ export const firstPartyOrders = pgTable("orders", {
   checkoutPublicToken: text("checkout_public_token").notNull(),
   status: text("status").notNull().default("pending_payment"),
   userId: text("user_id").references(() => users.id),
-  customerEmail: text("customer_email").notNull(),
+  customerEmail: text("customer_email"),
+  customerPhone: text("customer_phone"),
   customerName: text("customer_name"),
   deliveryJsonb: jsonb("delivery_jsonb"),
   currency: text("currency").notNull().default("IDR"),
@@ -411,6 +412,7 @@ export const firstPartyOrders = pgTable("orders", {
   uniqueIndex("orders_checkout_ref").on(table.checkoutRef),
   uniqueIndex("orders_checkout_public_token").on(table.checkoutPublicToken),
   index("orders_user_created").on(table.userId, table.createdAt),
+  check("orders_customer_phone_e164", sql`${table.customerPhone} IS NULL OR ${table.customerPhone} ~ '^\\+[1-9][0-9]{6,14}$'`),
 ]);
 
 export const orderPayments = pgTable("order_payments", {

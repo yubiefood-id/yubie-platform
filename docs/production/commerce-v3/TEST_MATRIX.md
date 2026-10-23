@@ -16,9 +16,11 @@ No OTP, Maps, carrier, payment or production delivery receipt has been fabricate
 | Responsive/accessibility | Open editor widths320/375/768/1440; screenshot375; Axe on account flow | PASS in the focused browser matrix |
 | PR B complete repository/DB gates | `npm run check`; full persistence and API suites after bootstrap/upgrade | PASS; persistence48/API50 before the additional upgrade case, which also passes locally |
 | PR B CI | CI39995880748 at 6aabd810ce87a70c9225fd4df53696ca939676b8 | PASS all five gates |
-| PR C promotion lifecycle | Real PostgreSQL claims, eligibility, server pricing, reservation/consumption/refund, concurrency, audit rollback, unknown outcomes | Focused tests pass; final full-suite receipt pending |
+| PR C promotion lifecycle | Real PostgreSQL claims, eligibility, server pricing, reservation/consumption/refund, concurrency, audit rollback, unknown outcomes | PASS fourteen focused cases, including populated0018→0019 upgrade |
 | PR C financial races | Accepted attach cancellation releases eligibility; completion before provider return; coordinated duplicate orphan callbacks | Reproduced failures before fixes, PostgreSQL regressions pass; synthetic PSP only |
 | PR C API/browser | Durable preview identity/claim, forged proof/discount rejection, CSRF; nonblocking approved offer and inactive offer | Focused API and four desktop/mobile browser cases PASS; no provider receipt |
+| PR C full gates | `npm run check`; real PostgreSQL bootstrap/upgrade + full persistence/API suites at a1316b3 | PASS; persistence63/API51, no DB skips |
+| PR C CI | CI40004479478 at a1316b3302082ae6545178b36332d6733d56f7ea | PASS all five gates |
 | PR C review | Separate specification and security review, including focused rereviews | Three blocking financial lifecycle/race findings fixed and cleared |
 | V3 checkout, final candidate | Dependent PR D/E requirements | Not accepted by PR A/B/C evidence |
 | Real SMSGate / Google / PSP | Protected infrastructure, approved identities, quota/billing and provider-specific staging receipts | BLOCKED_EXTERNAL |
@@ -45,3 +47,10 @@ Legacy upgrade fixtures deliberately leave their database on an older schema;
 the second migration is required before downstream API tests. Never target a
 customer database. The browser fixture uses synthetic public Maps settings and
 intercepts the SDK; it does not authorize any real Google request.
+
+PR D foundation is in progress, not an accepted checkout release. Focused V3
+schema/hash, optional-contact and historical-replay regressions pass. Full disposable
+PostgreSQL persistence64/API51 pass without skips. Separate standards/security
+and specification review cleared this foundation. Public
+phone-first routes/UI, ownership aliases, quotes and final acceptance remain
+unaccepted; no end-to-end V3 or real provider pass is claimed.
