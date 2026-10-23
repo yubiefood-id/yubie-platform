@@ -58,7 +58,8 @@ export interface OrderRecord {
   checkoutPublicToken: string;
   status: FirstPartyOrderStatus;
   userId: string | null;
-  customerEmail: string;
+  customerEmail: string | null;
+  customerPhone?: string | null;
   customerName: string | null;
   delivery: OrderDelivery | null;
   currency: "IDR";

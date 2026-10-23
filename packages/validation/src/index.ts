@@ -1,3 +1,4 @@
+import { customerAddressSchema } from "./delivery-address.js";
 import { z } from "zod";
 
 export const newsletterSubmissionSchema = z.object({
@@ -49,6 +50,21 @@ export const checkoutRequestSchema = z.object({
   promoCode: z.string().trim().max(32).optional(),
 });
 
+/** Explicit V3 contract; the legacy route keeps its V1 contract until adapted. */
+export const checkoutV3RequestSchema = z.object({
+  checkoutVersion: z.literal(3),
+  lines: z.array(checkoutLineSchema).min(1).max(25),
+  contact: z.object({
+    phone: z.string().trim().min(4).max(40),
+    country: z.string().regex(/^[A-Z]{2}$/).default("ID"),
+    name: z.string().trim().max(80).optional(),
+    email: z.email().nullable().optional(),
+  }).strict(),
+  delivery: customerAddressSchema,
+  promoCode: z.string().trim().max(32).optional(),
+}).strict();
+export type CheckoutV3Request = z.infer<typeof checkoutV3RequestSchema>;
+
 export const googleLoginSchema = z.object({
   credential: z.string().min(16).max(4096),
   g_csrf_token: z.string().min(1).max(256),
@@ -62,3 +78,7 @@ export type GoogleLoginRequest = z.infer<typeof googleLoginSchema>;
 
 export * from "./channel.js";
 export * from "./yubi-ops.js";
+export * from "./phone-auth.js";
+export * from "./delivery-address.js";
+export * from "./delivery-location.js";
+export * from "./promotion.js";

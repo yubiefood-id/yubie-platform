@@ -1,8 +1,8 @@
 "use client";
 
-import Image from "next/image";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { LAUNCH_PROMO_CODE, LAUNCH_PROMO_PERCENT } from "@yubie/domain";
 import { useCart } from "@/features/cart/cart-context";
 import { getApiOrigin } from "@/lib/api-origin";
 import { useFocusTrap } from "@/lib/a11y";
@@ -10,40 +10,37 @@ import { useFocusTrap } from "@/lib/a11y";
 const DISMISSED_KEY = "yubie.promo.dismissed.v1";
 
 export function StorefrontWidgets() {
-  const { applyPromo, openCart, count } = useCart();
-  const [promoOpen, setPromoOpen] = useState(false);
+  const { openCart, count } = useCart();
+  const [offer, setOffer] = useState<{ percentage: number } | null>(null);
+  const pathname = usePathname();
+  const hideOffer = /^\/(?:account|checkout|login)(?:\/|$)/.test(pathname);
   const [whatsappOpen, setWhatsappOpen] = useState(false);
   const [whatsappHref, setWhatsappHref] = useState<string | null>(null);
   const [whatsappChecked, setWhatsappChecked] = useState(false);
-  const promoRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(promoRef, promoOpen);
+  const whatsappRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(whatsappRef, whatsappOpen);
 
   useEffect(() => {
-    let dismissed = false;
-    try { dismissed = window.sessionStorage.getItem(DISMISSED_KEY) === "1"; } catch { dismissed = false; }
-    if (dismissed) return;
-    const timeout = window.setTimeout(() => setPromoOpen(true), 2200);
-    return () => window.clearTimeout(timeout);
-  }, []);
+    if (hideOffer) return;
+    try { if (window.sessionStorage.getItem(DISMISSED_KEY) === "1") return; } catch { /* Read-only fallback. */ }
+    const abort = new AbortController();
+    fetch("/api/promotions/welcome", { cache: "no-store", signal: abort.signal }).then(async response => {
+      const result = await response.json(), data = result.data;
+      if (!abort.signal.aborted) setOffer(response.ok && result.ok && data?.available && typeof data.percentage === "number" && Number.isFinite(data.percentage) && data.percentage > 0 && data.percentage < 100 && Date.parse(data.endsAt) > Date.now() && !["not_eligible", "pending"].includes(data.eligibility) ? { percentage: data.percentage } : null);
+    }).catch(() => { /* No approved offer is advertised during outages. */ });
+    return () => abort.abort();
+  }, [hideOffer, pathname]);
 
   useEffect(() => {
-    if (!promoOpen && !whatsappOpen) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { setPromoOpen(false); setWhatsappOpen(false); }
-    };
+    if (!whatsappOpen) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setWhatsappOpen(false); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [promoOpen, whatsappOpen]);
+  }, [whatsappOpen]);
 
   const closePromo = () => {
-    setPromoOpen(false);
-    try { window.sessionStorage.setItem(DISMISSED_KEY, "1"); } catch { /* session storage unavailable */ }
-  };
-
-  const claimPromo = () => {
-    applyPromo(LAUNCH_PROMO_CODE);
-    closePromo();
-    openCart();
+    setOffer(null);
+    try { window.sessionStorage.setItem(DISMISSED_KEY, "1"); } catch { /* Session-only dismissal remains available. */ }
   };
 
   const toggleWhatsapp = async () => {
@@ -61,18 +58,17 @@ export function StorefrontWidgets() {
   };
 
   return <>
-    {promoOpen && <div className="promo-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePromo(); }}>
-      <div className="promo-modal" ref={promoRef} role="dialog" aria-modal="true" aria-labelledby="promo-title">
-        <button className="icon-button" type="button" onClick={closePromo} aria-label="Tutup promo">×</button>
-        <div className="promo-visual"><Image src="/photography/context/lifestyle-breakfast.webp" alt="Sarapan dengan keluarga produk Yubie" fill sizes="(max-width: 640px) 100vw, 420px" unoptimized /></div>
-        <div className="promo-copy"><span className="eyebrow">LAUNCH OFFER</span><h2 id="promo-title">{LAUNCH_PROMO_PERCENT}% untuk keranjang Yubie Anda.</h2><p>Gunakan kode <strong>{LAUNCH_PROMO_CODE}</strong>. Diskon dihitung ulang oleh server saat checkout.</p><button type="button" className="button primary full" onClick={claimPromo}>Pakai kode {LAUNCH_PROMO_CODE}</button><button type="button" className="text-link promo-later" onClick={closePromo}>Nanti saja</button></div>
-      </div>
-    </div>}
+    {!hideOffer && offer && <aside className="welcome-offer" aria-label="Promo pelanggan terverifikasi">
+      <button className="icon-button" type="button" onClick={closePromo} aria-label="Tutup promo">×</button>
+      <h2>Promo {offer.percentage}% untuk pelanggan terverifikasi</h2>
+      <p>Berlaku untuk produk dan pelanggan yang memenuhi ketentuan. Verifikasi nomor untuk melihat kelayakanmu.</p>
+      <Link className="text-button" href="/login?next=/account">Lihat kelayakan promo</Link>
+    </aside>}
 
     <div className="whatsapp-widget">
-      {whatsappOpen && <div className="whatsapp-panel" role="dialog" aria-modal="true" aria-label="Bantuan belanja via WhatsApp">
+      {whatsappOpen && <div ref={whatsappRef} className="whatsapp-panel" role="dialog" aria-modal="true" aria-label="Bantuan belanja via WhatsApp">
         <header><div className="whatsapp-avatar" aria-hidden="true">Y</div><div><strong>Yubie Care</strong><span>Assisted shopping</span></div><button type="button" onClick={() => setWhatsappOpen(false)} aria-label="Tutup WhatsApp">×</button></header>
-        <div className="whatsapp-body"><p>Halo! Perlu bantuan memilih varian, mengecek pesanan, atau pembelian dalam jumlah besar?</p>{count > 0 && <button type="button" onClick={() => { setWhatsappOpen(false); openCart(); }}>Lihat {count} item di keranjang</button>}{whatsappHref ? <a className="whatsapp-cta" href={whatsappHref} target="_blank" rel="noreferrer">Lanjut ke WhatsApp resmi</a> : <small>Nomor WhatsApp resmi belum aktif di konfigurasi storefront. Anda tetap dapat menyelesaikan checkout online.</small>}</div>
+        <div className="whatsapp-body"><p>Halo! Perlu bantuan memilih varian, mengecek pesanan, atau pembelian dalam jumlah besar?</p>{count > 0 && <button type="button" onClick={() => { setWhatsappOpen(false); openCart(); }}>Lihat {count} item di keranjang</button>}{whatsappHref ? <a className="whatsapp-cta" href={whatsappHref} target="_blank" rel="noreferrer">Lanjut ke WhatsApp resmi</a> : <small>Nomor WhatsApp resmi belum aktif di konfigurasi storefront. Kamu tetap bisa melihat produk di website resmi.</small>}</div>
       </div>}
       <button type="button" className="whatsapp-trigger" onClick={toggleWhatsapp} aria-expanded={whatsappOpen} aria-label="Chat Yubie — buka bantuan WhatsApp"><span aria-hidden="true">◔</span><b>Chat Yubie</b></button>
     </div>

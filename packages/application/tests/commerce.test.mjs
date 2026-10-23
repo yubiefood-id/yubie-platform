@@ -284,7 +284,7 @@ test("checkout clamps quantity and rejects unavailable lines", async () => {
 
   const unavailable = await createFirstPartyCheckout({ ...BASE_INPUT, lines: [{ productId: "shake", sizeId: "any", quantity: 1 }] }, deps);
   assert.equal(unavailable.ok, false);
-  const mie = await createFirstPartyCheckout({ ...BASE_INPUT, lines: [{ productId: "mie", sizeId: "single", quantity: 1 }] }, deps);
+  const mie = await createFirstPartyCheckout({ ...BASE_INPUT, lines: [{ productId: "mie", sizeId: "single", quantity: 1 }] }, makeDeps());
   assert.equal(mie.ok, true);
   assert.equal(mie.value.totalAmount, 16000);
 });

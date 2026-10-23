@@ -108,7 +108,7 @@ test("migration 0009 creates the inventory core; checkout reserves FEFO atomical
     // Shortfall: the whole checkout transaction rolls back — no order, no
     // reservation, no lot movement survives.
     const ordersBefore = await database.client`SELECT count(*)::int AS n FROM orders`;
-    const short = await createFirstPartyCheckout({ ...input, lines: [{ productId: "flour", sizeId: "250g", quantity: 20 }] }, deps);
+    const short = await createFirstPartyCheckout({ ...input, idempotencyPrincipal: "guest:" + "9".repeat(64), lines: [{ productId: "flour", sizeId: "250g", quantity: 20 }] }, deps);
     assert.equal(short.ok, false);
     assert.match(short.error.message, /Insufficient sellable inventory/);
     const ordersAfter = await database.client`SELECT count(*)::int AS n FROM orders`;

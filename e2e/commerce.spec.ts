@@ -11,13 +11,13 @@ async function fillGuestCheckout(page: Page) {
 
 async function openGuestCheckout(page: Page) {
   await page.goto("/products");
-  await page.getByRole("button", { name: "Tutup promo", exact: true }).click();
   await page.getByRole("button", { name: "Tambah", exact: true }).first().click();
   await page.goto("/checkout");
   await fillGuestCheckout(page);
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.route("**/api/promotions/welcome", route => route.fulfill({json:{ok:true,data:{available:false}}}));
   await page.route("**/api/checkout/session", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { ready: true } }) });
   });
@@ -41,7 +41,6 @@ test("cart and guest checkout stay first-party and preview-only", async ({ page 
   });
 
   await page.goto("/products");
-  await page.getByRole("button", { name: "Tutup promo", exact: true }).click();
   await page.getByRole("button", { name: "Tambah", exact: true }).first().click();
   await expect.poll(async () => {
     const cart = await page.evaluate(() => localStorage.getItem("yubie.cart.v1"));
@@ -120,7 +119,6 @@ for (const path of ["/", "/products"]) {
   test(`${path} has no serious or critical automated accessibility violations`, async ({ page }) => {
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    await page.getByRole("button", { name: "Tutup promo", exact: true }).click();
     const results = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
       .analyze();

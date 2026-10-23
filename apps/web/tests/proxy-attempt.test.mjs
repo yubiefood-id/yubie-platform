@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // Native TS type-stripping (node >= 22.18) imports the pure helpers directly.
-import { attemptKeyForCart, attemptOutcomeForHttpStatus, classifyCheckoutResponse, forwardableProxyHeaders, nextAttemptKey } from "../lib/proxy-headers.ts";
+import { attemptKeyForCart, attemptOutcomeForHttpStatus, classifyCheckoutResponse, forwardableProxyHeaders, customerProxyHeaders, nextAttemptKey } from "../lib/proxy-headers.ts";
 
 test("the proxy forwards ONLY the allowlisted browser headers", () => {
   const headers = new Headers({
@@ -85,4 +85,14 @@ test("login return path cannot become an external or script navigation", async (
   const { safeLoginReturnPath } = await import("../lib/login-return.ts");
   for (const value of ["https://evil.example", "//evil.example/path", "/\\evil.example", "/\n/evil.example", "javascript:alert(1)", "", null]) assert.equal(safeLoginReturnPath(value), "/account");
   assert.equal(safeLoginReturnPath("/account/orders?status=paid#latest"), "/account/orders?status=paid#latest");
+});
+
+
+test("customer proxy binds origin and CSRF while trusting only configured Cloudflare ingress IP", () => {
+ const request=new Request('https://shop.test/api/auth/phone/challenges',{headers:{origin:'https://shop.test','x-csrf-token':'a'.repeat(64),'cf-connecting-ip':'203.0.113.10','x-yubie-client-ip':'attacker','x-yubie-browser-origin':'https://attacker.invalid'}});
+ assert.equal(customerProxyHeaders(request,false)['x-yubie-client-ip'],undefined);
+ const safe=customerProxyHeaders(request,true);
+ assert.equal(safe['x-yubie-client-ip'],'203.0.113.10');
+ assert.equal(safe['x-yubie-browser-origin'],'https://shop.test');
+ assert.equal(safe['x-csrf-token'],'a'.repeat(64));
 });

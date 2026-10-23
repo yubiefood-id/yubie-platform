@@ -2,6 +2,7 @@ import {
   AllowlistAttributionPolicy,
   CryptoIdGenerator,
   CryptoSessionTokenService,
+  OtpCryptography,
   InMemoryAuditRepository,
   InMemoryGrowthRepository,
   InMemoryIdempotencyRepository,
@@ -15,6 +16,8 @@ import {
   InMemorySessionRepository,
   InMemoryTransactionManager,
   InMemoryUserRepository,
+  UnavailableUserRepository,
+  UnavailableSessionRepository,
   InMemoryWebhookInboxRepository,
   InMemoryWhatsAppIntentRepository,
   SystemClock,
@@ -32,10 +35,12 @@ import {
 } from "@yubie/application";
 import {
   inspectCommerceRuntimeConfig,
+  parseIdentityRuntimeConfig,
+  parseDeliveryMapsConfig,
   parseCommerceRuntimeConfig,
   type CommerceRuntimeConfig,
 } from "@yubie/config";
-import { DefaultRedirectAllowlistPolicy, GoogleIdTokenVerifier, createCommercePaymentProvider } from "@yubie/integrations";
+import { DefaultRedirectAllowlistPolicy, GoogleIdTokenVerifier, createCommercePaymentProvider, TurnstileVerifier, GoogleDeliveryLocationProvider } from "@yubie/integrations";
 import {
   createDatabase,
   PostgresHealthProbe,
@@ -82,6 +87,10 @@ export interface AppContext {
   verifier: GoogleCredentialVerifier | null;
   googleClientId: string | null;
   tx: TransactionManager;
+  identityTransactions?: TransactionManager;
+  database?: ReturnType<typeof createDatabase>;
+  phoneAuth?: { crypto: OtpCryptography; allowedCountries: string[]; verifyCaptcha(token: string, ip: string): Promise<boolean> };
+  deliveryLocations?: import("@yubie/application").DeliveryLocationProvider;
 }
 
 const STATIC_ACTIVE_LISTING: MarketplaceListing = {
@@ -143,6 +152,11 @@ export function createAppContext(): AppContext {
   const clock: Clock = new SystemClock();
   const ids: IdGenerator = new CryptoIdGenerator();
   const tokens = new CryptoSessionTokenService();
+  const phoneConfig = parseIdentityRuntimeConfig(process.env, "api");
+  const mapsConfig = parseDeliveryMapsConfig(process.env);
+  const deliveryLocations = mapsConfig ? new GoogleDeliveryLocationProvider(mapsConfig) : undefined;
+  const captcha = phoneConfig ? new TurnstileVerifier(phoneConfig.turnstileSecretKey, new URL(phoneConfig.appOrigin).hostname) : null;
+  const phoneAuth = phoneConfig ? { crypto: new OtpCryptography({ hashKey: phoneConfig.hashSecret, encryptionKey: phoneConfig.encryptionKey }), allowedCountries: phoneConfig.allowedCountries, verifyCaptcha: (token: string, ip: string) => captcha!.verify(token, ip) } : undefined;
 
   const paymentMode = commerce.provider === "xendit" || commerce.provider === "ipaymu" ? commerce.provider : "preview";
   const paymentProvider = paymentMode === "preview" ? null : createCommercePaymentProvider(process.env);
@@ -160,10 +174,11 @@ export function createAppContext(): AppContext {
   // flag into memory. parseCommerceRuntimeConfig guarantees DATABASE_URL is
   // present before this branch is taken in xendit mode.
   const listingsFromDatabase = commerce.purchaseOptionsSource === "database";
-  const transactionalFromDatabase = paymentMode !== "preview" || listingsFromDatabase;
+  const transactionalFromDatabase = Boolean(databaseUrl);
 
   if (databaseUrl && (listingsFromDatabase || transactionalFromDatabase)) {
     const database = createDatabase(databaseUrl);
+    const identityTransactions = new PostgresTransactionManager(database);
     const transactional = transactionalFromDatabase;
     const transactionalOrders = transactional ? new PostgresOrderRepository(database) : new InMemoryOrderRepository();
     const transactionalPayments = transactional ? new PostgresPaymentRepository(database) : new InMemoryPaymentRepository();
@@ -199,6 +214,10 @@ export function createAppContext(): AppContext {
       appOrigin: commerce.appOrigin,
       verifier,
       googleClientId,
+      identityTransactions,
+      database,
+      ...(phoneAuth ? { phoneAuth } : {}),
+      ...(deliveryLocations ? { deliveryLocations } : {}),
       tx: transactional
         ? new PostgresTransactionManager(database)
         : new InMemoryTransactionManager({
@@ -234,8 +253,8 @@ export function createAppContext(): AppContext {
     orders,
     payments,
     paymentEvents,
-    users: new InMemoryUserRepository(),
-    authSessions: new InMemorySessionRepository(),
+    users: new UnavailableUserRepository(),
+    authSessions: new UnavailableSessionRepository(),
     tokens,
     paymentMode,
     paymentProvider,

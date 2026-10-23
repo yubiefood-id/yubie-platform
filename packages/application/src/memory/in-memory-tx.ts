@@ -40,6 +40,13 @@ export class InMemoryOutboxRepository implements OutboxRepository {
 export class InMemoryIdempotencyRepository implements IdempotencyRepository {
   private readonly claims = new Map<string, { requestHash: string; responseJson: string | null }>();
 
+  async lookup(record: Omit<IdempotencyClaim, "createdAt">) {
+    const existing = this.claims.get(`${record.scope}:${record.principalKey}:${record.operation}:${record.idempotencyKey}`);
+    if (!existing) return ok(null);
+    if (existing.requestHash !== record.requestHash) return err({ code: "conflict", message: "Idempotency key reused with different request", retryable: false, requestId: "idempotency" });
+    return ok({ status: "duplicate" as const, responseJson: existing.responseJson });
+  }
+
   async claim(record: IdempotencyClaim) {
     const composite = `${record.scope}:${record.principalKey}:${record.operation}:${record.idempotencyKey}`;
     const existing = this.claims.get(composite);

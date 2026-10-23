@@ -100,10 +100,11 @@ test("an expired provider session cancels the order and releases nothing to blin
   assert.equal(payment.status, "expired");
 });
 
-test("stale drafts without a delivered payment link are cancelled", async () => {
+test("stale drafts without any payment intent are cancelled", async () => {
   const deps = makeDeps();
   const { order } = await seedOrder(deps, { status: "draft", createdAt: "2026-10-02T10:00:00.000Z", session: null, sessionStatus: "pending", expiresAt: null });
   const fresh = await seedOrder(deps, { status: "draft", createdAt: NOW, session: null, sessionStatus: "pending", expiresAt: null });
+  for(const [id,payment] of deps.payments.items) if(payment.orderId===order.id) deps.payments.items.delete(id);
 
   const report = await reconcilePayments(deps);
   assert.equal(report.value.staleDraftsCancelled, 1);
@@ -124,6 +125,7 @@ test("an ambiguous create without a session id does not release stock", async ()
   assert.equal(report.value.staleDraftsCancelled, 0);
   assert.equal(deps.orders.items.get(order.id).status, "draft");
   assert.equal(deps.inventory.lots.get("lot_amb").quantityOnHand, 8);
+  const repeated=await reconcilePayments(deps);assert.equal(repeated.value.staleDraftsCancelled,0);assert.equal(deps.inventory.lots.get("lot_amb").quantityOnHand,8);
 });
 
 test("a draft with an attached session is flagged ambiguous, never cancelled blind", async () => {

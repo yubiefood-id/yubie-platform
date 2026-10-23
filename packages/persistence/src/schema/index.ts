@@ -1,7 +1,15 @@
-import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb } from "drizzle-orm/pg-core";
+import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb, boolean, foreignKey, check } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { PhoneChallenge, AuthIdentity, AddressDetails, DeliveryPin, PromotionCampaign, PromotionRedemption } from "@yubie/domain";
 
 export const listingStatusEnum = pgEnum("listing_status", ["draft", "active", "paused", "broken", "retired"]);
+
+export const customerAddresses = pgTable("customer_addresses", {
+  id: text("id").primaryKey(), userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  address: jsonb("address").$type<AddressDetails>().notNull(), pin: jsonb("pin").$type<DeliveryPin>(),
+  pinExpiresAt: timestamp("pin_expires_at", { withTimezone: true, mode: "string" }), isDefault: boolean("is_default").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(), updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, table => [index("customer_addresses_owner").on(table.userId, table.createdAt, table.id), uniqueIndex("customer_addresses_one_default").on(table.userId).where(sql`${table.isDefault}`), index("customer_addresses_pin_expiry").on(table.pinExpiresAt).where(sql`${table.pin} IS NOT NULL`)]);
 export const marketplaceEnum = pgEnum("marketplace", ["shopee", "tokopedia"]);
 export const whatsappStatusEnum = pgEnum("whatsapp_status", ["active", "paused", "retired"]);
 export const outboxStatusEnum = pgEnum("outbox_status", ["pending", "published", "failed"]);
@@ -356,7 +364,9 @@ export const conversationFlowEvents = pgTable("conversation_flow_events", {
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
-  googleSub: text("google_sub").notNull(),
+  googleSub: text("google_sub"),
+  phone: text("phone"),
+  phoneVerifiedAt: timestamp("phone_verified_at", { withTimezone: true, mode: "string" }),
   email: text("email"),
   name: text("name"),
   picture: text("picture"),
@@ -383,7 +393,8 @@ export const firstPartyOrders = pgTable("orders", {
   checkoutPublicToken: text("checkout_public_token").notNull(),
   status: text("status").notNull().default("pending_payment"),
   userId: text("user_id").references(() => users.id),
-  customerEmail: text("customer_email").notNull(),
+  customerEmail: text("customer_email"),
+  customerPhone: text("customer_phone"),
   customerName: text("customer_name"),
   deliveryJsonb: jsonb("delivery_jsonb"),
   currency: text("currency").notNull().default("IDR"),
@@ -401,6 +412,7 @@ export const firstPartyOrders = pgTable("orders", {
   uniqueIndex("orders_checkout_ref").on(table.checkoutRef),
   uniqueIndex("orders_checkout_public_token").on(table.checkoutPublicToken),
   index("orders_user_created").on(table.userId, table.createdAt),
+  check("orders_customer_phone_e164", sql`${table.customerPhone} IS NULL OR ${table.customerPhone} ~ '^\\+[1-9][0-9]{6,14}$'`),
 ]);
 
 export const orderPayments = pgTable("order_payments", {
@@ -550,3 +562,52 @@ export const consentLedger = pgTable("consent_ledger", {
   source: text("source").notNull(),
   occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "string" }).notNull(),
 });
+
+const identityTime = (name: string) => timestamp(name, { withTimezone: true, mode: "string" });
+export const authIdentities = pgTable("auth_identities", {
+  id: text("id").primaryKey(), userId: text("user_id").notNull().references(() => users.id),
+  provider: text("provider").$type<AuthIdentity["provider"]>().notNull(), subject: text("subject").notNull(),
+  verifiedAt: identityTime("verified_at").notNull(), createdAt: identityTime("created_at").notNull(),
+}, t => [uniqueIndex("auth_identities_provider_subject").on(t.provider, t.subject), uniqueIndex("auth_identities_user_provider").on(t.userId, t.provider), uniqueIndex("auth_identities_owner_provider").on(t.id, t.userId, t.provider)]);
+export const phoneVerifications = pgTable("phone_verifications", {
+  id: text("id").primaryKey(), browserHash: text("browser_hash").notNull(), phoneHash: text("phone_hash").notNull(),
+  requestKey: text("request_key").notNull(), requestHash: text("request_hash").notNull(),
+  purpose: text("purpose").$type<PhoneChallenge["purpose"]>().notNull(), targetUserId: text("target_user_id").references(() => users.id),
+  state: text("state").$type<PhoneChallenge["state"]>().notNull(), attempts: integer("attempts").notNull().default(0),
+  verifier: text("verifier"), phoneCiphertext: text("phone_ciphertext"), deliveryCiphertext: text("delivery_ciphertext"),
+  deliveryState: text("delivery_state").$type<PhoneChallenge["deliveryState"]>().notNull(), deliveryAttempts: integer("delivery_attempts").notNull().default(0),
+  leaseUntil: identityTime("lease_until"), nextAttemptAt: identityTime("next_attempt_at").notNull(),
+  createdAt: identityTime("created_at").notNull(), updatedAt: identityTime("updated_at").notNull(), expiresAt: identityTime("expires_at").notNull(),
+}, t => [uniqueIndex("phone_verifications_browser_request").on(t.browserHash, t.requestKey), index("phone_verifications_phone_created").on(t.phoneHash, t.createdAt)]);
+export const identityRateBuckets = pgTable("identity_rate_buckets", {
+  key: text("key").primaryKey(), count: integer("count").notNull(), expiresAt: identityTime("expires_at").notNull(),
+});
+
+export const promotionCampaigns = pgTable("promotion_campaigns", {
+  id: text("id").primaryKey(), kind: text("kind").notNull().default("welcome"), code: text("code").notNull().unique(),
+  status: text("status").$type<PromotionCampaign["status"]>().notNull().default("draft"), basisPoints: integer("basis_points").notNull().default(1500),
+  eligibleProductIds: text("eligible_product_ids").array().notNull(), startsAt: timestamp("starts_at", { withTimezone: true, mode: "string" }), endsAt: timestamp("ends_at", { withTimezone: true, mode: "string" }),
+  approvedAt: timestamp("approved_at", { withTimezone: true, mode: "string" }), approvedBy: text("approved_by"), approvalRef: text("approval_ref"), refundPolicy: text("refund_policy").$type<"retain_consumed">().notNull().default("retain_consumed"),
+}, table => [uniqueIndex("promotion_one_active_welcome").on(table.kind).where(sql`${table.status}='active'`)]);
+export const promotionEntitlements = pgTable("promotion_entitlements", {
+  id: text("id").primaryKey(), campaignId: text("campaign_id").notNull().references(() => promotionCampaigns.id), userId: text("user_id").notNull().references(() => users.id),
+  phoneIdentityId: text("phone_identity_id").notNull(), phoneProvider: text("phone_provider").notNull().default("phone"), claimedAt: timestamp("claimed_at", { withTimezone: true, mode: "string" }).notNull(),
+}, table => [
+  uniqueIndex("promotion_entitlements_customer").on(table.campaignId, table.userId), uniqueIndex("promotion_entitlements_phone").on(table.campaignId, table.phoneIdentityId),
+  uniqueIndex("promotion_entitlements_owner").on(table.id, table.campaignId, table.userId),
+  foreignKey({ columns: [table.phoneIdentityId, table.userId, table.phoneProvider], foreignColumns: [authIdentities.id, authIdentities.userId, authIdentities.provider] }),
+]);
+export const promotionRedemptions = pgTable("promotion_redemptions", {
+  id: text("id").primaryKey(), entitlementId: text("entitlement_id").notNull(), campaignId: text("campaign_id").notNull(), userId: text("user_id").notNull(), orderId: text("order_id").notNull().unique().references(() => firstPartyOrders.id),
+  state: text("state").$type<PromotionRedemption["state"]>().notNull(), eligibleSubtotalAmount: integer("eligible_subtotal_amount").notNull(), discountAmount: integer("discount_amount").notNull(), basisPoints: integer("basis_points").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(), updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(), consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "string" }), releasedAt: timestamp("released_at", { withTimezone: true, mode: "string" }),
+}, table => [
+  uniqueIndex("promotion_one_qualifying_redemption").on(table.entitlementId).where(sql`${table.state} IN('reserved','consumed')`), index("promotion_redemptions_customer_state").on(table.userId, table.state),
+  foreignKey({ columns: [table.entitlementId, table.campaignId, table.userId], foreignColumns: [promotionEntitlements.id, promotionEntitlements.campaignId, promotionEntitlements.userId] }),
+]);
+
+// Cookie possession and authenticated session associate recovery only, never delivery phone.
+export const checkoutGuestBindings = pgTable("checkout_guest_bindings", {
+  guestPrincipal: text("guest_principal").primaryKey(), userId: text("user_id").notNull().references(() => users.id),
+  linkedAt: timestamp("linked_at", { withTimezone: true, mode: "string" }).notNull(),
+}, table => [index("checkout_guest_bindings_user").on(table.userId)]);

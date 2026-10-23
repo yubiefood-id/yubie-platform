@@ -20,6 +20,7 @@
     "@hookform/resolvers": "^5.7.1",
     "@yubie/config": "*",
     "@yubie/domain": "*",
+    "@yubie/integrations": "*",
     "@yubie/ui": "*",
     "@yubie/validation": "*",
     "drizzle-orm": "0.45.2",

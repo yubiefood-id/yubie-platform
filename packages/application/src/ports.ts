@@ -87,6 +87,13 @@ export interface OrderRepository {
 }
 
 export interface PaymentRepository {
+  findCheckoutGuestOwner(guestPrincipal: string): Promise<string | null>;
+  listCheckoutGuestPrincipals(userId: string): Promise<string[]>;
+  bindCheckoutGuest(guestPrincipal: string, userId: string, now: string): Promise<boolean>;
+  /** Transaction-scoped, sorted advisory locks across owned checkout principals. */
+  lockCheckoutPrincipals(principals: string[]): Promise<void>;
+  /** At most two unresolved rows: multiple historical attempts must fail closed. */
+  findUnresolvedByPrincipals(principals: string[]): Promise<UseCaseResult<PaymentRecord[]>>;
   findById(id: string): Promise<UseCaseResult<PaymentRecord | null>>;
   /**
    * Loads a payment WITH a row lock inside the caller's transaction (Postgres
@@ -127,7 +134,8 @@ export interface CreatePaymentSessionInput {
   referenceId: string;
   amount: number;
   currency: "IDR";
-  customerEmail: string;
+  customerEmail: string | null;
+  customerPhone?: string | null;
   description: string;
   successReturnUrl: string;
   cancelReturnUrl: string;
@@ -203,6 +211,8 @@ export type IdempotencyClaimOutcome =
  * conflict, never a silent re-execute.
  */
 export interface IdempotencyRepository {
+  /** Read only: recover an existing attempt before applying today's catalog rules. */
+  lookup(record: Omit<IdempotencyClaim, "createdAt">): Promise<UseCaseResult<Extract<IdempotencyClaimOutcome, { status: "duplicate" }> | null>>;
   claim(record: IdempotencyClaim): Promise<UseCaseResult<IdempotencyClaimOutcome>>;
   /** Stores the first response so replays can return it verbatim. */
   attachResponse(record: Omit<IdempotencyClaim, "createdAt" | "requestHash">, responseJson: string): Promise<UseCaseResult<void>>;
@@ -334,6 +344,11 @@ export interface GrowthRepository {
 
 /** Repositories sharing one transaction, handed to TransactionManager work. */
 export interface TransactionalRepositories {
+  customerIdentity?: import("./ports/customer-identity.js").CustomerIdentityRepository;
+  customerAddresses?: import("./ports/customer-address.js").CustomerAddressRepository;
+  promotions?: import("./ports/promotions.js").PromotionRepository;
+  users?: UserRepository;
+  authSessions?: SessionRepository;
   orders: OrderRepository;
   payments: PaymentRepository;
   paymentEvents: PaymentEventRepository;
@@ -356,3 +371,7 @@ export interface TransactionManager {
 }
 
 export * from "./ports/support-conversation-provider.js";
+export * from "./ports/customer-identity.js";
+export * from "./ports/customer-address.js";
+export * from "./ports/delivery-location.js";
+export * from "./ports/promotions.js";

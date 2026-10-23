@@ -9,8 +9,8 @@ Every customer text ≤4096 UTF-16 units including footer; media caption ≤1024
 Approved fact summary ≤3900 before footer, otherwise unavailable. B2B inputs ≤256;
 they appear only in consented private Sales notes, never echoed in public copy or
 metrics. Product names, descriptions and variant rows come from the approved
-catalog resolver. Dates/eligibility for promotions come from effective approved
-knowledge and must match the existing domain campaign quote.
+catalog resolver. Yubi gives neutral promotion navigation and never reveals a code or grants
+entitlement; the website resolves approved campaign eligibility server-side.
 
 ### v2.copy.home
 
@@ -434,16 +434,17 @@ Only effective APPROVED_PUBLIC versions, string or summary field, are rendered.
 Nutrition/allergen/preparation/certification require their own category evidence.
 Missing evidence uses v2.copy.unavailable; unsupported category metric is bounded.
 
-### v2.promo_menu.active
+### v2.promo_menu.website_verification
 
-Variables: approved code, percentage, eligibility (1–800 chars), active start/end.
-The exact code AND percentage must match the existing domain promotion quote.
-No constant alone establishes an active campaign. Max 4096 including footer.
+Variables: account_available, catalog_available. Commerce V3 requires verified
+website eligibility; chat never reveals a code/percentage or grants entitlement.
+Max4096 including footer. Customer ownership/safety guards still run first.
 
 ```text
-Promo {code}: diskon {percentage}%.
-{eligibility}
-Konfirmasi ketentuan melalui website resmi atau tim Yubie.
+{account_available}
+Kelayakan promo diperiksa melalui akun di website resmi Yubie. Verifikasi nomor diperlukan; Yubi tidak menerbitkan kode atau menjanjikan diskon lewat chat.
+{otherwise}
+Verifikasi promo melalui akun website belum tersedia untuk layanan ini. Yubi tidak menerbitkan kode atau menjanjikan diskon lewat chat.
 {https://yubiefood.com/products only when catalog_available}
 {v2.footer}
 ```

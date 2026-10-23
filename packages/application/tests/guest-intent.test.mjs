@@ -135,3 +135,25 @@ test("reusing an idempotency key with a different email is a conflict, not a rep
   assert.equal(other.ok, false);
   assert.equal(other.error.code, "conflict");
 });
+
+test("V3 hashing includes phone and all delivery fields but excludes expiring pin receipts", async () => {
+  const { checkoutIntentHashV3, checkoutRequestHashV3 } = await import('../dist/index.js');
+  assert.equal(typeof checkoutIntentHashV3,'function');
+  const input={lines:CART.lines,promoCode:' yubie15 ',delivery:{city:'Bandung',fullAddress:'Alamat sintetis',building:'A',pin:{latitude:-6.9,longitude:107.6,confirmed:true,validationToken:'first-receipt'}}};
+  const hash=checkoutIntentHashV3(input);
+  assert.equal(hash,checkoutIntentHashV3({...input,delivery:{...input.delivery,pin:{...input.delivery.pin,validationToken:'renewed-receipt'}}}));
+  assert.notEqual(hash,checkoutIntentHashV3({...input,delivery:{...input.delivery,building:'B'}}));
+  assert.notEqual(hash,checkoutIntentHashV3({...input,delivery:{...input.delivery,pin:{...input.delivery.pin,longitude:107.7}}}));
+  assert.notEqual(hash,checkoutIntentHash(input));
+  assert.equal(checkoutRequestHashV3(hash,{phone:'+6281234567890'}),checkoutRequestHashV3(hash,{phone:'+6281234567890',email:null}));
+  assert.notEqual(checkoutRequestHashV3(hash,{phone:'+6281234567890'}),checkoutRequestHashV3(hash,{phone:'+12025550100'}));
+});
+
+test('stored checkout replay survives catalog withdrawal without repricing or a second provider create',async()=>{
+ const {productFamilies}=await import('@yubie/domain');
+ const deps=makeDeps(),input={...CART,idempotencyPrincipal:checkoutPrincipalKey({guestToken:GUEST_A}),idempotencyKey:'historic-replay'};
+ const first=await createFirstPartyCheckout(input,deps);assert.equal(first.ok,true);
+ const product=productFamilies.find(product=>product.id==='flour'),previous=product.status;
+ try{product.status='coming_soon';const replay=await createFirstPartyCheckout(input,deps);assert.deepEqual(replay,first);assert.equal(deps.provider.created.length,1);}
+ finally{product.status=previous;}
+});

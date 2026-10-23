@@ -14,6 +14,7 @@ export const test = base.extend<{ safety: void }>({
         return continueWithScopedAccess(route, environment.baseURL, process.env.CF_ACCESS_CLIENT_ID, process.env.CF_ACCESS_CLIENT_SECRET);
       });
     } else if (environment.tier === "mock") {
+      await context.route("**/api/promotions/welcome", route => route.fulfill({json:{ok:true,data:{available:false}}}));
       await context.route("**/api/auth/session", (route) => route.fulfill({ status: 200, contentType: "application/json", headers: { "cache-control": "no-store" }, body: JSON.stringify({ ok: true, data: { authenticated: false, googleClientId: null } }) }));
       await context.route("**/api/checkout/session", (route) => route.fulfill({ status: 200, contentType: "application/json", headers: { "cache-control": "no-store" }, body: JSON.stringify({ ok: true, data: { ready: true } }) }));
       await context.route("**/api/purchase-options/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { options: [] } }) }));

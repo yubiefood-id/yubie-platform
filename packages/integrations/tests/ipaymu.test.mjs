@@ -163,3 +163,10 @@ test("callback HMAC uses the VA and rejects a mutated amount", () => {
   assert.equal(verifyIpaymuCallback(fields, "other-va", signature), false);
   assert.notEqual(signIpaymuRequest("POST", VA, JSON.stringify(fields), API_KEY), signature);
 });
+
+test('phone-only create omits buyerEmail instead of fabricating a placeholder',async()=>{
+ let payload;
+ const session=provider(async(_url,init)=>{payload=JSON.parse(init.body);return{ok:true,status:200,async json(){return{Status:200,Data:{SessionID:'phone-only',Url:'https://sandbox.ipaymu.com/payment/phone-only'}};}};});
+ const result=await session.createPaymentSession({...input,customerEmail:null,customerPhone:'+6281234567890'});
+ assert.equal(result.ok,true);assert.equal(Object.hasOwn(payload,'buyerEmail'),false);assert.equal(payload.buyerPhone,'+6281234567890');
+});

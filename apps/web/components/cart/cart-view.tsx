@@ -50,7 +50,7 @@ export function CartView() {
         <div><span>Subtotal</span><strong>{formatRupiah(subtotal)}</strong></div>
         <form className="promo-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); applyPromo(String(data.get("promo") ?? "")); }}>
           <label htmlFor="cart-promo">Kode promo</label>
-          <div><input id="cart-promo" name="promo" defaultValue={promoCode ?? ""} placeholder="YUBIE15" autoCapitalize="characters" /><button type="submit">Terapkan</button></div>
+          <div><input id="cart-promo" name="promo" defaultValue={promoCode ?? ""} placeholder="Masukkan kode promo" autoCapitalize="characters" /><button type="submit">Terapkan</button></div>
         </form>
         {promotion && <div className="discount-row"><span>Diskon {promotion.percentage}% <button type="button" onClick={clearPromo}>Hapus</button></span><strong>−{formatRupiah(promotion.discountAmount)}</strong></div>}
         <div className="cart-grand-total"><span>Total</span><strong>{formatRupiah(total)}</strong></div>

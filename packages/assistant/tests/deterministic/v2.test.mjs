@@ -91,7 +91,7 @@ test('V2 approved promotion requires effective evidence; a source-code constant 
  const now=Date.now(),caps={catalog_available:true,account_available:false,checkout_available:false,order_portal_available:false,human_support_available:false};
  const deps={flowVersion:'deterministic-v2',capabilities:caps,knowledge:{async getEffectivePublicKnowledge(type,scope){assert.equal(type,'promotion');assert.equal(scope,'brand:yubie');return {data:{code:'YUBIE15',percentage:15,startsAt:new Date(now-1000).toISOString(),endsAt:new Date(now+60000).toISOString(),eligibility:'Sesuai ketentuan campaign yang disetujui.'},source:'SYNTHETIC_TEST_ONLY'};}}};
  const r=await new DeterministicConversationEngine(deps).processTurn({text:'promo',persisted:state(),conversationState:'BOT_ACTIVE'});
- assert.match(r.action.text,/YUBIE15/);assert.match(r.action.text,/15%/);assert.doesNotMatch(r.action.text,/checkout/);
+ assert.doesNotMatch(r.action.text,/YUBIE15|15%/);assert.match(r.action.text,/belum tersedia/);assert.doesNotMatch(r.action.text,/checkout/);
  deps.knowledge.getEffectivePublicKnowledge=async()=>({data:{code:'YUBIE15',percentage:15,startsAt:new Date(now-2000).toISOString(),endsAt:new Date(now-1000).toISOString(),eligibility:'expired'},source:'SYNTHETIC_TEST_ONLY'});
  const expired=await new DeterministicConversationEngine(deps).processTurn({text:'promo',persisted:state(),conversationState:'BOT_ACTIVE'});assert.doesNotMatch(expired.action.text,/YUBIE15/);
  deps.knowledge.getEffectivePublicKnowledge=async()=>({data:{code:'YUBIE15',percentage:10,startsAt:new Date(now-1000).toISOString(),endsAt:new Date(now+60000).toISOString(),eligibility:'mismatch'},source:'SYNTHETIC_TEST_ONLY'});
