@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { trackEvent } from "@/lib/analytics";
 import { formatRupiah } from "@/lib/format";
 import type { PublicUser } from "@yubie/domain";
+import { AddressBook } from "@/components/delivery/address-book";
 
 interface OrderSummary {
   checkoutId: string;
@@ -25,6 +26,7 @@ export function AccountView() {
   const [user, setUser] = useState<PublicUser | null>(null);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [mapsAvailable, setMapsAvailable] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,6 +36,7 @@ export function AccountView() {
       if (cancelled) return;
       if (!response?.ok || !payload?.data?.authenticated) { setPhase("unauthenticated"); return; }
       setUser(payload.data.user as PublicUser);
+      setMapsAvailable(payload.data.mapsAvailable === true);
       const ordersResponse = await fetch("/api/account/orders").catch(() => null);
       const ordersPayload = await ordersResponse?.json().catch(() => null);
       if (!cancelled && ordersPayload?.ok) setOrders(ordersPayload.data as OrderSummary[]);
@@ -75,6 +78,7 @@ export function AccountView() {
             <span className="order-status">{order.orderStatus.replace(/_/g, " ")}</span>
           </Link>
         </li>)}</ul> : <p className="checkout-note">Riwayat kosong.</p>}
+        <AddressBook mapsAvailable={mapsAvailable} />
       </section>
       <aside aria-label="Profil">
         <span className="eyebrow">PROFIL</span>

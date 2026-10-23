@@ -10,3 +10,8 @@ test('manual address works without pin; any pin must be finite and explicitly co
  for(const pin of [{latitude:NaN,longitude:107,source:'device',confirmed:true},{latitude:-6,longitude:107,source:'device',confirmed:false},{latitude:91,longitude:107,source:'google',confirmed:true}])assert.equal(domain.normalizeDeliveryAddress({...input,pin}),null);
  assert.ok(domain.normalizeDeliveryAddress({...input,pin:{latitude:-6.9,longitude:107.6,source:'device',confirmed:true,accuracyMeters:40}}));
 });
+
+test('address normalization strips cached pin metadata and unrelated input fields',()=>{
+ const normalized=domain.normalizeDeliveryAddress({...input,userId:'untrusted',pin:{latitude:-6.9,longitude:107.6,source:'google',confirmed:true,confirmedAt:'synthetic',expiresAt:'synthetic'}});
+ assert.ok(normalized);assert.equal('userId' in normalized,false);assert.equal('confirmedAt' in normalized.pin,false);assert.equal('expiresAt' in normalized.pin,false);
+});

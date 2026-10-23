@@ -1,6 +1,7 @@
 import { getApiOrigin } from "@/lib/api-origin";
 import { forwardableProxyHeaders, customerProxyHeaders } from "./proxy-headers";
 import { directCommerce } from "@/config/launch";
+import { readProxyBody } from "./api-proxy-body";
 
 /** Server hop timeout: a hung API must never pin the web worker. */
 const PROXY_TIMEOUT_MS = 15_000;
@@ -29,11 +30,12 @@ export async function proxyApi(request: Request, path: string): Promise<Response
     upstream = await fetch(`${getApiOrigin()}${path}`, {
       method: request.method,
       headers,
-      body: request.method === "GET" || request.method === "HEAD" ? undefined : await request.text(),
+      body: await readProxyBody(request),
       redirect: "manual",
       signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "BODY_TOO_LARGE") return Response.json({ ok: false, code: "BODY_TOO_LARGE" }, { status: 413, headers: { "cache-control": "no-store", "x-request-id": correlationId } });
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
     if (timedOut) return Response.json({ ok: false, code: "API_TIMEOUT" }, { status: 504, headers: { "x-request-id": correlationId } });
     return Response.json({ ok: false, code: "API_UNREACHABLE" }, { status: 502, headers: { "x-request-id": correlationId } });

@@ -48,8 +48,17 @@ test('expired pin is hidden on reads and edits and removed without changing cust
  const created=await a.saveCustomerAddress({actor:owner,address:{...input,pin:{latitude:-6.9,longitude:107.6,source:'google',confirmed:true}}},deps);assert.equal(created.ok,true);
  const expiry=created.value.pin.expiresAt;now+=86400_000;
  const edit=await a.saveCustomerAddress({actor:owner,id:created.value.id,address:{label:'Kantor'}},deps);assert.equal(edit.value.pin.expiresAt,expiry);
+ const repeated=await a.saveCustomerAddress({actor:owner,id:created.value.id,address:{...input,pin:{latitude:-6.9,longitude:107.6,source:'google',confirmed:true}}},deps);assert.equal(repeated.value.pin.expiresAt,expiry);
  now+=30*86400_000;
  const listed=(await a.listCustomerAddresses({actor:owner},deps)).value;assert.equal(listed[0].pin,null);
  const after=await a.saveCustomerAddress({actor:owner,id:created.value.id,address:{label:'Rumah'}},deps);assert.equal(after.value.pin,null);
  await a.purgeAddressPins(deps);const [row]=await db.client`SELECT address,pin,pin_expires_at FROM customer_addresses WHERE id=${created.value.id}`;assert.equal(row.pin,null);assert.equal(row.pin_expires_at,null);assert.equal(row.address.fullAddress,input.fullAddress);
+});
+
+test('Maps request budget commits before remote work without storing search or coordinates',{skip:!enabled},async()=>{
+ let active=0,calls=0;const tx=new p.PostgresTransactionManager(db);const wrapped={async run(operation,fn){active++;try{return await tx.run(operation,fn);}finally{active--;}}};
+ const deps={tx:wrapped,clock:{now:()=>new Date(now).toISOString()},hash:value=>new a.CryptoSessionTokenService().hash(value),provider:{async autocomplete(){assert.equal(active,0);calls++;return[];},async details(){return null;},async reverse(){return null;}}};
+ for(let i=0;i<21;i++)await a.lookupDeliveryLocation({action:'autocomplete',query:'Synthetic location query',sessionToken:randomUUID(),browser:'synthetic-location-browser',ip:'synthetic-location-ip'},deps);
+ assert.equal(calls,20);
+ const [row]=await db.client`SELECT count(*)::int AS n FROM identity_rate_buckets WHERE key LIKE '%Synthetic location query%'`;assert.equal(row.n,0);
 });

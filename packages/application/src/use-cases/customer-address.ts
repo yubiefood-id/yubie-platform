@@ -33,9 +33,10 @@ export async function saveCustomerAddress(input: { actor: CustomerProof; id?: st
     const owned = await addresses.list(owner);
     if (!previous && owned.length >= 20) return fail("validation");
     const { pin, ...details } = normalized;
+    const unchangedPin = pin && previous?.pin && pin.latitude === previous.pin.latitude && pin.longitude === previous.pin.longitude && pin.source === previous.pin.source;
     const address: CustomerAddress = {
       id: previous?.id ?? "adr_" + deps.ids.nextId(), userId: owner, address: details,
-      pin: input.address.pin === undefined && previous ? previous.pin : pin ? { ...pin, confirmedAt: now, expiresAt: new Date(Date.parse(now) + 30 * 86400_000).toISOString() } : null,
+      pin: (input.address.pin === undefined || unchangedPin) && previous ? previous.pin : pin ? { ...pin, confirmedAt: now, expiresAt: new Date(Date.parse(now) + 30 * 86400_000).toISOString() } : null,
       isDefault: previous?.isDefault ?? owned.length === 0, createdAt: previous?.createdAt ?? now, updatedAt: now,
     };
     const current = visible(address, now);

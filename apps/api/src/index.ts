@@ -538,7 +538,7 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     const user = await resolveSession(readSessionToken(request), { sessions: ctx.authSessions, users: ctx.users, tokens: ctx.tokens, clock: ctx.clock });
     if (!user.ok) return json({ ok: false, code: "CUSTOMER_STORAGE_UNAVAILABLE" }, { status: 503 });
     const bootstrap = customerBootstrap(request, ctx);
-    return json({ ok: true, data: { authenticated: user.value !== null, user: user.value, googleClientId: ctx.googleClientId, csrfToken: bootstrap.csrfToken, phoneAvailable: !!ctx.phoneAuth, otpCountries: ctx.phoneAuth?.allowedCountries ?? [] } }, { headers: bootstrap.headers });
+    return json({ ok: true, data: { authenticated: user.value !== null, user: user.value, googleClientId: ctx.googleClientId, csrfToken: bootstrap.csrfToken, phoneAvailable: !!ctx.phoneAuth, otpCountries: ctx.phoneAuth?.allowedCountries ?? [], mapsAvailable: !!ctx.deliveryLocations } }, { headers: bootstrap.headers });
   }
 
   const accountOrderMatch = url.pathname.match(/^\/v1\/account\/orders(?:\/([^/]+))?$/);
