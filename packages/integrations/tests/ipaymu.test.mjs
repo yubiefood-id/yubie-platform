@@ -129,22 +129,97 @@ test("transaction check maps settled success and leaves unsettled non-terminal",
   assert.equal(calls[0].url, "https://sandbox.ipaymu.com/api/v2/transaction");
 });
 
-test("constructor and factory refuse production hosts", () => {
+test("constructor and factory bind the API origin to the explicit environment", () => {
+  const NOTIFY = "https://api-staging.yubiefood.com/v1/webhooks/ipaymu";
+  const PROD_NOTIFY = "https://api.yubiefood.com/v1/webhooks/ipaymu";
+  // Sandbox default still refuses production origins.
   assert.throws(() => new IpaymuPaymentProvider({
     va: VA,
     apiKey: API_KEY,
     apiBaseUrl: "https://my.ipaymu.com",
-    notifyUrl: "https://api-staging.yubiefood.com/v1/webhooks/ipaymu",
-  }), /non-sandbox/);
+    notifyUrl: NOTIFY,
+  }), /official sandbox origin/);
+  // Production env with production origin constructs; every other combination throws.
+  const production = new IpaymuPaymentProvider({
+    va: "prod-va",
+    apiKey: "prod-key",
+    env: "production",
+    notifyUrl: PROD_NOTIFY,
+    fetchFn: async () => ({ ok: true, status: 200, async json() { return {}; } }),
+  });
+  assert.ok(production);
+  assert.throws(() => new IpaymuPaymentProvider({
+    va: "prod-va", apiKey: "prod-key", env: "production", apiBaseUrl: "https://sandbox.ipaymu.com", notifyUrl: PROD_NOTIFY,
+  }), /official production origin/);
+  // Host spoofs, ports, http, embedded credentials, and paths are rejected.
+  for (const spoof of [
+    "https://my.ipaymu.com.evil.tld",
+    "https://my.ipaymu.com:8443",
+    "http://my.ipaymu.com",
+    "https://va:key@my.ipaymu.com",
+    "https://my.ipaymu.com/api",
+    "https://live.ipaymu.com",
+  ]) {
+    assert.throws(() => new IpaymuPaymentProvider({
+      va: "prod-va", apiKey: "prod-key", env: "production", apiBaseUrl: spoof, notifyUrl: PROD_NOTIFY,
+    }), /official production origin/, spoof);
+  }
+  // Factory: sandbox stays sandbox-only unless IPAYMU_ENV selects production,
+  // and production additionally requires YUBIE_ENV=production.
   assert.equal(createCommercePaymentProvider({
     COMMERCE_PROVIDER: "ipaymu",
     IPAYMU_ENV: "sandbox",
     IPAYMU_VA: VA,
     IPAYMU_API_KEY: API_KEY,
-    IPAYMU_NOTIFY_URL: "https://api-staging.yubiefood.com/v1/webhooks/ipaymu",
+    IPAYMU_NOTIFY_URL: NOTIFY,
     IPAYMU_API_BASE_URL: "https://my.ipaymu.com",
   }), null);
+  const productionEnv = {
+    COMMERCE_PROVIDER: "ipaymu",
+    IPAYMU_ENV: "production",
+    YUBIE_ENV: "production",
+    IPAYMU_VA: "prod-va",
+    IPAYMU_API_KEY: "prod-key",
+    IPAYMU_NOTIFY_URL: PROD_NOTIFY,
+  };
+  assert.ok(createCommercePaymentProvider(productionEnv));
+  assert.equal(createCommercePaymentProvider({ ...productionEnv, YUBIE_ENV: "staging" }), null);
+  assert.equal(createCommercePaymentProvider({ ...productionEnv, YUBIE_ENV: undefined }), null);
+  assert.equal(createCommercePaymentProvider({ ...productionEnv, IPAYMU_API_BASE_URL: "https://sandbox.ipaymu.com" }), null);
+  assert.equal(createCommercePaymentProvider({ COMMERCE_PROVIDER: "ipaymu", IPAYMU_VA: VA, IPAYMU_API_KEY: API_KEY, IPAYMU_NOTIFY_URL: NOTIFY }), null);
   assert.equal(createCommercePaymentProvider({ COMMERCE_PROVIDER: "preview" }), null);
+});
+
+test("production provider posts to the live origin and refuses cross-env redirects", async () => {
+  const calls = [];
+  const session = new IpaymuPaymentProvider({
+    va: "prod-va",
+    apiKey: "prod-key",
+    env: "production",
+    notifyUrl: "https://api.yubiefood.com/v1/webhooks/ipaymu",
+    now: () => NOW,
+    fetchFn: async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { Status: 200, Data: { SessionID: "prod-sess", Url: redirectForCall } };
+        },
+      };
+    },
+  });
+  let redirectForCall = "https://my.ipaymu.com/payment/prod-sess";
+  const good = await session.createPaymentSession(input);
+  assert.equal(good.ok, true);
+  assert.equal(good.value.redirectUrl, "https://my.ipaymu.com/payment/prod-sess");
+  assert.equal(calls[0].url, "https://my.ipaymu.com/api/v2/payment");
+  // A sandbox-hosted redirect URL can never be accepted by a production provider.
+  redirectForCall = "https://sandbox.ipaymu.com/payment/prod-sess";
+  const crossEnv = await session.createPaymentSession(input);
+  assert.equal(crossEnv.ok, false);
+  assert.equal(crossEnv.error.code, "unavailable");
+  assert.equal(calls.length, 2);
 });
 
 test("callback HMAC uses the VA and rejects a mutated amount", () => {

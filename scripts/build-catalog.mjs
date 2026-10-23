@@ -7,7 +7,7 @@ import { artifactFiles, baseHeaders, catalogDigest, CATALOG_ORIGIN, CONTACT_EMAI
 
 const root = resolve(import.meta.dirname, "..");
 const profile = parseLaunchProfile(process.env.NEXT_PUBLIC_YUBIE_LAUNCH_PROFILE);
-if (profile === "DIRECT_COMMERCE_SANDBOX") throw new Error("CATALOG_CONFIG: static release cannot contain direct commerce");
+if (profile === "DIRECT_COMMERCE_SANDBOX" || profile === "DIRECT_COMMERCE_PRODUCTION") throw new Error("CATALOG_CONFIG: static release cannot contain direct commerce");
 const listings = JSON.parse(await readFile(resolve(root, "apps/web/config/approved-marketplace-listings.json"), "utf8"));
 validateCatalogListings(listings, profile);
 const revision = process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA || spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
