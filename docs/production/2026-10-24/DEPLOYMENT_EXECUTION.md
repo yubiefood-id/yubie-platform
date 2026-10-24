@@ -84,3 +84,20 @@ Verified ROLLBACK R1 gap: `COMMERCE_PROVIDER=preview` mid-incident would 503 `/v
 ### Browser automation
 
 No authenticated owner browser session exists in the engineering sandbox (fresh Chrome + Playwright only, no CDP/auth profiles, and extracting cookies is forbidden). All dashboard actions (Cloudflare DNS/token, iPaymu dashboard, Contabo panel) remain precise operator handoffs.
+
+---
+
+## RC_PUBLISHED — 2026-10-24T11:25Z (approx)
+
+- **Authoritative RC: run 40088633288 on `d1db6956d111033bb0493b2bcc18b982e38d456a` — completed success.** Dispatched by `github-actions[bot]` (green-main CI job, PR #45+#46 mechanism — `workflow_run` was empirically rejected: it inherits the push actor, run 40082509470), approved by mAsyamJ as the required reviewer via the pending-deployments API (deployment 7297770292) — legitimate two-person separation, no control weakened.
+- Images (immutable, GHCR): api `sha256:10ff4dbafc4d…`, worker `sha256:3a0bf1558fcb…`, admin `sha256:43a0aea29dc7…`, bot `sha256:4aed7cca643a…` (built, NOT deployed — WhatsApp deferred).
+- Merged since last entry: #42 (B2B hydration-race fix, run 40065971653 root-caused), #43 (admission-freeze proofs + fail-closed env contract), #44 (contact bar + promo terms/waitlist panel + phone waitlist, migration 0022), #45/#46 (bot-actor RC dispatch + GH_REPO fix).
+- CI_GREEN on final release SHA: run 40087833766 (5/5).
+
+## Deployment staged (2026-10-24 ~13:37Z)
+
+- VPS access RESTORED via release-agent key (authorized_keys backed up, append-only; sudo via owner-provided password, used minimally; password flagged for rotation — shared in chat).
+- `/etc/yubie/production.env` staged: 0600 root, 21 vars, RELEASE_SHA=d1db695…, GOOGLE_CLIENT_ID copied server-side from staging.env (value never left the VPS), COMMERCE_PROVIDER=preview, YUBIE_CHECKOUT_ADMISSION=disabled, SUPPORT_PROVIDER=disabled.
+- `/opt/yubie/production/docker-compose.prod.yml` staged; backup dir `/opt/yubie/backups` created.
+- Caddy truth: the ONLY ingress is RetroPick's `/opt/retropick-staging/runtime/caddy` with `/etc/retropick-staging/Caddyfile` (`admin off` → restart-only via `retropick-staging-caddy.service`); existing routes: api-staging.retropick.xyz, api-staging.yubiefood.com→127.0.0.1:18787, support.yubiefood.com→8080. Production route will be appended (api.yubiefood.com→127.0.0.1:18788) with config validation before the restart; TLS activates when DNS B1 lands.
+- **Sole remaining blocker for the backend deploy: GHCR pull credential** (packages are private; registry rejects the CLI token without `read:packages`). Device-flow grant pending owner entry; three codes expired unentered (CF3A-8315, 8669-839F, AD03-3ADE, 83F3-6809). Post-grant steps: docker login via stdin over SSH → compose pull → migrate 0001–0022 → up api+worker → pg_dump baseline + restore drill → Caddy append+validate+restart → health/host-header verification.
