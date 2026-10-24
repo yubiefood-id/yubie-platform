@@ -54,6 +54,13 @@ services:
 
   api:
     image: ghcr.io/yubiefood-id/yubie-api:${RELEASE_SHA}
+    # Loopback-only publish: the VPS ingress is a HOST caddy binary (the
+    # shared RetroPick caddy), which cannot join a compose bridge network.
+    # 127.0.0.1 binding keeps the API unreachable from outside the host —
+    # public TLS stays exclusively at the reverse proxy (same pattern the
+    # legacy staging compose uses for 18787).
+    ports:
+      - "127.0.0.1:18788:8787"
     environment:
       DATABASE_URL: ${DATABASE_URL}
       PORT: 8787
