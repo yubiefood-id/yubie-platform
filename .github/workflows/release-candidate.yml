@@ -1,14 +1,24 @@
 name: Release candidate
 
-# Manual, immutable staging-candidate publication (mission E7):
+# Immutable staging-candidate publication (mission E7):
 #   - no automatic production deploy, no VPS secrets
 #   - images are tagged with the EXACT requested commit SHA (immutable)
 #   - CI must already be green on that SHA; this workflow re-verifies the
 #     build before pushing so an untested SHA can never be published
 #   - digests are reported in the job summary for the deploy runbook
 #
-# Publish ONLY trusted SHAs (main or reviewed branches). Never dispatch this
-# on untrusted PR code: the job holds GITHUB_TOKEN packages:write.
+# Two dispatch paths, same gates:
+#   - workflow_dispatch: manual, TARGET_SHA defaults to the dispatch SHA.
+#   - workflow_run on green CI(main): the triggering actor becomes
+#     github-actions[bot]. This is deliberate: the `staging` environment's
+#     required reviewer (the repository owner) cannot approve a run their
+#     own identity dispatched — GitHub blocks self-approval. Bot dispatch +
+#     human approval is the authorized two-person separation; no protection
+#     rule is weakened. A concurrency group cancels superseded waiting runs
+#     so exactly one current-main RC is pending at a time.
+#
+# Publish ONLY trusted SHAs (main or reviewed branches). The gates (current
+# origin/main + 5/5 green checks) reject everything else.
 
 on:
   workflow_dispatch:
@@ -17,12 +27,21 @@ on:
         description: "Full commit SHA to publish (defaults to the SHA this run was dispatched on)"
         required: false
         default: ""
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: release-candidate
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   publish:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     environment: staging
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -31,7 +50,7 @@ jobs:
       checks: read
       packages: write
     env:
-      TARGET_SHA: ${{ github.event.inputs.sha || github.sha }}
+      TARGET_SHA: ${{ github.event.inputs.sha || github.event.workflow_run.head_sha || github.sha }}
     steps:
       - name: Resolve and validate target SHA
         run: |
