@@ -2,14 +2,18 @@
 
 Principle: financial callback processing and reconciliation remain available in EVERY rollback state, even when new checkouts are disabled. Never destroy data to roll back code.
 
-## R1 — Disable new payments (any suspicion of money mishandling)
+## R1 — Freeze NEW checkouts (any suspicion of money mishandling)
 
-Edit `/etc/yubie/production.env` on the VPS: `COMMERCE_PROVIDER=preview` (or `disabled`), then:
+**Primary lever: `YUBIE_CHECKOUT_ADMISSION=disabled`** (implemented 2026-10-24; validated by `apps/api/tests/checkout-admission.test.mjs`). Edit `/etc/yubie/production.env` on the VPS: set `YUBIE_CHECKOUT_ADMISSION=disabled` and keep `COMMERCE_PROVIDER` **unchanged** (still on the PSP), then:
 ```
 docker compose --env-file /etc/yubie/production.env -p yubie-prod \
   -f infrastructure/docker-compose.prod.yml up -d api worker
 ```
-In-flight sessions keep their callbacks: the webhook route stays deployed and the reconciler keeps polling (worker runs regardless of provider mode via pending-payment queries; callbacks for ipaymu mode require the provider context — if provider config is removed entirely, outstanding payments are reconciled from the durable queue once restored; do not delete payment rows).
+Effect: `POST /v1/checkouts` → 503 `CHECKOUT_DISABLED` before any work; the iPaymu webhook route, payment reconciler, checkout status/recovery reads, reservation resolution and payment-exception outbox keep running normally for every in-flight session.
+
+**Do NOT switch `COMMERCE_PROVIDER=preview` during an active incident with in-flight iPaymu payments.** Verified behavior: under preview, the `/v1/webhooks/ipaymu` route returns 503 `WEBHOOK_NOT_CONFIGURED` (gated on `paymentMode==="ipaymu"`) and the reconciler's provider is null (no polling) — callbacks and reconciliation for existing sessions would stop. Only after the reconciler shows zero pending/ambiguous payments may the provider be flipped to `preview`/`disabled` as a deeper rollback.
+
+Freeze order under fire: admission freeze (this section) → verify webhook + reconciler still processing → Finance decision on provider-level rollback (R2) once pending queue is drained.
 
 ## R2 — Roll back API/worker images
 
