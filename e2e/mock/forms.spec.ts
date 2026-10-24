@@ -25,6 +25,17 @@ test("B2B transport failure keeps the enquiry and consent available for retry", 
   await page.route("**/api/b2b", (route) => route.abort("connectionfailed"));
   await page.goto("/b2b");
   const form = page.locator(".b2b-form");
+  // Same hydration race as the newsletter spec (PR #38): CI run 40065971653
+  // failed BOTH chromium projects with getByLabel('Nama', {exact:true})
+  // resolving to 2 inputs — the error names two distinct input[name=name]
+  // elements, one inside a second form wrapper, i.e. the SSR form and the
+  // hydrated client form coexisted (the B2B form mounts through Suspense +
+  // useSearchParams, adding a remount path). 'Nama' vs 'Nama bisnis' cannot
+  // collide under exact:true, so two matches can only be two form instances.
+  // 20/20 local executions pass (faster hardware narrows the window), which
+  // is why the guard waits for exactly ONE form instead of trusting timing:
+  // a persistent duplicate still fails the count assertion.
+  await expect(form).toHaveCount(1);
   await form.getByLabel("Nama", { exact: true }).fill("Synthetic QA");
   await form.getByLabel("Nama bisnis").fill("Synthetic Bakery");
   await form.getByLabel("Jenis bisnis").selectOption({ label: "Bakery" });
