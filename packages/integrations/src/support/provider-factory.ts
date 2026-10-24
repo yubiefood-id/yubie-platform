@@ -34,6 +34,13 @@ export function resolveSupportProviderName(env: RuntimeEnvSource = process.env):
 export function createSupportProvider(env: RuntimeEnvSource = process.env): SupportConversationProvider {
   const config = parseRuntimeConfig(env);
 
+  if (config.supportProvider === "disabled") {
+    // Explicit bot-off deployment: constructing a provider here would mean
+    // either faking a delivery or silently dropping one. Both are forbidden;
+    // the caller must keep support queues dormant instead.
+    throw new Error("CONFIG_ERROR: SUPPORT_PROVIDER=disabled — support delivery is intentionally disabled; no provider may be constructed");
+  }
+
   if (config.supportProvider === "zammad") {
     if (!config.zammad) {
       throw new Error("CONFIG_ERROR: zammad provider selected without validated zammad configuration");

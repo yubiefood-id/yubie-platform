@@ -1,7 +1,59 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
-/** Official sandbox API origin. Production hosts are refused by the adapter. */
+/** Explicit iPaymu environment. Never inferred from a missing variable. */
+export type IpaymuEnvironment = "sandbox" | "production";
+
+/** Official sandbox API origin (docs.ipaymu.com, fetched 2026-10-19). */
 export const IPAYMU_SANDBOX_ORIGIN = "https://sandbox.ipaymu.com";
+/** Official production API origin; only reachable behind IPAYMU_ENV=production. */
+export const IPAYMU_PRODUCTION_ORIGIN = "https://my.ipaymu.com";
+
+export function ipaymuOriginForEnv(env: IpaymuEnvironment): string {
+  return env === "production" ? IPAYMU_PRODUCTION_ORIGIN : IPAYMU_SANDBOX_ORIGIN;
+}
+
+function ipaymuHostForEnv(env: IpaymuEnvironment): string {
+  return ipaymuOriginForEnv(env).replace("https://", "");
+}
+
+/**
+ * Host trust for provider-returned redirect/session URLs: exact https host for
+ * the selected environment, no embedded credentials. Path/query stay open
+ * because session URLs carry provider-generated paths and query parameters.
+ */
+export function isIpaymuRedirectUrl(url: string, env: IpaymuEnvironment): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "https:" &&
+      parsed.username === "" &&
+      parsed.password === "" &&
+      parsed.host === ipaymuHostForEnv(env)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Strict origin check for the configured API base URL: it must equal the
+ * official origin for the selected environment with no credentials, port,
+ * path, query, or fragment. Cross-environment origins are rejected so sandbox
+ * credentials can never be sent to the live host and vice versa.
+ */
+export function isIpaymuApiOrigin(url: string, env: IpaymuEnvironment): boolean {
+  try {
+    const parsed = new URL(url);
+    return isIpaymuRedirectUrl(url, env) && parsed.pathname === "/" && parsed.search === "" && parsed.hash === "";
+  } catch {
+    return false;
+  }
+}
+
+/** Backwards-compatible sandbox-only alias used by the sandbox probe. */
+export function isSandboxIpaymuHost(url: string): boolean {
+  return isIpaymuRedirectUrl(url, "sandbox");
+}
 
 const INTEGER_CALLBACK_KEYS = new Set(["trx_id", "status_code", "transaction_status_code", "paid_off"]);
 
@@ -59,15 +111,6 @@ export function parseIpaymuCallbackBody(raw: string, contentType: string): Recor
     return fields;
   }
   return null;
-}
-
-export function isSandboxIpaymuHost(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "https:" && parsed.host === "sandbox.ipaymu.com";
-  } catch {
-    return false;
-  }
 }
 
 function normalizeCallbackFields(raw: Record<string, unknown>): Record<string, unknown> {

@@ -14,13 +14,20 @@
 
 export type YubieEnvName = "development" | "test" | "staging" | "production";
 export type BotEngineName = "deterministic" | "legacy";
-export type SupportProviderName = "fake" | "chatwoot" | "zammad";
+/**
+ * "disabled" is an explicit operator choice (e.g. bot-off production): the
+ * worker runs commerce reconciliation without any support backend, support
+ * queues stay dormant, and any attempted support delivery fails loudly.
+ * It is never inferred from an unset variable — unset still means "fake",
+ * which staging/production refuse.
+ */
+export type SupportProviderName = "fake" | "chatwoot" | "zammad" | "disabled";
 
 export type RuntimeEnvSource = Record<string, string | undefined>;
 
 const ENV_NAMES: readonly YubieEnvName[] = ["development", "test", "staging", "production"];
 const BOT_ENGINE_NAMES: readonly BotEngineName[] = ["deterministic", "legacy"];
-const SUPPORT_PROVIDER_NAMES: readonly SupportProviderName[] = ["fake", "chatwoot", "zammad"];
+const SUPPORT_PROVIDER_NAMES: readonly SupportProviderName[] = ["fake", "chatwoot", "zammad", "disabled"];
 
 const ZAMMAD_GROUP_VARS = {
   botQueue: "ZAMMAD_GROUP_BOT_QUEUE",
@@ -487,8 +494,19 @@ export function parseCommerceRuntimeConfig(env: RuntimeEnvSource = process.env):
   }
 
   if (provider === "ipaymu") {
-    if (env.IPAYMU_ENV !== "sandbox") {
-      errors.push("COMMERCE_PROVIDER=ipaymu requires IPAYMU_ENV=sandbox (production iPaymu activation is refused)");
+    // Explicit environment selection only; never inferred from a missing value.
+    const ipaymuEnv = env.IPAYMU_ENV;
+    const ipaymuEnvValid = ipaymuEnv === "sandbox" || ipaymuEnv === "production";
+    if (!ipaymuEnvValid) {
+      errors.push(
+        "COMMERCE_PROVIDER=ipaymu requires IPAYMU_ENV=sandbox or IPAYMU_ENV=production (explicit selection; production activation is a reviewed operator gate)",
+      );
+    }
+    const expectedOrigin = ipaymuEnv === "production" ? "https://my.ipaymu.com" : "https://sandbox.ipaymu.com";
+    if (ipaymuEnv === "production" && parseYubieEnvName(env.YUBIE_ENV) !== "production") {
+      errors.push(
+        "IPAYMU_ENV=production requires YUBIE_ENV=production (production PSP credentials must never run in development/staging)",
+      );
     }
     if (!databaseConfigured) {
       errors.push("COMMERCE_PROVIDER=ipaymu requires DATABASE_URL");
@@ -496,14 +514,10 @@ export function parseCommerceRuntimeConfig(env: RuntimeEnvSource = process.env):
     for (const varName of ["IPAYMU_VA", "IPAYMU_API_KEY", "IPAYMU_NOTIFY_URL"] as const) {
       if (!env[varName]) errors.push(`COMMERCE_PROVIDER=ipaymu requires ${varName}`);
     }
-    const base = (env.IPAYMU_API_BASE_URL ?? "https://sandbox.ipaymu.com").trim();
-    try {
-      const parsed = new URL(base);
-      if (parsed.protocol !== "https:" || parsed.host !== "sandbox.ipaymu.com") {
-        errors.push("IPAYMU_API_BASE_URL must be https://sandbox.ipaymu.com");
-      }
-    } catch {
-      errors.push("IPAYMU_API_BASE_URL must be https://sandbox.ipaymu.com");
+    const base = (env.IPAYMU_API_BASE_URL ?? expectedOrigin).trim().replace(/\/+$/, "");
+    if (base !== expectedOrigin) {
+      // Exact match rejects wrong hosts, ports, http, embedded credentials, paths, queries.
+      errors.push(`IPAYMU_API_BASE_URL must be ${expectedOrigin}`);
     }
     if (!appOrigin) {
       errors.push("COMMERCE_PROVIDER=ipaymu requires APP_ORIGIN");
@@ -610,6 +624,9 @@ export function parseServiceRuntimeConfig(env: RuntimeEnvSource = process.env, s
     const webhookSecret = env.ZAMMAD_WEBHOOK_SECRET ?? "";
     const webhookBearer = env.ZAMMAD_WEBHOOK_BEARER ?? "";
     const agentbotSecret = env.CHATWOOT_AGENTBOT_SECRET ?? "";
+    if (supportProvider === "disabled") {
+      errors.push("bot service cannot run with SUPPORT_PROVIDER=disabled (no real inbound webhook to verify; simply do not deploy the bot)");
+    }
     if (supportProvider === "zammad" && !webhookSecret && !webhookBearer) {
       errors.push("bot service with SUPPORT_PROVIDER=zammad requires ZAMMAD_WEBHOOK_SECRET and/or ZAMMAD_WEBHOOK_BEARER (inbound webhook verification)");
     }
@@ -622,12 +639,19 @@ export function parseServiceRuntimeConfig(env: RuntimeEnvSource = process.env, s
   }
 
   if (service === "worker") {
-    // The worker drives Zammad replies/reconciliation: keep the full
-    // fail-closed support contract from parseRuntimeConfig.
-    try {
-      parseRuntimeConfig(env);
-    } catch (error) {
-      errors.push(configMessage(error));
+    if (supportProvider === "disabled") {
+      // Bot-off production: commerce reconciliation, identity delivery, and
+      // webhook cleanup run without any support backend. Support queues stay
+      // dormant and support deliveries fail loudly at the provider factory.
+      // An UNSET provider still fails closed below via parseRuntimeConfig.
+    } else {
+      // The worker drives Zammad replies/reconciliation: keep the full
+      // fail-closed support contract from parseRuntimeConfig.
+      try {
+        parseRuntimeConfig(env);
+      } catch (error) {
+        errors.push(configMessage(error));
+      }
     }
   }
 

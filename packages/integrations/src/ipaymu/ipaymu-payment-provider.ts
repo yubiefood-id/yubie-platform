@@ -1,13 +1,15 @@
 import { err, ok, type UseCaseResult } from "@yubie/domain";
 import type { CreatePaymentSessionInput, PaymentProviderPort, PaymentSessionHandle } from "@yubie/application";
-import { IPAYMU_SANDBOX_ORIGIN, isSandboxIpaymuHost, signIpaymuRequest } from "./signature.js";
+import { ipaymuOriginForEnv, isIpaymuApiOrigin, isIpaymuRedirectUrl, signIpaymuRequest, type IpaymuEnvironment } from "./signature.js";
 
 type FetchLike = (input: string, init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
 
 export interface IpaymuPaymentProviderOptions {
   va: string;
   apiKey: string;
-  /** Must be the official sandbox origin. Production hosts throw at construction. */
+  /** Explicit iPaymu environment. Defaults to sandbox; production requires IPAYMU_ENV=production upstream. */
+  env?: IpaymuEnvironment;
+  /** Must equal the official origin for the selected env; anything else throws at construction. */
   apiBaseUrl?: string;
   notifyUrl: string;
   timeoutMs?: number;
@@ -29,9 +31,10 @@ export class IpaymuPaymentProvider implements PaymentProviderPort {
   private readonly now: () => Date;
 
   constructor(private readonly options: IpaymuPaymentProviderOptions) {
-    const origin = (options.apiBaseUrl ?? IPAYMU_SANDBOX_ORIGIN).replace(/\/$/, "");
-    if (!isSandboxIpaymuHost(origin)) {
-      throw new Error("iPaymu adapter refuses a non-sandbox API origin");
+    const ipaymuEnv = options.env ?? "sandbox";
+    const origin = (options.apiBaseUrl ?? ipaymuOriginForEnv(ipaymuEnv)).replace(/\/+$/, "");
+    if (!isIpaymuApiOrigin(origin, ipaymuEnv)) {
+      throw new Error(`iPaymu adapter refuses an API origin that is not the official ${ipaymuEnv} origin`);
     }
     if (!isPublicHttps(options.notifyUrl)) {
       throw new Error("iPaymu notifyUrl must be a public https URL");
@@ -101,7 +104,7 @@ export class IpaymuPaymentProvider implements PaymentProviderPort {
     const data = asRecord(asRecord(parsed)?.Data);
     const sessionId = typeof data?.SessionID === "string" ? data.SessionID : "";
     const redirectUrl = typeof data?.Url === "string" ? data.Url : "";
-    if (!sessionId || !isSandboxIpaymuHost(redirectUrl)) {
+    if (!sessionId || !isIpaymuRedirectUrl(redirectUrl, this.options.env ?? "sandbox")) {
       return err({ code: "unavailable", message: "iPaymu create response did not include an allowlisted session URL.", retryable: true, requestId: "ipaymu" });
     }
     return ok({
