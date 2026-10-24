@@ -26,6 +26,16 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "yubie-web-production",
   "main": "dist/server/index.js",
+  // Static assets (JS/CSS/media emitted by the vinext build) are served by
+  // the Workers Static Assets binding BEFORE the worker script — the vinext
+  // server reads the same files through env.ASSETS. Without this block the
+  // deployed worker serves HTML that references hashed assets it cannot
+  // deliver (404 → hydration breaks on every client-rendered page).
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "none"
+  },
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
