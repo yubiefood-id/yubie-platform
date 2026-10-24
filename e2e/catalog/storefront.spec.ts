@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { test, expect, assertAppOrigin } from "../support/fixtures.js";
 import { testEnvironment } from "../support/environment.js";
 import { variants, escapePattern } from "../support/catalog-variants.js";
+import { siteConfig } from "../../apps/web/config/site.js";
 
 const publicRoutes = ["/", "/products", "/our-story", "/our-roots", "/impact", "/b2b", "/faq", "/terms", "/privacy", "/products/yubie-flour", "/products/yubie-shake", "/products/yubie-ppang", "/products/yubie-mie"];
 
@@ -14,6 +15,9 @@ for (const path of publicRoutes) {
     expect(response?.status()).toBe(200);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.locator('a[href^="mailto:hello@yubiefood.com"]').first()).toBeVisible();
+    const contactBar = page.locator(".contact-bar");
+    await expect(contactBar.getByRole("link", { name: "WhatsApp Yubie" })).toHaveAttribute("href", siteConfig.social.whatsappCommunity);
+    await expect(contactBar.getByRole("link", { name: "Feedback Produk Yubie" })).toHaveAttribute("href", siteConfig.social.feedbackForm);
     await expect(page.locator('a[href^="/checkout"], a[href^="/cart"], a[href^="/account"], a[href^="/login"], form')).toHaveCount(0);
     await expect(page.locator('meta[name="codex-preview"]')).toHaveCount(0);
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /^https:\/\/yubiefood\.com(?:\/|$)/);

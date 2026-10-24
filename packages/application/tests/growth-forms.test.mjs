@@ -50,17 +50,19 @@ test("newsletter subscription is durable, deduped, and records marketing consent
 
 test("waitlist entries are per product and NEVER imply marketing consent", async () => {
   const deps = makeDeps();
-  const joined = await joinProductWaitlist({ email: "a@example.com", productId: "shake", source: "pdp" }, deps);
+  const joined = await joinProductWaitlist({ phone: "+62812345678", productId: "shake", source: "pdp" }, deps);
   assert.equal(joined.value.outcome, "joined");
-  const again = await joinProductWaitlist({ email: "a@example.com", productId: "shake", source: "pdp" }, deps);
+  const again = await joinProductWaitlist({ phone: "+62812345678", productId: "shake", source: "pdp" }, deps);
   assert.equal(again.value.outcome, "already_waiting");
-  const otherProduct = await joinProductWaitlist({ email: "a@example.com", productId: "mie", source: "pdp" }, deps);
+  const otherProduct = await joinProductWaitlist({ phone: "+62812345678", productId: "mie", source: "pdp" }, deps);
   assert.equal(otherProduct.value.outcome, "joined");
 
   assert.equal(deps.growth.waitlist.size, 2);
   assert.equal(deps.growth.newsletter.size, 0, "no newsletter row from a waitlist sign-up");
   const purposes = new Set(deps.growth.consentLedger.map((entry) => entry.purpose));
   assert.deepEqual([...purposes], ["product_waitlist"]);
+  const consent = deps.growth.consentLedger.find((entry) => entry.purpose === "product_waitlist");
+  assert.equal(consent.subjectType, "phone", "waitlist consent is keyed by phone number");
 });
 
 test("b2b lead creates a durable row, own consent purpose, and an outbox event", async () => {

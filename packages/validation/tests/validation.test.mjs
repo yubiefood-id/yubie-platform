@@ -8,8 +8,10 @@ test("newsletter validation requires explicit consent", () => {
 });
 
 test("product waitlist is scoped to a coming-soon product and explicit consent", () => {
-  assert.equal(productWaitlistSchema.safeParse({ email: "hello@yubiefood.com", productId: "shake", consent: true }).success, true);
-  assert.equal(productWaitlistSchema.safeParse({ email: "hello@yubiefood.com", productId: "mie", consent: true }).success, true);
-  assert.equal(productWaitlistSchema.safeParse({ email: "hello@yubiefood.com", productId: "flour", consent: true }).success, false);
-  assert.equal(productWaitlistSchema.safeParse({ email: "hello@yubiefood.com", productId: "ppang", consent: false }).success, false);
+  assert.equal(productWaitlistSchema.safeParse({ phone: "+62812345678", productId: "shake", consent: true }).success, true);
+  assert.equal(productWaitlistSchema.safeParse({ phone: "+62812345678", productId: "mie", consent: true }).success, true);
+  assert.equal(productWaitlistSchema.safeParse({ phone: "+62812345678", productId: "all", consent: true }).success, true);
+  assert.equal(productWaitlistSchema.safeParse({ phone: "+62812345678", productId: "flour", consent: true }).success, false);
+  assert.equal(productWaitlistSchema.safeParse({ phone: "123", productId: "ppang", consent: true }).success, false);
+  assert.equal(productWaitlistSchema.safeParse({ phone: "+62812345678", productId: "ppang", consent: false }).success, false);
 });

@@ -520,7 +520,8 @@ export const newsletterSubscriptions = pgTable("newsletter_subscriptions", {
 
 export const productWaitlistEntries = pgTable("product_waitlist_entries", {
   id: text("id").primaryKey(),
-  email: text("email").notNull(),
+  email: text("email"),
+  phone: text("phone").notNull(),
   productId: text("product_id").notNull(),
   status: text("status").notNull().default("waiting"),
   source: text("source").notNull(),
@@ -529,7 +530,7 @@ export const productWaitlistEntries = pgTable("product_waitlist_entries", {
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
 }, (table) => [
-  uniqueIndex("product_waitlist_email_product").on(table.email, table.productId),
+  uniqueIndex("product_waitlist_phone_product").on(table.phone, table.productId),
 ]);
 
 export const b2bLeads = pgTable("b2b_leads", {

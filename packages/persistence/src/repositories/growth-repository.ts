@@ -5,8 +5,8 @@ import type { Database } from "../client.js";
 import { b2bLeads, consentLedger, newsletterSubscriptions, productWaitlistEntries } from "../schema/index.js";
 
 /**
- * PostgreSQL growth + consent storage (migration 0010). Natural keys
- * (newsletter email; waitlist email+product) make duplicate submissions
+ * PostgreSQL growth + consent storage (migrations 0010 + 0022). Natural keys
+ * (newsletter email; waitlist phone+product) make duplicate submissions
  * idempotent; the consent ledger is append-only.
  */
 export class PostgresGrowthRepository implements GrowthRepository {
@@ -31,12 +31,12 @@ export class PostgresGrowthRepository implements GrowthRepository {
     return ok({ outcome: inserted.length > 0 ? "subscribed" : "already_subscribed" });
   }
 
-  async recordWaitlistEntry(submission: { email: string; productId: string; source: string; consentVersion: string; consentedAt: string }): Promise<UseCaseResult<{ outcome: "joined" | "already_waiting" }>> {
+  async recordWaitlistEntry(submission: { phone: string; productId: string; source: string; consentVersion: string; consentedAt: string }): Promise<UseCaseResult<{ outcome: "joined" | "already_waiting" }>> {
     const inserted = await this.database.db
       .insert(productWaitlistEntries)
       .values({
         id: `wtl_${randomUUID()}`,
-        email: submission.email,
+        phone: submission.phone,
         productId: submission.productId,
         status: "waiting",
         source: submission.source,
@@ -45,7 +45,7 @@ export class PostgresGrowthRepository implements GrowthRepository {
         createdAt: submission.consentedAt,
         updatedAt: submission.consentedAt,
       })
-      .onConflictDoNothing({ target: [productWaitlistEntries.email, productWaitlistEntries.productId] })
+      .onConflictDoNothing({ target: [productWaitlistEntries.phone, productWaitlistEntries.productId] })
       .returning({ id: productWaitlistEntries.id });
     return ok({ outcome: inserted.length > 0 ? "joined" : "already_waiting" });
   }

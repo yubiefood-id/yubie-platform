@@ -10,6 +10,7 @@ export const siteConfig = {
     instagram: "https://www.instagram.com/yubiefood.official/",
     tiktok: "https://www.tiktok.com/@yubiefood.official",
     whatsappCommunity: "https://chat.whatsapp.com/IVpNHQOsn371YeTSdyX6q2",
+    feedbackForm: "https://forms.gle/tdBw1f8KWjBRs96K8",
   },
 } as const;
 
