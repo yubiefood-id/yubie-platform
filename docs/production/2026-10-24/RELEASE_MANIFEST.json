@@ -60,10 +60,13 @@
   },
   "web": {
     "runtime": "cloudflare-worker",
-    "config": "apps/web/wrangler.prod.jsonc",
-    "deployedVersion": null,
-    "blocker": "B2 \u2014 wrangler token lacks Workers edit scopes",
-    "fallback": "vercel-static-catalog (live, untouched)"
+    "worker": "yubie-web-production",
+    "candidateVersion": "8fbf3cef-c13c-46f3-9ab7-6b7cfad07868",
+    "candidateHost": "https://next.yubiefood.com",
+    "acceptance": "STAGING_TIER 66/66 + EXTENDED 6/6 (2026-10-24, evidence in DEPLOYMENT_EXECUTION)",
+    "assetsFix": "Workers Static Assets binding (P0: hashed assets 404 pre-fix)",
+    "apexCutover": "PENDING_OWNER: delete apex A records (CF 100117) then redeploy; Vercel preserved as rollback (snapshot recorded)",
+    "rollback": "vercel-static-catalog (live, untouched; apex A snapshot 64.29.17.1/216.198.79.1)"
   },
   "database": {
     "migrationLevel": "0021",
@@ -84,7 +87,7 @@
     "zammadProductionUntouched": true
   },
   "status": {
-    "PRODUCTION_WEB_LIVE": "BLOCKED_OPERATOR_SCOPE",
+    "PRODUCTION_WEB_LIVE": "PENDING_OWNER_DNS_DELETION",
     "PRODUCTION_API_LIVE": "BLOCKED_OPERATOR (B0 SSH + B1 DNS)",
     "PRODUCTION_ADMIN_LIVE": "BLOCKED_OPERATOR (B3/B4)",
     "ERP_OPERATOR_READY": "BLOCKED_EXTERNAL (B14)",
@@ -92,7 +95,8 @@
     "IPAYMU_LIVE_ACCEPTED": "NO",
     "FULL_COMMERCE_LIVE": "NO_GO",
     "FULL_COMMERCE_NO_GO": "ACTIVE_UNTIL_GATES_PASS",
-    "PRODUCTION_API_LIVE_LOOPBACK": "DEPLOYED_VERIFIED (public via DNS B1)"
+    "PRODUCTION_API_LIVE_LOOPBACK": "DEPLOYED_VERIFIED (public via DNS B1)",
+    "WEB_CANDIDATE_DEPLOYED": "YES_ACCEPTED"
   },
   "deployReadiness": {
     "vpsAccess": "RESTORED (release-agent key; authorized_keys append-only, backup kept)",
