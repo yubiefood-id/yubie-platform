@@ -216,3 +216,23 @@ jobs:
               aquasec/trivy:0.67.1@sha256:c0ed528623baf6e250e2225010e5fbb4b91f6983595dafc1beb81ff686ba4734 \
               image --scanners vuln --input /image.tar --exit-code 1 --ignore-unfixed --severity HIGH,CRITICAL
           done
+
+  dispatch-release-candidate:
+    # Green-main bot dispatch of the RC (actor separation for the staging
+    # environment approval: the required reviewer cannot approve a run their
+    # own identity dispatched). GITHUB_TOKEN -> workflow_dispatch is one of
+    # the documented recursion exceptions. The RC's own gates re-verify
+    # current main + 5/5 green before anything is published; a concurrency
+    # group supersedes stale waiting RC runs.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [quality, persistence, security, browser, containers]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch release-candidate for this SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release-candidate.yml --ref "${{ github.ref }}" -f sha="${{ github.sha }}"
