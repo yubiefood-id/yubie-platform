@@ -116,3 +116,18 @@ Executed after the owner provisioned GHCR registry auth on the VPS (root docker 
 6. **Verification (loopback)**: `/healthz` ok + exact SHA; `/readyz` 200; `POST /v1/checkouts` with valid `x-api-proxy-token` → **503 CHECKOUT_DISABLED** (fail-closed posture proven in production); webhook shape 503 WEBHOOK_NOT_CONFIGURED (preview); unauthenticated requests → 401 PROXY_UNAUTHORIZED (trust boundary first).
 7. **Caddy**: `/etc/retropick-staging/Caddyfile` backed up, `api.yubiefood.com → 127.0.0.1:18788` appended, `caddy validate` OK, `retropick-staging-caddy` restarted — api-staging.yubiefood.com 200, support.yubiefood.com 200, api-staging.retropick.xyz answering (Zammad/RetroPick/staging untouched). New host: HTTP→308 wired; TLS activates when DNS lands.
 8. **Public reachability blocker (updated B1)**: the zone carries a **wildcard `*.yubiefood.com → 198.54.117.242`**, so `api.yubiefood.com` currently lands on the wildcard, not the VPS. Fix: create a SPECIFIC A record `api.yubiefood.com → 84.247.158.36` (DNS-only) — specific records override the wildcard.
+
+---
+
+## Candidate acceptance + apex cutover state (2026-10-24 ~15:4xZ)
+
+**DNS/TLS recovered by owner** (Namecheap→Cloudflare delegation, api A record; Caddy Let's Encrypt issued). Verified: `api.yubiefood.com/healthz` 200 SHA `379f978`, readyz 200; Worker→API→DB proxy path live (real csrfToken + googleClientId through `/api/auth/session`).
+
+**P0 found and fixed:** the deployed Worker served HTML referencing hashed assets it could not deliver (`assets/index-*.js` → 404, "Failed to fetch dynamically imported module" — hydration broke on all client-rendered pages). Root cause: deploy without Workers Static Assets wiring. Fixed in `wrangler.prod.jsonc` (assets binding, dist/client, assets-first); clean rebuild + redeploy = version **8fbf3cef**. Referenced asset now 200 (86KB).
+
+**Acceptance (version 8fbf3cef):**
+- Sanctioned staging tier vs candidate (`next.yubiefood.com`, EXPECTED_RELEASE_SHA=379f978, DIRECT_COMMERCE_PRODUCTION): **66/66 PASS** desktop+mobile chromium — release-identity preflight (API SHA + preview provider + DB connected), storefront journeys (catalog, variant price/selection through cart refresh, WCAG2AA axe on all pages, 320/768px layouts, robots/sitemap).
+- Extended journeys (desktop+mobile): **6/6 PASS** — login page + session API (production google client id, csrfToken, Secure cookies), account session-gated with no customer data, **checkout honestly disabled end-to-end via the app's own path (`POST /api/checkout` → 503 CHECKOUT_DISABLED)**, zero page/console errors.
+- Sandbox-network caveat handled: local resolver intermittently served the stale wildcard IP; verified against VPS resolver + hosts pin — all failures were transport artifacts, and the one reproducible failure (asset 404) was the real P0 above.
+
+**Apex cutover — attempted, one owner step remains:** attach of `yubiefood.com` custom domain fails with Cloudflare **100117** (existing externally-managed apex A records). Rollback snapshot recorded (Vercel `asyams-projects/yubie-web` Ready; apex A `64.29.17.1`/`216.198.79.1`; www CNAME `1cb06cbfd63cf530.vercel-dns-017.com`, www intentionally stays on Vercel and 308s to apex). **Owner action: delete the two apex A records in Cloudflare → re-run `npx wrangler deploy -c wrangler.prod.jsonc` (from apps/web) → cutover complete.** `wrangler.prod.jsonc` carries both routes (cutover-ready).
