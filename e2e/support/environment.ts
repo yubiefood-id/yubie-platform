@@ -1,4 +1,4 @@
-import { parseLaunchProfile } from "../../packages/config/src/launch.js";
+import { isDirectCommerceProfile, parseLaunchProfile } from "../../packages/config/src/launch.js";
 
 export type TestTier = "mock" | "catalog" | "staging" | "sandbox" | "production-smoke";
 
@@ -23,7 +23,9 @@ export function testEnvironment(env: NodeJS.ProcessEnv = process.env) {
   let launchProfile;
   try { launchProfile = parseLaunchProfile(env.E2E_LAUNCH_PROFILE || (["mock", "sandbox"].includes(tier) ? "DIRECT_COMMERCE_SANDBOX" : undefined)); }
   catch { return reject("unknown launch profile"); }
-  const catalog = launchProfile !== "DIRECT_COMMERCE_SANDBOX";
+  // Any direct-commerce profile (sandbox or production) runs the dynamic
+  // storefront — only the catalog profiles are static artifacts with digests.
+  const catalog = !isDirectCommerceProfile(launchProfile);
   const expectedDigest = env.EXPECTED_CATALOG_DIGEST || null;
   if (tier === "sandbox" && catalog) reject("provider sandbox cannot select a catalog profile");
   if (tier === "catalog" && !catalog) reject("catalog acceptance cannot select direct commerce");
