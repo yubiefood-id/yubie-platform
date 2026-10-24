@@ -322,7 +322,7 @@ export interface InventoryRepository {
  */
 export interface GrowthRepository {
   recordNewsletterConsent(submission: { email: string; name: string | null; source: string; consentVersion: string; consentedAt: string }): Promise<UseCaseResult<{ outcome: "subscribed" | "already_subscribed" }>>;
-  recordWaitlistEntry(submission: { email: string; productId: string; source: string; consentVersion: string; consentedAt: string }): Promise<UseCaseResult<{ outcome: "joined" | "already_waiting" }>>;
+  recordWaitlistEntry(submission: { phone: string; productId: string; source: string; consentVersion: string; consentedAt: string }): Promise<UseCaseResult<{ outcome: "joined" | "already_waiting" }>>;
   recordB2bLead(submission: {
     id: string;
     name: string;

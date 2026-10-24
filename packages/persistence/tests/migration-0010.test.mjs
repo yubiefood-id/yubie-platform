@@ -69,13 +69,13 @@ test("migration 0010 creates growth tables; submissions are durable and deduped"
     assert.deepEqual(ledger.map((row) => [row.purpose, row.action]), [["marketing_newsletter", "granted"]]);
 
     const waitlistDupes = await database.client`
-      INSERT INTO product_waitlist_entries (id, email, product_id, status, source, consent_version, consented_at, created_at, updated_at)
-      VALUES ('wtl_1', 'w@example.com', 'shake', 'waiting', 'pdp', '2026-10', ${NOW}, ${NOW}, ${NOW}),
-             ('wtl_2', 'w@example.com', 'shake', 'waiting', 'pdp', '2026-10', ${NOW}, ${NOW}, ${NOW})
+      INSERT INTO product_waitlist_entries (id, phone, product_id, status, source, consent_version, consented_at, created_at, updated_at)
+      VALUES ('wtl_1', '+62812345678', 'shake', 'waiting', 'pdp', '2026-10', ${NOW}, ${NOW}, ${NOW}),
+             ('wtl_2', '+62812345678', 'shake', 'waiting', 'pdp', '2026-10', ${NOW}, ${NOW}, ${NOW})
       ON CONFLICT DO NOTHING
       RETURNING id
     `;
-    assert.equal(waitlistDupes.length, 1, "unique (email, product) dedupes waitlist entries");
+    assert.equal(waitlistDupes.length, 1, "unique (phone, product) dedupes waitlist entries");
   } finally {
     await closeDatabase(database);
     await dropIsolatedDatabase(dbName);

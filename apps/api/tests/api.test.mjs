@@ -153,12 +153,12 @@ test("waitlist accepts only scoped coming-soon product interest", async () => {
   const accepted = await handleRequest(new Request("https://api.yubiefood.com/v1/waitlist", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "hello@yubiefood.com", productId: "shake", consent: true })
+    body: JSON.stringify({ phone: "+62812345678", productId: "shake", consent: true })
   }));
   const rejected = await handleRequest(new Request("https://api.yubiefood.com/v1/waitlist", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "hello@yubiefood.com", productId: "flour", consent: true })
+    body: JSON.stringify({ phone: "+62812345678", productId: "flour", consent: true })
   }));
   assert.equal(accepted.status, 201);
   assert.equal((await accepted.json()).data.outcome, "joined");

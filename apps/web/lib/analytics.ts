@@ -9,6 +9,8 @@ export type YubieAnalyticsEvent =
   | "product_variant_select"
   | "marketplace_click"
   | "whatsapp_intent_click"
+  | "contact_bar_click"
+  | "feedback_form_click"
   | "b2b_sample_click"
   | "b2b_product_development_click"
   | "product_waitlist_submit"

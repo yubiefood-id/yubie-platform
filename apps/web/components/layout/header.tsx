@@ -7,6 +7,7 @@ import { navigation, siteConfig } from "@/config/site";
 import { products } from "@/config/products";
 import { CartDrawer } from "@/components/cart/cart-drawer";
 import { SocialLinks } from "@/components/layout/social-links";
+import { ContactBar } from "@/components/layout/contact-bar";
 import { useCart } from "@/features/cart/cart-context";
 import { directCommerce } from "@/config/launch";
 
@@ -66,6 +67,7 @@ function SiteHeader({ cart }: { cart?: { count: number; openCart: () => void } }
 
   return <>
     <a className="skip-link" href="#main">Lewati ke konten utama</a>
+    <ContactBar />
     {directCommerce && <div className="announcement">{siteConfig.announcement}</div>}
     <header className="site-header">
       <Link className="brand" href="/" aria-label="Yubie home"><Image src="/brand/transparent_yubie.png" alt="Yubie — Nourish Naturally" width={1250} height={910} priority unoptimized /></Link>

@@ -6,6 +6,9 @@ import { useEffect, useRef, useState } from "react";
 import { useCart } from "@/features/cart/cart-context";
 import { getApiOrigin } from "@/lib/api-origin";
 import { useFocusTrap } from "@/lib/a11y";
+import { trackEvent } from "@/lib/analytics";
+import { siteConfig } from "@/config/site";
+import { ProductWaitlistForm } from "@/components/forms/product-waitlist-form";
 
 const DISMISSED_KEY = "yubie.promo.dismissed.v1";
 
@@ -61,7 +64,12 @@ export function StorefrontWidgets() {
     {!hideOffer && offer && <aside className="welcome-offer" aria-label="Promo pelanggan terverifikasi">
       <button className="icon-button" type="button" onClick={closePromo} aria-label="Tutup promo">×</button>
       <h2>Promo {offer.percentage}% untuk pelanggan terverifikasi</h2>
-      <p>Berlaku untuk produk dan pelanggan yang memenuhi ketentuan. Verifikasi nomor untuk melihat kelayakanmu.</p>
+      <ul className="offer-terms">
+        <li>Verifikasi nomor HP kamu untuk melihat kelayakan.</li>
+        <li>Join <a href={siteConfig.social.whatsappCommunity} target="_blank" rel="noopener noreferrer">komunitas WhatsApp Yubie</a>.</li>
+      </ul>
+      <ProductWaitlistForm productId="all" />
+      <p className="offer-feedback">Sudah mencoba produk Yubie? <a href={siteConfig.social.feedbackForm} target="_blank" rel="noopener noreferrer" onClick={() => trackEvent("feedback_form_click", { target: "welcome-offer" })}>Isi formulir feedback</a></p>
       <Link className="text-button" href="/login?next=/account">Lihat kelayakan promo</Link>
     </aside>}
 

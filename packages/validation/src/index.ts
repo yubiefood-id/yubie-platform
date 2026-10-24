@@ -8,8 +8,8 @@ export const newsletterSubmissionSchema = z.object({
 });
 
 export const productWaitlistSchema = z.object({
-  email: z.email(),
-  productId: z.enum(["shake", "ppang", "mie"]),
+  phone: z.string().trim().min(8).max(24),
+  productId: z.enum(["shake", "ppang", "mie", "all"]),
   consent: z.literal(true),
 });
 

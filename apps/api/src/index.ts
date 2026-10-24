@@ -308,7 +308,7 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     const parsed = productWaitlistSchema.safeParse(body.value);
     if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
     const result = await joinProductWaitlist(
-      { email: parsed.data.email, productId: parsed.data.productId, source: "web" },
+      { phone: parsed.data.phone, productId: parsed.data.productId, source: "web" },
       { tx: ctx.tx, clock: ctx.clock, ids: ctx.ids },
     );
     if (!result.ok) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });

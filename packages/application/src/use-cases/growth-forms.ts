@@ -11,8 +11,8 @@ export interface NewsletterSubmissionInput {
 }
 
 export interface WaitlistSubmissionInput {
-  email: string;
-  productId: "shake" | "ppang" | "mie";
+  phone: string;
+  productId: "shake" | "ppang" | "mie" | "all";
   source: string;
 }
 
@@ -83,7 +83,7 @@ export async function joinProductWaitlist(
   const now = deps.clock.now();
   return deps.tx.run("growth.waitlist", async (repos) => {
     const result = await repos.growth.recordWaitlistEntry({
-      email: input.email,
+      phone: input.phone,
       productId: input.productId,
       source: input.source,
       consentVersion: GROWTH_CONSENT_VERSION,
@@ -93,8 +93,8 @@ export async function joinProductWaitlist(
     if (result.value.outcome === "joined") {
       await repos.growth.appendConsent({
         id: id(deps, "csl"),
-        subjectType: "email",
-        subjectKey: input.email,
+        subjectType: "phone",
+        subjectKey: input.phone,
         purpose: "product_waitlist",
       action: "granted",
       consentVersion: GROWTH_CONSENT_VERSION,
@@ -102,7 +102,7 @@ export async function joinProductWaitlist(
         occurredAt: now,
       });
     }
-    await repos.audit.append({ action: "waitlist.joined", resourceType: "product_waitlist_entry", resourceId: `${input.email}:${input.productId}`, actor: "web", occurredAt: now });
+    await repos.audit.append({ action: "waitlist.joined", resourceType: "product_waitlist_entry", resourceId: `${input.phone}:${input.productId}`, actor: "web", occurredAt: now });
     return result;
   });
 }
