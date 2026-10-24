@@ -56,3 +56,31 @@ Running log; every entry names evidence (SHA, run, digest, URL, timestamp UTC). 
 ## Live activation
 
 - `IPAYMU_LIVE_ACCEPTED = NO` / `FULL_COMMERCE_LIVE = NO_GO` until ADR-013 gates pass.
+
+---
+
+## Recovery session addendum (2026-10-24, later)
+
+### Flake fix (PR #38 — MERGED)
+
+Run 40060240923 browser job failed honestly: `locator('.newsletter-form').getByLabel('Email')` strict-mode violation — the SSR form and hydrated client form coexided during hydration on mobile-chromium (both elements named in the error; `getByPlaceholder(...).nth(1)` proves the transient duplicate). Fixed by asserting `toHaveCount(1)` before interaction (race removed, single-form invariant kept). Main run 40061874864 (bdfbaaa) passed 5/5; the fix removes the latent race regardless.
+
+### Payment-safe emergency switch (PR #39 — MERGED)
+
+Verified ROLLBACK R1 gap: `COMMERCE_PROVIDER=preview` mid-incident would 503 `/v1/webhooks/ipaymu` (WEBHOOK_NOT_CONFIGURED) and no-op the reconciler — in-flight callbacks dropped. Implemented `YUBIE_CHECKOUT_ADMISSION=disabled` (config enum fail-closed; API gate before any checkout work; compose pass-through; regression tests; ROLLBACK R1 rewritten). Freeze now stops NEW sessions only; callbacks, reconciliation, recovery reads and reservation resolution keep running.
+
+### Release candidate
+
+- Stale run 40060244646 (de837d0) CANCELLED (main moved). Premature run 40064081145 (e4799b3) CANCELLED (dispatched before #39 merged).
+- **Authoritative RC: run 40065176432 on `678725463a95b500e772403a72ef807f8662d152`** — RC_WAITING_APPROVAL.
+- B17 analysis: the gh CLI token IS the owner (mAsyamJ) and mAsyamJ is the sole required reviewer, but GitHub blocks self-approval of a run dispatched by the same actor (`current_user_can_approve:false`; approval POST → 422 "No pending deployment requests to approve"). Approval must come from the owner's web session.
+
+### B0 (SSH) — still refused, recovery kit prepared
+
+- `vps-contabo-yubie-1` re-tested 2026-10-24: `Permission denied (publickey,password)`.
+- Fresh agent keypair generated: `~/.ssh/id_ed25519_yubie_release_agent` (public fingerprint `SHA256:EFWl19r7Hg/9Opu0qI4JxUlU7AT5yS8JhoaRsPwmv98`). Operator appends the public key to `yubie-deploy`'s authorized_keys via an existing authorized session (exact commands in OPERATOR_BLOCKERS B0).
+- Production env with CSPRNG secrets (POSTGRES_PASSWORD / API_PROXY_TOKEN / OPS_API_TOKEN; mode 0600, outside Git) staged at `~/.yubie-prod-secrets/production.env` on the engineering host, RELEASE_SHA filled to 6787254 — deploy is one `scp` away once SSH works.
+
+### Browser automation
+
+No authenticated owner browser session exists in the engineering sandbox (fresh Chrome + Playwright only, no CDP/auth profiles, and extracting cookies is forbidden). All dashboard actions (Cloudflare DNS/token, iPaymu dashboard, Contabo panel) remain precise operator handoffs.

@@ -3,46 +3,79 @@
   "releaseDate": "2026-10-24",
   "targetDomain": "https://yubiefood.com",
   "source": {
-    "gitSha": "de837d07379393eadcf93dbc9bf47d2d25f5de34",
-    "prs": [34, 35, 36],
-    "ciRunId": 40060240923,
-    "ciStatus": "in_progress_at_manifest_write",
+    "gitSha": "678725463a95b500e772403a72ef807f8662d152",
+    "prs": [
+      34,
+      35,
+      36,
+      37,
+      38,
+      39
+    ],
+    "ciRunId": "40061874864 (bdfbaaa success) + per-PR green; post-merge main run in progress",
+    "ciStatus": "PER_PR_GREEN",
     "prCheckRuns": {
-      "34": "all 5 green (run 40039800425 base / 40038955431 head)",
-      "35": "all 5 green (run 40039800425)",
-      "36": "all 5 green (run 40058506248, includes undici 7.30.1 security fix)"
-    }
+      "38": "flake fix \u2014 all 5 green (run 40062588066)",
+      "39": "checkout admission switch \u2014 all 5 green (run 40064117901)"
+    },
+    "notes": "Flaky browser gate on run 40060240923 root-caused (hydration duplicate raced strict-mode locator) and fixed in PR #38, not suppressed."
   },
   "releaseCandidate": {
-    "workflowRunId": 40060244646,
-    "status": "WAITING_STAGING_ENVIRONMENT_APPROVAL",
-    "blocker": "B17 — required reviewer mAsyamJ must approve the deployment in GitHub Actions",
-    "url": "https://github.com/yubiefood-id/yubie-platform/actions/runs/40060244646"
+    "workflowRunId": 40065176432,
+    "status": "RC_WAITING_APPROVAL",
+    "targetSha": "678725463a95b500e772403a72ef807f8662d152",
+    "blocker": "B17 \u2014 GitHub blocks self-approval when the same account dispatched the run; owner must approve via web UI session",
+    "url": "https://github.com/yubiefood-id/yubie-platform/actions/runs/40065176432",
+    "supersededRuns": [
+      {
+        "id": 40060244646,
+        "sha": "de837d0",
+        "disposition": "CANCELLED (stale target after main moved)"
+      },
+      {
+        "id": 40064081145,
+        "sha": "e4799b3",
+        "disposition": "CANCELLED (dispatched before PR #39 merged)"
+      }
+    ]
   },
   "images": {
-    "yubie-api": { "digest": "PENDING_RC_APPROVAL", "deployed": false },
-    "yubie-worker": { "digest": "PENDING_RC_APPROVAL", "deployed": false },
-    "yubie-admin": { "digest": "PENDING_RC_APPROVAL", "deployed": false },
-    "yubie-bot": { "digest": "PENDING_RC_APPROVAL_BUILT_NOT_DEPLOYED", "deployed": false }
+    "yubie-api": {
+      "digest": "PENDING_RC_APPROVAL",
+      "deployed": false
+    },
+    "yubie-worker": {
+      "digest": "PENDING_RC_APPROVAL",
+      "deployed": false
+    },
+    "yubie-admin": {
+      "digest": "PENDING_RC_APPROVAL",
+      "deployed": false
+    },
+    "yubie-bot": {
+      "digest": "PENDING_RC_APPROVAL_BUILT_NOT_DEPLOYED",
+      "deployed": false
+    }
   },
   "web": {
     "runtime": "cloudflare-worker",
     "config": "apps/web/wrangler.prod.jsonc",
     "deployedVersion": null,
-    "blocker": "B2 — wrangler token lacks Workers edit scopes",
+    "blocker": "B2 \u2014 wrangler token lacks Workers edit scopes",
     "fallback": "vercel-static-catalog (live, untouched)"
   },
   "database": {
     "migrationLevel": "0021",
     "backupBaseline": null,
     "restoreVerified": false,
-    "blocker": "B0 — VPS deploy SSH refused"
+    "blocker": "B0 \u2014 VPS deploy SSH refused"
   },
   "commerce": {
     "launchProfile": "DIRECT_COMMERCE_PRODUCTION",
     "commerceProvider": "preview",
     "ipaymuEnv": null,
-    "livePaymentsAuthorized": false
+    "livePaymentsAuthorized": false,
+    "emergencySwitch": "YUBIE_CHECKOUT_ADMISSION (PR #39): freezes NEW sessions only; callbacks/reconciliation stay alive"
   },
   "support": {
     "provider": "disabled",
