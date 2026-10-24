@@ -39,12 +39,12 @@
     "yubie-api": {
       "tag": "ghcr.io/yubiefood-id/yubie-api:d1db6956d111033bb0493b2bcc18b982e38d456a",
       "digest": "sha256:10ff4dbafc4d...",
-      "deployed": false
+      "deployed": true
     },
     "yubie-worker": {
       "tag": "ghcr.io/yubiefood-id/yubie-worker:d1db6956d111033bb0493b2bcc18b982e38d456a",
       "digest": "sha256:3a0bf1558fcb...",
-      "deployed": false
+      "deployed": true
     },
     "yubie-admin": {
       "tag": "ghcr.io/yubiefood-id/yubie-admin:d1db6956d111033bb0493b2bcc18b982e38d456a",
@@ -91,7 +91,8 @@
     "IPAYMU_SANDBOX_ACCEPTED": "NOT_RUN (B5-B8)",
     "IPAYMU_LIVE_ACCEPTED": "NO",
     "FULL_COMMERCE_LIVE": "NO_GO",
-    "FULL_COMMERCE_NO_GO": "ACTIVE_UNTIL_GATES_PASS"
+    "FULL_COMMERCE_NO_GO": "ACTIVE_UNTIL_GATES_PASS",
+    "PRODUCTION_API_LIVE_LOOPBACK": "DEPLOYED_VERIFIED (public via DNS B1)"
   },
   "deployReadiness": {
     "vpsAccess": "RESTORED (release-agent key; authorized_keys append-only, backup kept)",
@@ -99,5 +100,27 @@
     "compose": "/opt/yubie/production/docker-compose.prod.yml staged (project yubie-prod)",
     "caddy": "shared RetroPick Caddy identified (/etc/retropick-staging/Caddyfile, admin off, restart-only)",
     "soleBlocker": "GHCR pull credential: device-flow scope grant pending owner entry (read:packages)"
+  },
+  "deployedBackend": {
+    "status": "PRODUCTION_API_DEPLOYED",
+    "deployedAtUtc": "2026-10-24T14:05Z (approx)",
+    "sourceSha": "379f978609f82305126ad7100c8dd6befd8022a8",
+    "rcRun": 40098640091,
+    "compose": "infrastructure/docker-compose.prod.yml @ 379f978 (loopback 127.0.0.1:18788, PR #48)",
+    "containers": [
+      "yubie-prod-postgres-1 healthy",
+      "yubie-prod-api-1 healthy",
+      "yubie-prod-worker-1 up (supportDisabled:true)"
+    ],
+    "migrations": "0001-0022 (schema_migrations max: 0022_waitlist_phone.sql)",
+    "backupBaseline": "/opt/yubie/backups/prod-baseline-379f978-20261024T140946Z.sql (156K)",
+    "restoreDrill": "45 public tables restored into scratch DB then dropped",
+    "healthz": "ok:true releaseSha 379f978 (loopback)",
+    "readyz": "200",
+    "checkoutAdmission": "503 CHECKOUT_DISABLED verified WITH valid proxy token (fail-closed initial posture)",
+    "webhookShape": "503 WEBHOOK_NOT_CONFIGURED (preview mode; no forged events sent)",
+    "caddy": "api.yubiefood.com -> 127.0.0.1:18788 appended to /etc/retropick-staging/Caddyfile (backup kept), caddy validate OK, retropick-staging-caddy restarted; api-staging/support/retropick routes verified unchanged; HTTP->308 redirect wired",
+    "publicReachability": "BLOCKED_DNS_WILDCARD: zone has *.yubiefood.com -> 198.54.117.242; a SPECIFIC A record api.yubiefood.com -> 84.247.158.36 (DNS-only) is required to override it",
+    "bot": "not deployed (profile off) per WhatsApp deferral"
   }
 }
