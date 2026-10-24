@@ -3,27 +3,40 @@
   "releaseDate": "2026-10-24",
   "targetDomain": "https://yubiefood.com",
   "source": {
-    "gitSha": "PENDING_PR_MERGE",
+    "gitSha": "de837d07379393eadcf93dbc9bf47d2d25f5de34",
     "prs": [34, 35, 36],
-    "ciRunId": null,
-    "ciStatus": "PENDING"
+    "ciRunId": 40060240923,
+    "ciStatus": "in_progress_at_manifest_write",
+    "prCheckRuns": {
+      "34": "all 5 green (run 40039800425 base / 40038955431 head)",
+      "35": "all 5 green (run 40039800425)",
+      "36": "all 5 green (run 40058506248, includes undici 7.30.1 security fix)"
+    }
+  },
+  "releaseCandidate": {
+    "workflowRunId": 40060244646,
+    "status": "WAITING_STAGING_ENVIRONMENT_APPROVAL",
+    "blocker": "B17 — required reviewer mAsyamJ must approve the deployment in GitHub Actions",
+    "url": "https://github.com/yubiefood-id/yubie-platform/actions/runs/40060244646"
   },
   "images": {
-    "yubie-api": { "digest": "PENDING_RC", "deployed": false },
-    "yubie-worker": { "digest": "PENDING_RC", "deployed": false },
-    "yubie-admin": { "digest": "PENDING_RC", "deployed": false },
-    "yubie-bot": { "digest": "PENDING_RC_BUILT_NOT_DEPLOYED", "deployed": false }
+    "yubie-api": { "digest": "PENDING_RC_APPROVAL", "deployed": false },
+    "yubie-worker": { "digest": "PENDING_RC_APPROVAL", "deployed": false },
+    "yubie-admin": { "digest": "PENDING_RC_APPROVAL", "deployed": false },
+    "yubie-bot": { "digest": "PENDING_RC_APPROVAL_BUILT_NOT_DEPLOYED", "deployed": false }
   },
   "web": {
     "runtime": "cloudflare-worker",
     "config": "apps/web/wrangler.prod.jsonc",
     "deployedVersion": null,
+    "blocker": "B2 — wrangler token lacks Workers edit scopes",
     "fallback": "vercel-static-catalog (live, untouched)"
   },
   "database": {
     "migrationLevel": "0021",
     "backupBaseline": null,
-    "restoreVerified": false
+    "restoreVerified": false,
+    "blocker": "B0 — VPS deploy SSH refused"
   },
   "commerce": {
     "launchProfile": "DIRECT_COMMERCE_PRODUCTION",
@@ -38,10 +51,10 @@
   },
   "status": {
     "PRODUCTION_WEB_LIVE": "BLOCKED_OPERATOR_SCOPE",
-    "PRODUCTION_API_LIVE": "NOT_RUN",
-    "PRODUCTION_ADMIN_LIVE": "BLOCKED_OPERATOR",
-    "ERP_OPERATOR_READY": "BLOCKED_EXTERNAL",
-    "IPAYMU_SANDBOX_ACCEPTED": "NOT_RUN",
+    "PRODUCTION_API_LIVE": "BLOCKED_OPERATOR (B0 SSH + B1 DNS)",
+    "PRODUCTION_ADMIN_LIVE": "BLOCKED_OPERATOR (B3/B4)",
+    "ERP_OPERATOR_READY": "BLOCKED_EXTERNAL (B14)",
+    "IPAYMU_SANDBOX_ACCEPTED": "NOT_RUN (B5-B8)",
     "IPAYMU_LIVE_ACCEPTED": "NO",
     "FULL_COMMERCE_LIVE": "NO_GO",
     "FULL_COMMERCE_NO_GO": "ACTIVE_UNTIL_GATES_PASS"
