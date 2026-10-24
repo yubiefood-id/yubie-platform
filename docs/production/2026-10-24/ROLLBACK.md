@@ -15,6 +15,8 @@ Effect: `POST /v1/checkouts` → 503 `CHECKOUT_DISABLED` before any work; the iP
 
 Freeze order under fire: admission freeze (this section) → verify webhook + reconciler still processing → Finance decision on provider-level rollback (R2) once pending queue is drained.
 
+Proof matrix (all executed in CI): `apps/api/tests/admission-freeze-recovery.test.mjs` (existing session identifiable; new sessions refused; authenticated callback for the existing session applies with exactly-once stock; redelivery after restart is a duplicate no-op; second successful transaction raises a durable exception whose outbox entry is produced under the freeze; lifting the freeze reopens checkout) and `packages/application/tests/reconcile-payments.test.mjs` ("reconciler keeps resolving payments while checkout admission is frozen"). Initial production ships with `YUBIE_CHECKOUT_ADMISSION=disabled` pinned by `scripts/tests/production-env-contract.test.mjs`.
+
 ## R2 — Roll back API/worker images
 
 ```
