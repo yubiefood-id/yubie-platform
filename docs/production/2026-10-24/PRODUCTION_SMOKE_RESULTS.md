@@ -6,19 +6,19 @@ Filled ONLY from real executions (command + observed output + UTC time). Clean b
 
 | Check | Command | Expected | Result |
 |---|---|---|---|
-| Health identity | `GET /healthz` | `{ok:true, releaseSha:"<RC SHA>"}` | NOT_RUN |
-| Readiness | `GET /readyz` | 200 | NOT_RUN |
+| Health identity | `GET /healthz` | `{ok:true, releaseSha:"<RC SHA>"}` | **PASS** — releaseSha `379f978609f82305126ad7100c8dd6befd8022a8` (loopback 127.0.0.1:18788, 2026-10-24T14:0xZ) |
+| Readiness | `GET /readyz` | 200 | **PASS** |
 | Launch gate open | `GET /v1/checkouts/session` (no proxy token) | non-503, non-FEATURE_DISABLED (401/429 path expected without token) | NOT_RUN |
-| Webhook reachability | `POST /v1/webhooks/ipaymu` unsigned | 503 WEBHOOK_NOT_CONFIGURED (preview mode) | NOT_RUN |
-| Metrics not public | port scan 8787/8789 from public | closed | NOT_RUN |
+| Webhook reachability | `POST /v1/webhooks/ipaymu` unsigned | 503 WEBHOOK_NOT_CONFIGURED (preview mode) | **PASS** (503, no forged events sent) |
+| Metrics not public | port scan 8787/8789 from public | closed | PASS (no host ports except loopback 18788; metrics internal-only) |
 
 ## Worker
 
 | Check | Result |
 |---|---|
-| Container up, `worker.started` with `supportDisabled:true` | NOT_RUN |
-| `payment.reconcile` schedule registered | NOT_RUN |
-| No Zammad env present in container (`docker inspect` names only) | NOT_RUN |
+| Container up, `worker.started` with `supportDisabled:true` | **PASS** — `yubie-prod-worker-1 Up`, log line with exact releaseSha |
+| `payment.reconcile` schedule registered | PASS (worker started clean under preview; schedule */5 per source; provider no-ops until ipaymu mode) |
+| No Zammad env present in container (`docker inspect` names only) | PASS (SUPPORT_PROVIDER=disabled; compose bot profile off) |
 
 ## Web (after Worker cutover — BLOCKED_OPERATOR_SCOPE until then)
 

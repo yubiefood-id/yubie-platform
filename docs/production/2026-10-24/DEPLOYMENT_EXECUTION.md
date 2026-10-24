@@ -101,3 +101,18 @@ No authenticated owner browser session exists in the engineering sandbox (fresh 
 - `/opt/yubie/production/docker-compose.prod.yml` staged; backup dir `/opt/yubie/backups` created.
 - Caddy truth: the ONLY ingress is RetroPick's `/opt/retropick-staging/runtime/caddy` with `/etc/retropick-staging/Caddyfile` (`admin off` → restart-only via `retropick-staging-caddy.service`); existing routes: api-staging.retropick.xyz, api-staging.yubiefood.com→127.0.0.1:18787, support.yubiefood.com→8080. Production route will be appended (api.yubiefood.com→127.0.0.1:18788) with config validation before the restart; TLS activates when DNS B1 lands.
 - **Sole remaining blocker for the backend deploy: GHCR pull credential** (packages are private; registry rejects the CLI token without `read:packages`). Device-flow grant pending owner entry; three codes expired unentered (CF3A-8315, 8669-839F, AD03-3ADE, 83F3-6809). Post-grant steps: docker login via stdin over SSH → compose pull → migrate 0001–0022 → up api+worker → pg_dump baseline + restore drill → Caddy append+validate+restart → health/host-header verification.
+
+---
+
+## PRODUCTION_API_DEPLOYED — 2026-10-24 ~14:05Z
+
+Executed after the owner provisioned GHCR registry auth on the VPS (root docker context; PAT flagged for rotation — pasted in chat).
+
+1. **Pull verified** under sudo/root: `ghcr.io/yubiefood-id/yubie-api:379f978…` downloaded.
+2. **Target reconciled**: newest published RC = 40098640091 @ `379f978` (= current main, includes PR #48 compose). Older RCs (d1db695, 981d81c) superseded. Schedule-spawned duplicate waiter for the same SHA cancelled (already published).
+3. **Pre-execution inspection passed**: env (preview / admission=disabled / support=disabled / lots / GOOGLE_CLIENT_ID present), compose (127.0.0.1:18788 loopback publish), script SHA guard = 379f978.
+4. **Deployed**: compose project `yubie-prod` — postgres healthy → migrate (0001–0022; schema_migrations max `0022_waitlist_phone.sql`) → api **healthy** + worker **up** (`worker.started supportDisabled:true releaseSha 379f978`). Bot profile off.
+5. **Baseline backup + restore drill**: `prod-baseline-379f978-20261024T140946Z.sql` (156K); drill restored 45 public tables into a scratch DB, then dropped. (Script note: step 4 originally died on a sh-vs-bash `${SHA:0:7}` substitution — steps rerun via bash; script to be fixed in a follow-up.)
+6. **Verification (loopback)**: `/healthz` ok + exact SHA; `/readyz` 200; `POST /v1/checkouts` with valid `x-api-proxy-token` → **503 CHECKOUT_DISABLED** (fail-closed posture proven in production); webhook shape 503 WEBHOOK_NOT_CONFIGURED (preview); unauthenticated requests → 401 PROXY_UNAUTHORIZED (trust boundary first).
+7. **Caddy**: `/etc/retropick-staging/Caddyfile` backed up, `api.yubiefood.com → 127.0.0.1:18788` appended, `caddy validate` OK, `retropick-staging-caddy` restarted — api-staging.yubiefood.com 200, support.yubiefood.com 200, api-staging.retropick.xyz answering (Zammad/RetroPick/staging untouched). New host: HTTP→308 wired; TLS activates when DNS lands.
+8. **Public reachability blocker (updated B1)**: the zone carries a **wildcard `*.yubiefood.com → 198.54.117.242`**, so `api.yubiefood.com` currently lands on the wildcard, not the VPS. Fix: create a SPECIFIC A record `api.yubiefood.com → 84.247.158.36` (DNS-only) — specific records override the wildcard.
