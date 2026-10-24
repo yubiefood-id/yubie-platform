@@ -3,17 +3,23 @@
   "releaseDate": "2026-10-24",
   "targetDomain": "https://yubiefood.com",
   "source": {
-    "gitSha": "678725463a95b500e772403a72ef807f8662d152",
+    "gitSha": "d1db6956d111033bb0493b2bcc18b982e38d456a",
     "prs": [
       34,
       35,
       36,
       37,
       38,
-      39
+      39,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46
     ],
     "ciRunId": "40061874864 (bdfbaaa success) + per-PR green; post-merge main run in progress",
-    "ciStatus": "PER_PR_GREEN",
+    "ciStatus": "GREEN (run 40087833766 on d1db695, 5/5)",
     "prCheckRuns": {
       "38": "flake fix \u2014 all 5 green (run 40062588066)",
       "39": "checkout admission switch \u2014 all 5 green (run 40064117901)"
@@ -21,40 +27,35 @@
     "notes": "Flaky browser gate on run 40060240923 root-caused (hydration duplicate raced strict-mode locator) and fixed in PR #38, not suppressed."
   },
   "releaseCandidate": {
-    "workflowRunId": 40065176432,
-    "status": "RC_WAITING_APPROVAL",
-    "targetSha": "678725463a95b500e772403a72ef807f8662d152",
-    "blocker": "B17 \u2014 GitHub blocks self-approval when the same account dispatched the run; owner must approve via web UI session",
-    "url": "https://github.com/yubiefood-id/yubie-platform/actions/runs/40065176432",
-    "supersededRuns": [
-      {
-        "id": 40060244646,
-        "sha": "de837d0",
-        "disposition": "CANCELLED (stale target after main moved)"
-      },
-      {
-        "id": 40064081145,
-        "sha": "e4799b3",
-        "disposition": "CANCELLED (dispatched before PR #39 merged)"
-      }
-    ]
+    "workflowRunId": 40088633288,
+    "status": "RC_PUBLISHED",
+    "targetSha": "d1db6956d111033bb0493b2bcc18b982e38d456a",
+    "dispatchActor": "github-actions[bot] (green-main CI dispatch; two-person separation \u2014 approved by mAsyamJ as required reviewer)",
+    "approvedBy": "mAsyamJ (deployment 7297770292)",
+    "url": "https://github.com/yubiefood-id/yubie-platform/actions/runs/40088633288",
+    "supersededRuns": "40060244646, 40064081145, 40065176432, 40082509470, 40084112888 (all cancelled stale)"
   },
   "images": {
     "yubie-api": {
-      "digest": "PENDING_RC_APPROVAL",
+      "tag": "ghcr.io/yubiefood-id/yubie-api:d1db6956d111033bb0493b2bcc18b982e38d456a",
+      "digest": "sha256:10ff4dbafc4d...",
       "deployed": false
     },
     "yubie-worker": {
-      "digest": "PENDING_RC_APPROVAL",
+      "tag": "ghcr.io/yubiefood-id/yubie-worker:d1db6956d111033bb0493b2bcc18b982e38d456a",
+      "digest": "sha256:3a0bf1558fcb...",
       "deployed": false
     },
     "yubie-admin": {
-      "digest": "PENDING_RC_APPROVAL",
+      "tag": "ghcr.io/yubiefood-id/yubie-admin:d1db6956d111033bb0493b2bcc18b982e38d456a",
+      "digest": "sha256:43a0aea29dc7...",
       "deployed": false
     },
     "yubie-bot": {
-      "digest": "PENDING_RC_APPROVAL_BUILT_NOT_DEPLOYED",
-      "deployed": false
+      "tag": "ghcr.io/yubiefood-id/yubie-bot:d1db6956d111033bb0493b2bcc18b982e38d456a",
+      "digest": "sha256:4aed7cca643a...",
+      "deployed": false,
+      "note": "built, intentionally NOT deployed (WhatsApp deferred)"
     }
   },
   "web": {
@@ -91,5 +92,12 @@
     "IPAYMU_LIVE_ACCEPTED": "NO",
     "FULL_COMMERCE_LIVE": "NO_GO",
     "FULL_COMMERCE_NO_GO": "ACTIVE_UNTIL_GATES_PASS"
+  },
+  "deployReadiness": {
+    "vpsAccess": "RESTORED (release-agent key; authorized_keys append-only, backup kept)",
+    "productionEnv": "/etc/yubie/production.env staged (0600 root; 21 vars; GOOGLE_CLIENT_ID copied server-side from staging)",
+    "compose": "/opt/yubie/production/docker-compose.prod.yml staged (project yubie-prod)",
+    "caddy": "shared RetroPick Caddy identified (/etc/retropick-staging/Caddyfile, admin off, restart-only)",
+    "soleBlocker": "GHCR pull credential: device-flow scope grant pending owner entry (read:packages)"
   }
 }
