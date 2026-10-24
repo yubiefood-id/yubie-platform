@@ -235,4 +235,5 @@ jobs:
       - name: Dispatch release-candidate for this SHA
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: gh workflow run release-candidate.yml --ref "${{ github.ref }}" -f sha="${{ github.sha }}"
