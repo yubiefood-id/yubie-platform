@@ -239,6 +239,30 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      # Transport fallback for deployment hosts without a GHCR read:packages
+      # credential: export the exact published images (same digests, pulled
+      # back from GHCR inside this job) as a workflow artifact, which any
+      # authorized repo identity can download. This does NOT bypass any
+      # publication gate — the environment approval above already authorized
+      # these artifacts; it only adds a second, equally access-controlled
+      # transport path beside the container registry.
+      - name: Export published images as artifact
+        run: |
+          mkdir -p release-images
+          for image in yubie-api yubie-worker yubie-admin yubie-bot; do
+            full="ghcr.io/${{ github.repository_owner }}/${image}:${TARGET_SHA}"
+            docker pull --quiet "$full"
+            docker save "$full" -o "release-images/${image}.tar"
+          done
+          ls -lh release-images/
+      - name: Upload release images
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-images-${{ env.TARGET_SHA }}
+          path: release-images/*.tar
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Report digests
         run: |
           {
