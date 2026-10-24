@@ -211,3 +211,30 @@ test("attach_failed draft: provider session ACTIVE gets cancelled and stock rele
   assert.equal(report2.value.flaggedAmbiguous, 1);
   assert.equal(deps2.orders.items.get(seeded.order.id).status, "draft");
 });
+
+test("the reconciler keeps resolving payments while checkout admission is frozen", async () => {
+  // Incident posture (ROLLBACK.md R1): YUBIE_CHECKOUT_ADMISSION=disabled must
+  // never affect recovery of in-flight payments — the reconciler is the
+  // financial safety net while new sessions are frozen.
+  const previous = process.env.YUBIE_CHECKOUT_ADMISSION;
+  process.env.YUBIE_CHECKOUT_ADMISSION = "disabled";
+  try {
+    const deps = makeDeps("COMPLETED");
+    await seedOrder(deps, {});
+
+    const report = await reconcilePayments(deps);
+    assert.equal(report.value.polled, 1);
+    assert.equal(report.value.transitioned, 1);
+    const order = [...deps.orders.items.values()].at(-1);
+    const payment = [...deps.payments.items.values()].at(-1);
+    assert.equal(order.status, "paid");
+    assert.equal(payment.status, "succeeded");
+
+    // Repeat passes are idempotent, not double-applying.
+    const repeated = await reconcilePayments(deps);
+    assert.equal(repeated.value.transitioned, 0);
+  } finally {
+    if (previous === undefined) delete process.env.YUBIE_CHECKOUT_ADMISSION;
+    else process.env.YUBIE_CHECKOUT_ADMISSION = previous;
+  }
+});
