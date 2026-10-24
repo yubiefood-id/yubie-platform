@@ -1,0 +1,41 @@
+// Cloudflare Workers deployment contract for the Yubie web runtime (PRODUCTION).
+//
+// Same verified Vinext worker bundle as staging (scripts/build-verified.sh);
+// this file only describes the production deployment:
+//
+//   npm run build                                  # in apps/web — produces dist/
+//   npx wrangler deploy -c wrangler.prod.jsonc
+//   npx wrangler secret put API_PROXY_TOKEN -c wrangler.prod.jsonc
+//
+// Build-time profile note: the worker bundle must be built with
+// NEXT_PUBLIC_YUBIE_LAUNCH_PROFILE=DIRECT_COMMERCE_PRODUCTION so customer
+// routes render; the static catalog export path rejects that profile by design.
+//
+// Cutover order (ADR-013 + 2026-10-24/ROLLBACK.md):
+//   1. Deploy first to the candidate hostname (next.yubiefood.com route below),
+//      run the browser acceptance suite against it.
+//   2. Only after acceptance + operator approval, switch the route pattern to
+//      the apex yubiefood.com. The Vercel static catalog stays deployed and
+//      untouched as the rollback origin.
+//
+// Preflight requirements before any production deploy:
+//   - Wrangler token with Workers Scripts:Edit + Zone Workers Routes:Edit.
+//   - api.yubiefood.com DNS + production API live and healthy.
+//   - Snapshot prior apex DNS/Worker state for rollback.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yubie-web-production",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "YUBIE_API_ORIGIN": "https://api.yubiefood.com"
+  },
+  // Candidate-first cutover: accept on next.yubiefood.com before touching the
+  // apex. Switch this pattern to "yubiefood.com" only at the approved cutover.
+  "routes": [{ "pattern": "next.yubiefood.com", "custom_domain": true }]
+  // Secrets (set via `wrangler secret put`, never committed):
+  //   API_PROXY_TOKEN — authenticates the web→api server hop (production value).
+}

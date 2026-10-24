@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "releaseDate": "2026-10-24",
+  "targetDomain": "https://yubiefood.com",
+  "source": {
+    "gitSha": "PENDING_PR_MERGE",
+    "prs": [34, 35, 36],
+    "ciRunId": null,
+    "ciStatus": "PENDING"
+  },
+  "images": {
+    "yubie-api": { "digest": "PENDING_RC", "deployed": false },
+    "yubie-worker": { "digest": "PENDING_RC", "deployed": false },
+    "yubie-admin": { "digest": "PENDING_RC", "deployed": false },
+    "yubie-bot": { "digest": "PENDING_RC_BUILT_NOT_DEPLOYED", "deployed": false }
+  },
+  "web": {
+    "runtime": "cloudflare-worker",
+    "config": "apps/web/wrangler.prod.jsonc",
+    "deployedVersion": null,
+    "fallback": "vercel-static-catalog (live, untouched)"
+  },
+  "database": {
+    "migrationLevel": "0021",
+    "backupBaseline": null,
+    "restoreVerified": false
+  },
+  "commerce": {
+    "launchProfile": "DIRECT_COMMERCE_PRODUCTION",
+    "commerceProvider": "preview",
+    "ipaymuEnv": null,
+    "livePaymentsAuthorized": false
+  },
+  "support": {
+    "provider": "disabled",
+    "whatsapp": "DEFERRED",
+    "zammadProductionUntouched": true
+  },
+  "status": {
+    "PRODUCTION_WEB_LIVE": "BLOCKED_OPERATOR_SCOPE",
+    "PRODUCTION_API_LIVE": "NOT_RUN",
+    "PRODUCTION_ADMIN_LIVE": "BLOCKED_OPERATOR",
+    "ERP_OPERATOR_READY": "BLOCKED_EXTERNAL",
+    "IPAYMU_SANDBOX_ACCEPTED": "NOT_RUN",
+    "IPAYMU_LIVE_ACCEPTED": "NO",
+    "FULL_COMMERCE_LIVE": "NO_GO",
+    "FULL_COMMERCE_NO_GO": "ACTIVE_UNTIL_GATES_PASS"
+  }
+}
