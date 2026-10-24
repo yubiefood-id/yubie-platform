@@ -164,3 +164,12 @@ test("ipaymu production requires explicit production environment and exact produ
   // Sandbox env keeps parsing with its own exact origin.
   assert.equal(parseCommerceRuntimeConfig(IPAYMU_BASE).provider, "ipaymu");
 });
+
+test("checkout admission switch parses explicitly and fails closed on typos", () => {
+  assert.equal(parseCommerceRuntimeConfig(IPAYMU_BASE).checkoutAdmission, "enabled");
+  assert.equal(parseCommerceRuntimeConfig({ ...IPAYMU_BASE, YUBIE_CHECKOUT_ADMISSION: "disabled" }).checkoutAdmission, "disabled");
+  assert.throws(
+    () => parseCommerceRuntimeConfig({ ...IPAYMU_BASE, YUBIE_CHECKOUT_ADMISSION: "disbled" }),
+    /YUBIE_CHECKOUT_ADMISSION must be one of/,
+  );
+});

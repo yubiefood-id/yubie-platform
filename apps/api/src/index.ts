@@ -341,6 +341,15 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
   }
 
   if (request.method === "POST" && url.pathname === "/v1/checkouts" && process.env.COMMERCE_PROVIDER !== "disabled") {
+    // Payment-safe emergency switch (ROLLBACK.md R1): stop NEW payable
+    // sessions while keeping provider callbacks, reconciliation, recovery
+    // reads and reservation resolution fully alive for in-flight orders.
+    // COMMERCE_PROVIDER stays on the PSP until every pending payment is
+    // authoritatively resolved — flipping it to preview would 503 the
+    // webhook route and no-op the reconciler.
+    if (process.env.YUBIE_CHECKOUT_ADMISSION === "disabled") {
+      return json({ ok: false, code: "CHECKOUT_DISABLED" }, { status: 503, headers: { "cache-control": "no-store" } });
+    }
     const rawBody = await readBoundedText(request, MAX_JSON_BYTES);
     if (rawBody === null) return tooLarge();
     let parsedJson: unknown = null;

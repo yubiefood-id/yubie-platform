@@ -352,16 +352,26 @@ function configMessage(error: unknown): string {
 export type CommerceProviderName = "preview" | "xendit" | "ipaymu" | "disabled";
 export type PurchaseOptionsSourceName = "static" | "database";
 export type InventoryModeName = "none" | "lots";
+/**
+ * Payment-safe emergency lever: "disabled" stops NEW checkout session
+ * creation only — provider callbacks, reconciliation, recovery reads and
+ * reservation resolution keep running (ROLLBACK.md R1). Default enabled;
+ * typos fail startup instead of silently freezing or enabling checkout.
+ */
+export type CheckoutAdmissionName = "enabled" | "disabled";
 
 const COMMERCE_PROVIDER_NAMES: readonly CommerceProviderName[] = ["preview", "xendit", "ipaymu", "disabled"];
 const PURCHASE_OPTIONS_SOURCE_NAMES: readonly PurchaseOptionsSourceName[] = ["static", "database"];
 const INVENTORY_MODE_NAMES: readonly InventoryModeName[] = ["none", "lots"];
+const CHECKOUT_ADMISSION_NAMES: readonly CheckoutAdmissionName[] = ["enabled", "disabled"];
 
 export interface CommerceRuntimeConfig {
   provider: CommerceProviderName;
   purchaseOptionsSource: PurchaseOptionsSourceName;
   /** "lots" gates checkout on released, unexpired lot stock (food-safety). */
   inventoryMode: InventoryModeName;
+  /** Emergency NEW-session freeze; never affects callbacks/reconciliation. */
+  checkoutAdmission: CheckoutAdmissionName;
   /** Whether DATABASE_URL is present. The value itself never leaves this boundary. */
   databaseConfigured: boolean;
   /** Public web origin used for Xendit return URLs; validated https when xendit. */
@@ -427,6 +437,21 @@ export function parseInventoryModeName(raw: string | undefined): InventoryModeNa
 }
 
 /**
+ * Resolve the checkout admission mode. Default enabled. A typo fails startup
+ * rather than silently freezing (or re-enabling) new payable checkouts.
+ */
+export function parseCheckoutAdmissionName(raw: string | undefined): CheckoutAdmissionName {
+  if (raw === undefined || raw === "") return "enabled";
+  const match = CHECKOUT_ADMISSION_NAMES.find((name) => name === raw.toLowerCase());
+  if (!match) {
+    throw new RuntimeConfigError(
+      `YUBIE_CHECKOUT_ADMISSION must be one of: ${CHECKOUT_ADMISSION_NAMES.join(", ")} (received "${raw}")`,
+    );
+  }
+  return match;
+}
+
+/**
  * Validate commerce runtime configuration. First-party payments (xendit) fail
  * closed: they require durable PostgreSQL, the provider secret, the webhook
  * callback token, the business id used for webhook validation, and an https
@@ -454,6 +479,13 @@ export function parseCommerceRuntimeConfig(env: RuntimeEnvSource = process.env):
   let inventoryMode: InventoryModeName = "none";
   try {
     inventoryMode = parseInventoryModeName(env.INVENTORY_MODE);
+  } catch (error) {
+    errors.push(configMessage(error));
+  }
+
+  let checkoutAdmission: CheckoutAdmissionName = "enabled";
+  try {
+    checkoutAdmission = parseCheckoutAdmissionName(env.YUBIE_CHECKOUT_ADMISSION);
   } catch (error) {
     errors.push(configMessage(error));
   }
@@ -550,7 +582,7 @@ export function parseCommerceRuntimeConfig(env: RuntimeEnvSource = process.env):
     throw new RuntimeConfigError(errors.join("; "));
   }
 
-  return { provider, purchaseOptionsSource, inventoryMode, databaseConfigured, appOrigin };
+  return { provider, purchaseOptionsSource, inventoryMode, checkoutAdmission, databaseConfigured, appOrigin };
 }
 
 /** Non-throwing variant for readiness endpoints and operator tooling. */
