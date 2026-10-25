@@ -16,7 +16,6 @@ for (const path of publicRoutes) {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.locator('a[href^="mailto:hello@yubiefood.com"]').first()).toBeVisible();
     const contactBar = page.locator(".contact-bar");
-    await expect(contactBar.getByRole("link", { name: "WhatsApp Yubie" })).toHaveAttribute("href", siteConfig.social.whatsappCommunity);
     await expect(contactBar.getByRole("link", { name: "Feedback Produk Yubie" })).toHaveAttribute("href", siteConfig.social.feedbackForm);
     await expect(page.locator('a[href^="/checkout"], a[href^="/cart"], a[href^="/account"], a[href^="/login"], form')).toHaveCount(0);
     await expect(page.locator('meta[name="codex-preview"]')).toHaveCount(0);

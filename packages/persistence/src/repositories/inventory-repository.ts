@@ -3,7 +3,7 @@ import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { ok, type UseCaseResult } from "@yubie/domain";
 import type { InventoryLot, InventoryMovement } from "@yubie/domain";
 import { InsufficientInventoryError, type InventoryRepository, type InventoryReserveInput, type InventoryReserveOutcome } from "@yubie/application";
-import { aggregateLineQuantities, lotIsSellable } from "@yubie/domain";
+import { expandInventoryDemand, inventoryCapacity, lotIsSellable, productFamilies, type InventorySkuPolicy } from "@yubie/domain";
 import type { Database } from "../client.js";
 import { inventoryLots, inventoryMovements, inventoryReservations } from "../schema/index.js";
 
@@ -23,7 +23,10 @@ export class PostgresInventoryRepository implements InventoryRepository {
 
   async reserveForOrder(input: InventoryReserveInput): Promise<UseCaseResult<InventoryReserveOutcome>> {
     const onDate = input.now.slice(0, 10);
-    const aggregated = aggregateLineQuantities(input.lines);
+    const policies = await this.policies(true);
+    let aggregated;
+    try { aggregated = expandInventoryDemand(input.lines, policies); }
+    catch { const line=input.lines[0]!; throw new InsufficientInventoryError(line.productId,line.sizeId,line.quantity,0); }
 
     for (const line of aggregated) {
       const lots = await this.lockSellableLots(line.productId, line.sizeId, onDate);
@@ -96,6 +99,12 @@ export class PostgresInventoryRepository implements InventoryRepository {
       .returning({ lotId: inventoryReservations.lotId, productId: inventoryReservations.productId, sizeId: inventoryReservations.sizeId });
 
     for (const row of flipped) {
+      const unsafe = await this.database.db.execute(sql`SELECT id FROM inventory_lots WHERE id=${row.lotId} AND (status IN ('received','quarantined','recalled') OR expiry_date<=${now.slice(0,10)}::date OR coalesce(length(trim(qc_approval_ref)),0)=0) FOR UPDATE`);
+      if(unsafe.length){
+        await this.database.db.execute(sql`UPDATE orders SET fulfillment_hold='lot_unavailable_after_reservation' WHERE id=${orderId}`);
+        await this.database.db.execute(sql`INSERT INTO audit_events(id,actor,action,resource_type,resource_id,occurred_at) VALUES(${"audit_"+randomUUID()},'payment-settlement','inventory.fulfillment_hold','order',${orderId},${now}::timestamptz)`);
+        await this.database.db.execute(sql`INSERT INTO outbox_events(id,event_type,aggregate_type,aggregate_id,payload_json,dedupe_key,status,available_at,attempt_count) VALUES(${"outbox_"+randomUUID()},'inventory.fulfillment_hold','order',${orderId},${JSON.stringify({orderId,reason:"lot_unavailable_after_reservation"})},${"inventory:hold:"+orderId+":"+row.lotId},'pending',${now}::timestamptz,0) ON CONFLICT(dedupe_key) DO NOTHING`);
+      }
       // Quantity was already deducted at reserve time; consume is a pure
       // lifecycle close with a zero-delta movement for lot traceability.
       await this.recordMovement(row.lotId, row.productId, row.sizeId, "consume", 0, orderId, "payment_confirmed", now);
@@ -112,6 +121,7 @@ export class PostgresInventoryRepository implements InventoryRepository {
           eq(inventoryLots.productId, productId),
           eq(inventoryLots.sizeId, sizeId),
           eq(inventoryLots.status, "released"),
+          sql`qc_approval_ref IS NOT NULL AND length(trim(qc_approval_ref)) > 0 AND released_at IS NOT NULL`,
           gt(inventoryLots.expiryDate, onDate.slice(0, 10)),
         ),
       )
@@ -129,6 +139,7 @@ export class PostgresInventoryRepository implements InventoryRepository {
           eq(inventoryLots.productId, productId),
           eq(inventoryLots.sizeId, sizeId),
           eq(inventoryLots.status, "released"),
+          sql`qc_approval_ref IS NOT NULL AND length(trim(qc_approval_ref)) > 0 AND released_at IS NOT NULL`,
           gt(inventoryLots.expiryDate, onDate),
         ),
       )
@@ -138,6 +149,32 @@ export class PostgresInventoryRepository implements InventoryRepository {
       .limit(200)
       .for("update");
     return rows.map(mapLotRow).filter((lot) => lotIsSellable(lot, `${onDate}T00:00:00.000Z`));
+  }
+
+  private async policies(lock = false): Promise<InventorySkuPolicy[]> {
+    const rows = await this.database.db.execute(sql`SELECT product_id,size_id,version,components,approval_ref FROM inventory_sku_policies ORDER BY product_id,size_id ${lock ? sql`FOR SHARE` : sql``}`);
+    return rows.map(row=>({productId:String(row.product_id),sizeId:String(row.size_id),version:Number(row.version),approvalRef:String(row.approval_ref),components:row.components as InventorySkuPolicy["components"]}));
+  }
+
+  async availability(onDate: string) {
+    const policies = await this.policies();
+    const rows = await this.database.db.execute(sql`SELECT product_id,size_id,sum(quantity_on_hand)::integer AS quantity FROM inventory_lots WHERE status='released' AND expiry_date>${onDate.slice(0,10)}::date AND released_at IS NOT NULL AND length(trim(qc_approval_ref))>0 GROUP BY product_id,size_id`);
+    const physical = rows.map(row=>({productId:String(row.product_id),sizeId:String(row.size_id),quantity:Number(row.quantity)}));
+    return productFamilies.flatMap(product=>product.sizes.map(size=>{
+      const policy=policies.find(p=>p.productId===product.id&&p.sizeId===size.id);
+      const maxQuantity=policy?inventoryCapacity(policy,physical):0;
+      return {productId:product.id,sizeId:size.id,maxQuantity,status:policy?(maxQuantity>0?"available" as const:"unavailable" as const):"unverified" as const};
+    }));
+  }
+
+  async canFulfill(lines: Array<{productId:string;sizeId:string;quantity:number}>, now:string): Promise<boolean> {
+    let demand;
+    try { demand=expandInventoryDemand(lines,await this.policies()); } catch { return false; }
+    for(const line of demand) {
+      const lots=await this.listSellable(line.productId,line.sizeId,now);
+      if(!lots.ok || lots.value.reduce((sum,lot)=>sum+lot.quantityOnHand,0)<line.quantity)return false;
+    }
+    return true;
   }
 
   private recordMovement(

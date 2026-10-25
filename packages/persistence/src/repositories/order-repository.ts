@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, isNotNull, lt, inArray, or, sql } from "drizzle-orm";
-import { ok, type UseCaseResult } from "@yubie/domain";
+import { ok, FINANCIAL_EXCEPTION_STATES, type UseCaseResult } from "@yubie/domain";
 import type { OrderLineRecord, OrderRecord, OrderShipping, PaymentEventRecord, PaymentRecord } from "@yubie/domain";
 import { DuplicatePaymentIntentError } from "@yubie/application";
 import type { OrderRepository, PaymentEventAppendOutcome, PaymentEventRepository, PaymentRepository } from "@yubie/application";
@@ -82,6 +82,10 @@ export class PostgresOrderRepository implements OrderRepository {
 }
 
 export class PostgresPaymentRepository implements PaymentRepository {
+  async hasFinancialException(){
+    const rows=await this.database.db.execute(sql`SELECT EXISTS(SELECT 1 FROM order_payments p JOIN orders o ON o.id=p.order_id WHERE p.reconciliation_state IN ('provider_mismatch','late_success_after_terminal','multiple_successful_transactions','other_payment_unresolved') OR (p.status='succeeded' AND o.status NOT IN ('paid','processing','shipped','completed'))) AS blocked`);
+    return rows[0]?.blocked===true;
+  }
   constructor(private readonly database: Database) {}
 
   async findCheckoutGuestOwner(guestPrincipal: string): Promise<string | null> {
@@ -191,7 +195,7 @@ export class PostgresPaymentRepository implements PaymentRepository {
         expiresAt: payment.expiresAt,
         ...(payment.providerBusinessId !== undefined ? { providerBusinessId: payment.providerBusinessId } : {}),
         ...(payment.providerPaymentId !== undefined ? { providerPaymentId: payment.providerPaymentId } : {}),
-        ...(payment.reconciliationState !== undefined ? { reconciliationState: payment.reconciliationState } : {}),
+        ...(payment.reconciliationState !== undefined ? { reconciliationState: sql`CASE WHEN ${orderPayments.reconciliationState} IN (${sql.join(FINANCIAL_EXCEPTION_STATES.map(state=>sql`${state}`),sql`,`)}) THEN ${orderPayments.reconciliationState} ELSE ${payment.reconciliationState??null} END` } : {}),
         updatedAt: payment.updatedAt,
       },
     });
@@ -238,6 +242,7 @@ function mapOrderRow(row: typeof firstPartyOrders.$inferSelect): OrderRecord {
   return {
     id: row.id,
     checkoutRef: row.checkoutRef,
+    fulfillmentHold: row.fulfillmentHold,
     checkoutPublicToken: row.checkoutPublicToken,
     status: row.status as OrderRecord["status"],
     userId: row.userId,

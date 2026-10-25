@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from "react";
 import {
   MAX_CART_LINE_QUANTITY,
   productFamilies,
@@ -65,6 +65,7 @@ export interface CartDisplayLine {
 }
 
 interface CartContextValue {
+  availability: Array<{productId:string;sizeId:string;maxQuantity:number;status:string}> | null;
   lines: CartLine[];
   hydrated: boolean;
   isOpen: boolean;
@@ -89,7 +90,21 @@ function isStoredLine(value: unknown): value is CartLine {
 }
 
 export function CartProvider({ children }: { children: ReactNode }) {
+  const [availability,setAvailability]=useState<CartContextValue["availability"]>(null);
   const [state, dispatch] = useReducer(cartReducer, { lines: [], hydrated: false, open: false, promoCode: null });
+  useEffect(()=>{
+    const abort=new AbortController();
+    const refresh=()=>fetch("/api/catalog/availability",{cache:"no-store",signal:abort.signal}).then(async response=>{
+      const body=await response.json();
+      if(!response.ok||!Array.isArray(body.data))throw new Error("Availability unavailable");
+      if(!abort.signal.aborted)setAvailability(body.data.filter((row: {maxQuantity?:unknown})=>Number.isSafeInteger(row.maxQuantity)&&Number(row.maxQuantity)>=0));
+    }).catch(()=>{if(!abort.signal.aborted)setAvailability(null);});
+    void refresh();
+    const onFocus=()=>{void refresh();};
+    window.addEventListener("focus",onFocus);
+    const interval=setInterval(onFocus,30000);
+    return()=>{abort.abort();window.removeEventListener("focus",onFocus);clearInterval(interval);};
+  },[]);
 
   useEffect(() => {
     let lines: CartLine[] = [];
@@ -144,6 +159,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<CartContextValue>(() => ({
+    availability,
     lines: state.lines,
     hydrated: state.hydrated,
     isOpen: state.open,
@@ -157,7 +173,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     promoCode: state.promoCode,
     applyPromo: (code) => dispatch({ type: "applyPromo", code }),
     clearPromo: () => dispatch({ type: "clearPromo" }),
-  }), [state, addItem]);
+  }), [state, addItem, availability]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

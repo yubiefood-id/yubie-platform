@@ -33,6 +33,14 @@ const input = {
   items: [{ referenceId: "flour-250g", name: "Yubie Flour 250g", quantity: 1, netUnitAmount: 35000 }],
 };
 
+test("reconciliation uses the numeric payment id without mistaking a redirect SessionID for it",async()=>{
+ let body=null;
+ const session=provider(async(_url,init)=>{body=JSON.parse(init.body);return{ok:true,status:200,json:async()=>({Data:{Status:1,SessionId:"uuid-session",ReferenceId:"co_test",Amount:35000}})};});
+ const result=await session.getPaymentSession("uuid-session",{providerPaymentId:"123456",referenceId:"co_test"});
+ assert.equal(result.ok,true);assert.deepEqual(body,{transactionId:"123456"});
+ assert.equal(result.value.providerSessionId,"uuid-session");
+});
+
 test("create signs the exact JSON body and allowlists the sandbox redirect", async () => {
   const calls = [];
   const session = provider(async (url, init) => {

@@ -87,6 +87,7 @@ export interface OrderRepository {
 }
 
 export interface PaymentRepository {
+  hasFinancialException():Promise<boolean>;
   findCheckoutGuestOwner(guestPrincipal: string): Promise<string | null>;
   listCheckoutGuestPrincipals(userId: string): Promise<string[]>;
   bindCheckoutGuest(guestPrincipal: string, userId: string, now: string): Promise<boolean>;
@@ -116,6 +117,7 @@ export interface PaymentEventRepository {
 }
 
 export interface PaymentSessionHandle {
+  currency?: string | null;
   provider: PaymentProviderKind;
   providerSessionId: string;
   redirectUrl: string;
@@ -128,6 +130,15 @@ export interface PaymentSessionHandle {
   /** Merchant reference and amount as reported by the provider's own lookup. */
   referenceId?: string | null;
   amount?: number | null;
+}
+
+/** Signature/merchant checked at ingress; no credentials or raw callback PII. */
+export interface VerifiedPaymentNotification {
+  referenceId:string; amount:number; currency:string|null; trxId:string|null;
+  sessionId:string|null; payloadHash:string;
+}
+export interface PaymentNotificationInbox {
+  receive(notification:VerifiedPaymentNotification):Promise<"received"|"duplicate">;
 }
 
 export interface CreatePaymentSessionInput {
@@ -155,7 +166,7 @@ export interface CreatePaymentSessionInput {
  */
 export interface PaymentProviderPort {
   createPaymentSession(input: CreatePaymentSessionInput): Promise<UseCaseResult<PaymentSessionHandle>>;
-  getPaymentSession(providerSessionId: string): Promise<UseCaseResult<PaymentSessionHandle | null>>;
+  getPaymentSession(providerSessionId: string, lookup?: {providerPaymentId?:string|null;referenceId?:string}): Promise<UseCaseResult<PaymentSessionHandle | null>>;
   cancelPaymentSession(providerSessionId: string): Promise<UseCaseResult<{ accepted: boolean }>>;
 }
 
@@ -211,6 +222,8 @@ export type IdempotencyClaimOutcome =
  * conflict, never a silent re-execute.
  */
 export interface IdempotencyRepository {
+  attachResource(record: Omit<IdempotencyClaim,"createdAt"|"requestHash">,orderId:string):Promise<UseCaseResult<void>>;
+  findResources(principals:string[],idempotencyKey:string):Promise<UseCaseResult<string[]>>;
   /** Read only: recover an existing attempt before applying today's catalog rules. */
   lookup(record: Omit<IdempotencyClaim, "createdAt">): Promise<UseCaseResult<Extract<IdempotencyClaimOutcome, { status: "duplicate" }> | null>>;
   claim(record: IdempotencyClaim): Promise<UseCaseResult<IdempotencyClaimOutcome>>;
@@ -298,6 +311,8 @@ export class DuplicatePaymentIntentError extends Error {
  * are locked so concurrent checkouts cannot oversell.
  */
 export interface InventoryRepository {
+  availability?(onDate: string): Promise<Array<{productId:string;sizeId:string;maxQuantity:number;status:"available"|"unavailable"|"unverified"}>>;
+  canFulfill?(lines: InventoryReserveLine[], onDate: string): Promise<boolean>;
   reserveForOrder(input: InventoryReserveInput): Promise<UseCaseResult<InventoryReserveOutcome>>;
   /** Releases the order's active reservations and restores lot quantities exactly once. */
   releaseForOrder(orderId: string, reason: string, now: string): Promise<UseCaseResult<{ released: number }>>;
@@ -344,6 +359,7 @@ export interface GrowthRepository {
 
 /** Repositories sharing one transaction, handed to TransactionManager work. */
 export interface TransactionalRepositories {
+  shipping?: { authorize(city: string, now: string): Promise<{policy:"free_promotional";amount:number;reason:string}|null> };
   customerIdentity?: import("./ports/customer-identity.js").CustomerIdentityRepository;
   customerAddresses?: import("./ports/customer-address.js").CustomerAddressRepository;
   promotions?: import("./ports/promotions.js").PromotionRepository;

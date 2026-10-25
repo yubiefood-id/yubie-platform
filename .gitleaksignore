@@ -8,3 +8,5 @@ e2e3840029486695768ab51bf411f6f36323ef99:packages/application/tests/otp-cryptogr
 # Reviewed truncated GHCR image digests in the release manifest — public
 # content-addressable identifiers published in the CI job summary, not secrets.
 e773facded3375813b9d4ea15c68c7d113e9bdd8:docs/production/2026-10-24/RELEASE_MANIFEST.json:generic-api-key:40
+# Public backend Git commit SHA recorded as release evidence, not a credential.
+fe8366a1a46376d901ef4489082b31ffd81dffd9:docs/production/2026-10-25/RELEASE_REPORT.md:generic-api-key:14

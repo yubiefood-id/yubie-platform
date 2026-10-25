@@ -17,13 +17,15 @@
     "db:migrate": "node dist/scripts/migrate.js",
     "db:seed": "node dist/scripts/seed.js",
     "db:seed:assistant": "node dist/scripts/seed-assistant.js",
-    "db:reset": "node dist/scripts/reset.js"
+    "db:reset": "node dist/scripts/reset.js",
+    "inventory:onboard": "node dist/scripts/inventory-onboard.js"
   },
   "dependencies": {
     "@yubie/application": "*",
     "@yubie/domain": "*",
     "drizzle-orm": "0.45.2",
-    "postgres": "3.4.7"
+    "postgres": "3.4.7",
+    "@yubie/validation": "*"
   },
   "devDependencies": {
     "drizzle-kit": "0.31.10"

@@ -79,8 +79,8 @@ availability never overrides correctness.
 
 ## Ambiguous payment procedure
 
-1. Keep the storefront/provider mode unchanged. If broad impact exists, return
-   checkout to preview through the approved configuration/deploy path.
+1. Keep the storefront/provider mode unchanged. If broad impact exists, set
+   `YUBIE_CHECKOUT_ADMISSION=disabled` through the approved configuration/deploy path, preserving the PSP.
 2. Record `x-request-id`, `checkoutRef`, release SHA, and first observed time.
 3. Query the protected exception endpoint and provider dashboard/API using the
    same `checkoutRef`. Do not run create-session again.
@@ -108,8 +108,8 @@ availability never overrides correctness.
 
 Before payment application rollback:
 
-1. stop new live checkout by switching to preview only through an approved
-   release/configuration change;
+1. stop new checkout with `YUBIE_CHECKOUT_ADMISSION=disabled`, preserving
+   the configured PSP through the approved release/configuration path;
 2. keep callback ingress and the reconciliation worker running;
 3. wait until active requests finish and the reconcile queue has no overdue
    job;
@@ -118,7 +118,7 @@ Before payment application rollback:
 6. do not roll back migrations while newer code/data may depend on them;
 7. re-run health/readiness, callback rejection, duplicate callback, and
    reconciliation checks;
-8. keep preview until all unknown holds are resolved.
+8. keep admission disabled until all unknown holds are resolved.
 
 If the rollback image cannot safely read the current schema, stop and restore
 forward with a compatible image. Database restore is a separate incident
@@ -136,3 +136,25 @@ procedure and must preserve provider reconciliation evidence.
 
 Support must not label an unknown outcome “failed” merely to unblock a retry.
 
+
+## Durable iPaymu notification inbox (0024+)
+
+Ingress validates the signature and merchant, stores only minimal payment
+correlation fields, and acknowledges after persistence. The independent
+`payment.notifications` worker retrieves authoritative state. Incomplete
+lookups remain retryable with the transaction ID retained. Rejections and
+exceptions retain their reason and emit dedicated worker metrics/logs; a
+`provider_mismatch` payment is listed in protected exception views and requires
+investigation before reopening admission. Never discard a received transaction
+ID merely because its first lookup was incomplete.
+
+`payment_notification_pending_count` and
+`payment_notification_oldest_age_seconds` expose inbox backlog. A rejected or
+exception outcome from an expected provider is a financial incident: freeze
+new admission, retain the PSP and recover the exact attempt. Do not delete
+inbox rows to clear an alert.
+
+A recalled or expired lot at settlement records a fulfillment hold while keeping
+verified payment truth. Recalling a lot later also holds affected unshipped
+orders. Operations must inspect those holds before fulfillment; routine count
+onboarding cannot re-release recalled lots.

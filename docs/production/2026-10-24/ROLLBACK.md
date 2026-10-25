@@ -17,30 +17,40 @@ Freeze order under fire: admission freeze (this section) → verify webhook + re
 
 Proof matrix (all executed in CI): `apps/api/tests/admission-freeze-recovery.test.mjs` (existing session identifiable; new sessions refused; authenticated callback for the existing session applies with exactly-once stock; redelivery after restart is a duplicate no-op; second successful transaction raises a durable exception whose outbox entry is produced under the freeze; lifting the freeze reopens checkout) and `packages/application/tests/reconcile-payments.test.mjs` ("reconciler keeps resolving payments while checkout admission is frozen"). Initial production ships with `YUBIE_CHECKOUT_ADMISSION=disabled` pinned by `scripts/tests/production-env-contract.test.mjs`.
 
-## R2 — Roll back API/worker images
+## R2 — API/worker rollback or forward recovery
 
-```
-# on VPS: restore previous RELEASE_SHA in /etc/yubie/production.env, then
-docker compose --env-file /etc/yubie/production.env -p yubie-prod \
-  -f infrastructure/docker-compose.prod.yml pull
-docker compose --env-file /etc/yubie/production.env -p yubie-prod \
-  -f infrastructure/docker-compose.prod.yml run --rm migrate   # schema is expand-only; older images tolerate newer schema per migration headers
-docker compose --env-file /etc/yubie/production.env -p yubie-prod \
-  -f infrastructure/docker-compose.prod.yml up -d --remove-orphans
-```
-Schema: migrations are expand-only; verify the previous image's compatibility notes before downgrading (no down-migration exists by design).
+Use reviewed immutable image digests from the release receipt through
+`YUBIE_API_IMAGE` and `YUBIE_WORKER_IMAGE`. Preserve the production environment
+file, configured PSP, PostgreSQL volume and callback ingress. Deploy only
+`api worker` in project `yubie-prod`; never remove unrelated services.
 
-## R3 — Roll back the web Worker (after cutover)
+Admission stays disabled. Confirm schema compatibility before changing images.
+Migrations 0023–0025 are additive; they do not authorize an older payment worker:
+old workers cannot drain the new payment notification inbox. Keep a compatible
+notification/reconciliation worker whenever any payment or notification remains
+unresolved. If no compatible rollback image is qualified, restore forward with
+a reviewed compatible image. Do not claim backend rollback readiness without
+that receipt. Never restore an older database over customer transactions.
 
-Vercel static catalog remains deployed and untouched as the fallback origin. To revert `yubiefood.com`: delete the Worker route / restore the prior DNS state captured at cutover (see DEPLOYMENT_EXECUTION.md "cutover snapshot"). The Vercel deployment is never deleted during the release.
+## R3 — Cloudflare Worker rollback
 
-## R4 — Caddy route
+The apex and candidate are existing custom domains on `yubie-web-production`.
+Preserve both custom domains, DNS and the `ASSETS` binding. Roll back the Worker
+with Wrangler to a reviewed compatible version, then check HTML, referenced
+JS/CSS, lazy modules, authentication and recovery reads on both hosts.
 
-Remove the `api.yubiefood.com` block appended for this release (it is additive; RetroPick/Zammad blocks untouched) and `docker exec caddy caddy reload --config /etc/caddy/Caddyfile`.
+Baseline observed 2026-10-24: active version
+`e6c5a4dc-f3d9-4fdc-b710-97904e680cea`. Both homepages and their loaded assets
+passed read-only inspection. This is baseline evidence, not acceptance of every
+commerce route. Requalify the chosen version against the deployed API before
+using it for rollback. **Do not revert apex DNS to Vercel or delete custom domains.**
 
-## R5 — Admin
+## R4 — Shared VPS and ingress
 
-`docker compose -p yubie-admin -f infrastructure/docker-compose.admin.yml down` (loopback-only BFF; zero public exposure without the Caddy route, which R4 also removes).
+Keep existing Caddy routes, including `api.yubiefood.com`, operational throughout
+rollback. This release does not redeploy admin, ERPNext, WhatsApp, Zammad or
+RetroPick. A financial incident freezes admission first; it does not remove
+webhook ingress or stop reconciliation.
 
 ## Never
 

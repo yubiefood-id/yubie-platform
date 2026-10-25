@@ -4,6 +4,8 @@ import {
   GUEST_CHECKOUT_TOKEN_PATTERN,
   checkoutPrincipalKey,
   createFirstPartyCheckout,
+  quoteCheckout,
+  currentCheckout,
   getAccountOrder,
   getCheckoutStatus,
   getPurchaseOptions,
@@ -64,7 +66,7 @@ function getOperationsDatabase(): Database {
 
 const json = (body: unknown, init?: ResponseInit) => new Response(JSON.stringify(body), {
   ...init,
-  headers: { "content-type": "application/json; charset=utf-8", ...init?.headers },
+  headers: { "content-type": "application/json; charset=utf-8", "cache-control":"no-store", ...init?.headers },
 });
 
 /**
@@ -156,6 +158,10 @@ function integerField(value: unknown): number | null {
  */
 function checkoutError(code: string): { status: number; code: string } {
   switch (code) {
+    case "shipping_unavailable":
+      return { status: 503, code: "SHIPPING_UNAVAILABLE" };
+    case "checkout_safety_hold":
+      return { status: 503, code: "CHECKOUT_SAFETY_HOLD" };
     case "unauthorized":
       return { status: 401, code: "CHECKOUT_SESSION_REQUIRED" };
     case "validation":
@@ -289,6 +295,24 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     return json({ data: catalog, meta: { count: catalog.length } });
   }
 
+  if (request.method === "GET" && url.pathname === "/v1/catalog/availability") {
+    try {
+      const data=await ctx.tx.run("inventory.availability",async repos=>repos.inventory.availability?repos.inventory.availability(ctx.clock.now()):catalog.flatMap(product=>product.sizes.map(size=>({productId:product.id,sizeId:size.id,maxQuantity:0,status:"unverified"}))));
+      return json({ok:true,data},{headers:{"cache-control":"no-store"}});
+    }catch{return json({ok:false,code:"AVAILABILITY_UNAVAILABLE"},{status:503,headers:{"cache-control":"no-store"}});}
+  }
+  if (request.method === "POST" && url.pathname === "/v1/checkouts/quote") {
+    const body=await readJsonBody(request,MAX_JSON_BYTES);if(!body.ok)return tooLarge();
+    const parsed=checkoutRequestSchema.pick({lines:true,promoCode:true,delivery:true}).safeParse(body.value);
+    if(!parsed.success)return json({ok:false,code:"INVALID_REQUEST"},{status:400,headers:{"cache-control":"no-store"}});
+    const user=await resolveSession(readSessionToken(request),{sessions:ctx.authSessions,users:ctx.users,tokens:ctx.tokens,clock:ctx.clock});
+    if(!user.ok)return json({ok:false,code:"CUSTOMER_STORAGE_UNAVAILABLE"},{status:503,headers:{"cache-control":"no-store"}});
+    const proof=parsed.data.promoCode&&user.value?await currentCustomerProof(request,ctx):undefined;
+    const result=await quoteCheckout({lines:parsed.data.lines,...(parsed.data.delivery?{city:parsed.data.delivery.city}:{}),...(parsed.data.promoCode?{promoCode:parsed.data.promoCode}:{}),userId:user.value?.id??null,...(proof?{customerProof:proof}:{})},{tx:ctx.tx,clock:ctx.clock});
+    if(!result.ok){const mapping=checkoutError(result.error.code);return json({ok:false,code:mapping.code},{status:mapping.status,headers:{"cache-control":"no-store"}});}
+    return json({ok:true,data:result.value},{headers:{"cache-control":"no-store"}});
+  }
+
   if (request.method === "POST" && url.pathname === "/v1/newsletter") {
     const body = await readJsonBody(request, 32 * 1024);
     if (!body.ok) return tooLarge();
@@ -347,7 +371,7 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     // COMMERCE_PROVIDER stays on the PSP until every pending payment is
     // authoritatively resolved — flipping it to preview would 503 the
     // webhook route and no-op the reconciler.
-    if (process.env.YUBIE_CHECKOUT_ADMISSION === "disabled") {
+    if (process.env.YUBIE_CHECKOUT_ADMISSION === "disabled" || (process.env.YUBIE_ENV === "production" && process.env.YUBIE_CHECKOUT_ADMISSION !== "enabled")) {
       return json({ ok: false, code: "CHECKOUT_DISABLED" }, { status: 503, headers: { "cache-control": "no-store" } });
     }
     const rawBody = await readBoundedText(request, MAX_JSON_BYTES);
@@ -387,6 +411,7 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
         ...(process.env.SHIPPING_POLICY ? { shippingPolicy: process.env.SHIPPING_POLICY } : {}),
         provider: ctx.paymentMode === "ipaymu" ? "ipaymu" : "xendit",
         inventoryMode: ctx.inventoryMode,
+        requireApprovedShipping: process.env.YUBIE_ENV === "production",
         idempotencyKey: request.headers.get("idempotency-key"),
         idempotencyPrincipal: principal,
         ...(parsed.data.promoCode ? { promoCode: parsed.data.promoCode } : {}),
@@ -418,7 +443,21 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     // first response cannot leave a retry under a different principal.
     const guest = guestCheckoutToken(request);
     const headers: Record<string, string> = guest.existing ? {} : { "set-cookie": checkoutCookie(guest.token, (ctx.appOrigin ?? url.origin).startsWith("https://")) };
-    return json({ ok: true, data: { ready: true } }, { headers: { ...headers, "cache-control": "no-store" } });
+    try{
+      const held=ctx.paymentMode!=="preview"&&await ctx.tx.run("checkout.admission.read",repos=>repos.payments.hasFinancialException());
+      return json({ok:true,data:{ready:true,admission:process.env.YUBIE_CHECKOUT_ADMISSION==="enabled"&&ctx.paymentMode!=="preview"&&!held?"enabled":"disabled"}},{headers:{...headers,"cache-control":"no-store"}});
+    }catch{return json({ok:false,data:{ready:false},code:"CHECKOUT_UNAVAILABLE"},{status:503,headers:{"cache-control":"no-store"}});}
+  }
+
+  if(request.method==="GET"&&url.pathname==="/v1/checkouts/current"){
+    try{
+      const user=await resolveSession(readSessionToken(request),{sessions:ctx.authSessions,users:ctx.users,tokens:ctx.tokens,clock:ctx.clock});
+      if(!user.ok)throw new Error("Customer session unavailable");
+      const guest=guestCheckoutToken(request);
+      const attemptKey=request.headers.get("idempotency-key");
+      const data=await currentCheckout({userId:user.value?.id??null,guestPrincipal:guest.existing?checkoutPrincipalKey({guestToken:guest.token}):null,...(attemptKey&&/^[A-Za-z0-9_-]{1,128}$/.test(attemptKey)?{attemptKey}:{})},ctx.tx);
+      return json({ok:true,data},{headers:{"cache-control":"no-store"}});
+    }catch{return json({ok:false,code:"RECOVERY_UNAVAILABLE"},{status:503,headers:{"cache-control":"no-store"}});}
   }
 
   const checkoutStatusMatch = url.pathname.match(/^\/v1\/checkouts\/([^/]+)$/);
@@ -460,6 +499,15 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
       logEvent("api.ipaymu_webhook", { requestId, outcome: "rejected", code: "invalid_payload" });
       return json({ ok: false, code: "INVALID_PAYLOAD" }, { status: 400 });
     }
+    if(merchant!==ctx.ipaymuVa || (stringField(fields,"currency") && stringField(fields,"currency")!=="IDR"))return json({ok:false,code:"REJECTED"},{status:409});
+    if(ctx.paymentNotifications){
+      try{
+        const result=await ctx.paymentNotifications.receive({referenceId,amount,currency:stringField(fields,"currency")||null,trxId,sessionId,payloadHash:createHash("sha256").update(rawBody).digest("hex")});
+        logEvent("api.ipaymu_webhook",{requestId,outcome:result});
+        return json({ok:true,data:{result}},{headers:{"cache-control":"no-store"}});
+      }catch{return json({ok:false,code:"UNAVAILABLE"},{status:503,headers:{"cache-control":"no-store"}});}
+    }
+    if(ctx.database)return json({ok:false,code:"UNAVAILABLE"},{status:503});
     let authoritativeStatus = null;
     let authoritativeReferenceId: string | null = null;
     let authoritativeAmount: number | null = null;

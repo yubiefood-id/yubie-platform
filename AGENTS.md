@@ -20,11 +20,11 @@ The October 2026 commercial brief makes four families available: Yubie Flour, Sh
 
 ## 2. Current commerce model
 
-Production D2C is marketplace-first.
+Production first-party D2C uses iPaymu hosted Redirect Payment under ADR-013. New payment admission stays disabled until the independent activation gates pass; approved marketplaces remain a rollback channel.
 
 - Public purchase CTAs route to approved marketplace listings.
 - WhatsApp is used for questions, assisted B2C and B2B.
-- Direct payment on yubie.id is implemented per ADR-012 (Xendit TEST mode only; LIVE prohibited until the sandbox matrix passes). ADR-004's marketplace-first posture remains the rollback path.
+- Direct commerce follows ADR-013. Xendit remains implemented but inactive; there is no automatic PSP failover. Disabling new admission must preserve the configured PSP, callbacks and reconciliation for in-flight payments.
 - Do not connect production payment credentials to the current preview checkout.
 - Do not scrape Shopee, Tokopedia, TikTok Shop or Seller Center. Use approved APIs, webhooks, official exports or explicit operator imports.
 

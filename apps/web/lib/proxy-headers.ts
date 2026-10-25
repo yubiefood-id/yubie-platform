@@ -69,9 +69,18 @@ export function attemptOutcomeForHttpStatus(status: number): "ambiguous" | "defi
 export interface HeldAttempt {
   key: string;
   fingerprint: string;
+  checkoutToken?: string;
 }
 
 export const CHECKOUT_ATTEMPT_STORAGE_KEY = "yubie.checkout-attempt.v1";
+
+/** Recovery reads can succeed even when new checkout storage is unavailable. */
+export function rememberRecoveredCheckout(storage:Pick<Storage,"getItem"|"setItem">,checkoutToken:string):void {
+  try{
+    const held=JSON.parse(storage.getItem(CHECKOUT_ATTEMPT_STORAGE_KEY)??"null");
+    storage.setItem(CHECKOUT_ATTEMPT_STORAGE_KEY,JSON.stringify({...((held?.key&&held?.fingerprint)?{key:held.key,fingerprint:held.fingerprint}:{}),checkoutToken}));
+  }catch{/* The verified server token remains usable without browser persistence. */}
+}
 
 /** Only an opaque key and a SHA-256 fingerprint enter storage, never the
  * checkout body (which contains contact/address data). No time-based reset:
@@ -84,7 +93,8 @@ export async function storedAttemptForRequest(storage: Pick<Storage, "getItem" |
     const parsed = JSON.parse(storage.getItem(CHECKOUT_ATTEMPT_STORAGE_KEY) ?? "null");
     if (parsed && typeof parsed.key === "string" && /^[a-f0-9-]{36}$/.test(parsed.key) && typeof parsed.fingerprint === "string" && /^[a-f0-9]{64}$/.test(parsed.fingerprint)) previous = parsed;
   } catch { /* A corrupt value is replaced; blocked storage fails on setItem. */ }
-  const attempt = attemptKeyForCart(previous, fingerprint, freshKey);
+  if(previous && previous.fingerprint!==fingerprint)throw new Error("An unresolved checkout must be recovered before changing this attempt");
+  const attempt = previous ?? attemptKeyForCart(null, fingerprint, freshKey);
   storage.setItem(CHECKOUT_ATTEMPT_STORAGE_KEY, JSON.stringify(attempt));
   return attempt;
 }
@@ -99,7 +109,7 @@ export function attemptKeyForCart(held: HeldAttempt | null, fingerprint: string,
   return { key: freshKey, fingerprint };
 }
 
-export type CheckoutUiOutcome = "redirect" | "preview" | "pending" | "sold_out" | "invalid" | "failed";
+export type CheckoutUiOutcome = "redirect" | "preview" | "pending" | "unavailable" | "sold_out" | "invalid" | "failed";
 
 const PENDING_CODES = new Set(["PENDING_RECONCILIATION", "PROVIDER_UNAVAILABLE", "API_TIMEOUT", "IDEMPOTENCY_KEY_REUSED"]);
 
@@ -108,6 +118,7 @@ export function classifyCheckoutResponse(status: number, payload: { code?: unkno
   if (status === 201 && data?.mode === "live" && typeof data.redirectUrl === "string") return "redirect";
   if (status >= 200 && status < 300 && data?.status === "preview") return "preview";
   const code = typeof payload?.code === "string" ? payload.code : null;
+  if (code === "CHECKOUT_DISABLED" || code === "CHECKOUT_SAFETY_HOLD" || code === "SHIPPING_UNAVAILABLE" || code === "FEATURE_DISABLED" || code === "PROMOTION_UNAVAILABLE") return "unavailable";
   if (code === "INSUFFICIENT_INVENTORY" || code === "UNAVAILABLE_LINE") return "sold_out";
   if ((code && PENDING_CODES.has(code)) || status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504) return "pending";
   if (status === 400) return "invalid";

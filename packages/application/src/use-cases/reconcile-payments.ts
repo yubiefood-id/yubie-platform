@@ -1,3 +1,4 @@
+import { paymentSessionMatches,flagPaymentMismatch,recordPaymentMismatch } from "./payment-session-verification.js";
 import { paymentStatusFromProviderSession, type AppError } from "@yubie/domain";
 import type { Clock, IdGenerator, OrderRepository, PaymentProviderPort, PaymentRepository, TransactionManager } from "../ports.js";
 import { applyPaymentStatus } from "./process-payment-webhook.js";
@@ -63,7 +64,9 @@ export async function reconcilePayments(deps: ReconcilePaymentsDeps): Promise<{ 
         continue;
       }
       report.polled += 1;
-      const session = await deps.provider.getPaymentSession(payment.providerSessionId);
+      const correlatedOrder=await deps.orders.findById(payment.orderId);
+      if(!correlatedOrder.ok||!correlatedOrder.value)continue;
+      const session = await deps.provider.getPaymentSession(payment.providerSessionId,{providerPaymentId:payment.providerPaymentId??null,referenceId:correlatedOrder.value.checkoutRef});
       if (!session.ok) continue; // Provider unreachable: retry on the next cron tick; never release on a guess.
       if (!session.value) {
         await deps.tx.run("reconcile.flag_missing_session", async (repos) => {
@@ -75,6 +78,7 @@ export async function reconcilePayments(deps: ReconcilePaymentsDeps): Promise<{ 
         report.flaggedAmbiguous += 1;
         continue;
       }
+      if(!paymentSessionMatches(payment,correlatedOrder.value,session.value)) { await flagPaymentMismatch(payment.id,deps); report.flaggedAmbiguous+=1; continue; }
       const target = paymentStatusFromProviderSession(session.value.rawStatus);
       if (!target) continue;
       const moved = await deps.tx.run("reconcile.apply_poll", async (repos) => {
@@ -83,6 +87,7 @@ export async function reconcilePayments(deps: ReconcilePaymentsDeps): Promise<{ 
         if (!locked.ok || !locked.value || locked.value.status !== "pending") return false;
         const freshOrder = await repos.orders.findById(payment.orderId);
         if (!freshOrder.ok || !freshOrder.value) return false;
+        if(!paymentSessionMatches(locked.value,freshOrder.value,session.value!)){await recordPaymentMismatch(locked.value,repos,deps.clock.now());return false;}
         const effect = await applyPaymentStatus({ ...repos, clock: deps.clock, ids: deps.ids }, locked.value, freshOrder.value, target);
         return effect === "applied";
       });
@@ -100,7 +105,8 @@ export async function reconcilePayments(deps: ReconcilePaymentsDeps): Promise<{ 
       // provider calls happen OUTSIDE any transaction, local writes inside one.
       const attachCandidate = await deps.tx.run("reconcile.inspect_draft", async (repos) => {
         const payments = await repos.payments.findByOrderId(order.id);
-        const payment = payments.ok ? payments.value[0] ?? null : null;
+        if(!payments.ok)throw new Error("Payment inspection unavailable; reservations remain held");
+        const payment = payments.value[0] ?? null;
         const freshOrder = await repos.orders.findById(order.id);
         if (!freshOrder.ok || freshOrder.value?.status !== "draft") return null;
         if (!payment || !payment.providerSessionId) {
@@ -117,7 +123,8 @@ export async function reconcilePayments(deps: ReconcilePaymentsDeps): Promise<{ 
       if (attachCandidate.kind === "attach_failed") {
         const payment = attachCandidate.payment;
         if (payment.providerSessionId === null) continue; // type-narrow; guarded above
-        const poll = await deps.provider.getPaymentSession(payment.providerSessionId);
+        const poll = await deps.provider.getPaymentSession(payment.providerSessionId,{providerPaymentId:payment.providerPaymentId??null,referenceId:order.checkoutRef});
+        if(poll.ok&&poll.value&&!paymentSessionMatches(payment,order,poll.value)){await flagPaymentMismatch(payment.id,deps);report.flaggedAmbiguous+=1;continue;}
         if (poll.ok && poll.value && poll.value.rawStatus === "ACTIVE") {
           // The link was never delivered to a browser; cancel the session so
           // it can never be paid, then close the draft and release stock.
@@ -126,7 +133,7 @@ export async function reconcilePayments(deps: ReconcilePaymentsDeps): Promise<{ 
             const done = await deps.tx.run("reconcile.cancel_attach_failed", async (repos) => {
               const locked = await repos.payments.lockById(payment.id);
               const freshOrder = await repos.orders.findById(order.id);
-              if (!freshOrder.ok || freshOrder.value?.status !== "draft" || !locked.ok || !locked.value || locked.value.status !== "pending") return false;
+              if (!freshOrder.ok || freshOrder.value?.status !== "draft" || !locked.ok || !locked.value || locked.value.status !== "pending" || !paymentSessionMatches(locked.value,freshOrder.value,poll.value!)) return false;
               const effect = await applyPaymentStatus({ ...repos, clock: deps.clock, ids: deps.ids }, locked.value, freshOrder.value, "cancelled");
               if (effect !== "applied") return false;
               await repos.payments.save({ ...locked.value, status: "cancelled", reconciliationState: "attach_failed_cancelled", updatedAt: deps.clock.now() });
@@ -146,7 +153,7 @@ export async function reconcilePayments(deps: ReconcilePaymentsDeps): Promise<{ 
           report.flaggedAmbiguous += 1;
           continue;
         }
-        if (poll.ok && poll.value) {
+        if (poll.ok && poll.value && paymentSessionMatches(payment,order,poll.value)) {
           const target = paymentStatusFromProviderSession(poll.value.rawStatus);
           if (target) {
             const moved = await deps.tx.run("reconcile.apply_poll", async (repos) => {
@@ -154,6 +161,7 @@ export async function reconcilePayments(deps: ReconcilePaymentsDeps): Promise<{ 
               if (!locked.ok || !locked.value || locked.value.status !== "pending") return false;
               const freshOrder = await repos.orders.findById(order.id);
               if (!freshOrder.ok || !freshOrder.value) return false;
+              if(!paymentSessionMatches(locked.value,freshOrder.value,poll.value!)){await recordPaymentMismatch(locked.value,repos,deps.clock.now());return false;}
               const effect = await applyPaymentStatus({ ...repos, clock: deps.clock, ids: deps.ids }, locked.value, freshOrder.value, target);
               return effect === "applied";
             });
@@ -193,7 +201,8 @@ export async function reconcilePayments(deps: ReconcilePaymentsDeps): Promise<{ 
       const cancelled = await deps.tx.run("reconcile.cancel_stale_draft", async (repos) => {
         const freshOrder = await repos.orders.findById(order.id);
         const payments = await repos.payments.findByOrderId(order.id);
-        const payment = payments.ok ? payments.value[0] ?? null : null;
+        if(!payments.ok)throw new Error("Payment inspection unavailable; reservations remain held");
+        const payment = payments.value[0] ?? null;
         if (!freshOrder.ok || freshOrder.value?.status !== "draft") return false;
         if (!payments.ok || (payment && (payment.providerSessionId || !["failed", "expired", "cancelled"].includes(payment.status)))) return false;
         await repos.orders.save({ ...freshOrder.value, status: "cancelled", updatedAt: deps.clock.now() });

@@ -13,7 +13,7 @@ changing shared staging away from `COMMERCE_PROVIDER=preview`, or real money.
   `IPAYMU_SANDBOX_VA` and `IPAYMU_SANDBOX_API_KEY` (the sandbox pair the project
   already uses).
 - An isolated sandbox API instance is approved: its own database (restored
-  from a staging backup or empty and migrated through `0013`), its own
+  from a staging backup or empty and migrated through `0025`), its own
   hostname reachable by iPaymu for callbacks, `COMMERCE_PROVIDER=ipaymu`,
   `IPAYMU_ENV=sandbox`, `IPAYMU_API_BASE_URL=https://sandbox.ipaymu.com`, and
   `IPAYMU_NOTIFY_URL=https://<isolated-host>/v1/webhooks/ipaymu`.
@@ -28,7 +28,7 @@ the request id (`x-request-id`) for each step. Never record the VA, API key,
 signature, or customer email.
 
 1. **Release under test.** Isolated instance `/healthz` returns the reviewed
-   `releaseSha`; `/readyz` is 200; migrations through `0013` applied.
+   `releaseSha`; `/readyz` is 200; migrations through `0025` applied.
 2. **Create session.** Dispatch the probe workflow (main, `confirm=sandbox`,
    `expected_sha=<sha>`), or check out on the isolated storefront. Evidence:
    `CREATE_SESSION_PASS`, redirect host `sandbox.ipaymu.com`.
@@ -42,7 +42,7 @@ signature, or customer email.
    callback; the browser never marks the order paid.
 6. **Expiry / cancel.** Let a second session expire or cancel it. Evidence:
    order cancelled; reservations released exactly once; a late success callback
-   is `stale`.
+   creates a durable `late_success_after_terminal` exception without reviving fulfillment.
 7. **Amount and reference mismatch.** Send a signed callback with a wrong
    amount (sandbox tooling or recorded fixture). Evidence: `rejected` with
    `payment_amount_mismatch`; order unchanged.
@@ -61,3 +61,8 @@ signature, or customer email.
 | 1–10 | NOT_RUN | |
 
 M2 = PASS only if all ten are PASS. Any FAIL keeps first-party payments off.
+
+Current release execution status: **BLOCKED_EXTERNAL** until rotated sandbox
+credentials, an isolated callback host and the provider contract evidence are
+available. Mock tests and a successful create-session probe do not satisfy this
+matrix. Production admission stays disabled while any step is unexecuted.

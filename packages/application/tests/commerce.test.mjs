@@ -276,11 +276,12 @@ test("idempotent replay returns the stored first response; a different request u
   assert.equal(conflicting.error.code, "conflict");
 });
 
-test("checkout clamps quantity and rejects unavailable lines", async () => {
+test("checkout rejects invalid quantities and unavailable lines", async () => {
   const deps = makeDeps();
   const clamped = await createFirstPartyCheckout({ ...BASE_INPUT, lines: [{ productId: "flour", sizeId: "250g", quantity: 99 }] }, deps);
-  assert.equal(clamped.ok, true);
-  assert.equal(clamped.value.totalAmount, 20 * 35000);
+  assert.equal(clamped.ok, false);
+  assert.equal(clamped.error.code, "validation");
+  assert.equal(deps.provider.created.length, 0);
 
   const unavailable = await createFirstPartyCheckout({ ...BASE_INPUT, lines: [{ productId: "shake", sizeId: "any", quantity: 1 }] }, deps);
   assert.equal(unavailable.ok, false);

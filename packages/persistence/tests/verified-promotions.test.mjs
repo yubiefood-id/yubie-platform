@@ -109,7 +109,8 @@ test('grant and consumption audit failures roll back their complete business tra
 test('attach-failure cancellation releases the promotion and permits a new attempt',{skip:!enabled},async()=>{
  const actor=actors[7];assert.equal((await a.claimWelcomePromotion({actor},deps)).ok,true);
  const input={lines:[{productId:'flour',sizeId:'250g',quantity:1}],customerEmail:'synthetic@example.invalid',userId:actor.userId,customerProof:actor,promoCode:'YUBIE15',idempotencyPrincipal:'user:'+actor.userId,idempotencyKey:randomUUID(),successReturnUrl:'https://local.test/success',cancelReturnUrl:'https://local.test/cancel'};
- const provider={async createPaymentSession(input){return{ok:true,value:{providerSessionId:'attach_'+input.referenceId,redirectUrl:'https://payments.invalid/synthetic',rawStatus:'ACTIVE',expiresAt:null}};},async getPaymentSession(){return{ok:true,value:{rawStatus:'ACTIVE'}};},async cancelPaymentSession(){return{ok:true,value:{accepted:true}};}};
+ const sessions=new Map();
+ const provider={async createPaymentSession(input){const session={provider:input.provider??'xendit',providerSessionId:'attach_'+input.referenceId,referenceId:input.referenceId,amount:input.amount,currency:'IDR',redirectUrl:'https://payments.invalid/synthetic',rawStatus:'ACTIVE',expiresAt:null};sessions.set(session.providerSessionId,session);return{ok:true,value:session};},async getPaymentSession(id){return{ok:true,value:sessions.get(id)??null};},async cancelPaymentSession(){return{ok:true,value:{accepted:true}};}};
  const broken={...deps,tx:{run(label,fn){if(label==='checkout.attach_session')throw Error('synthetic attach outage');return deps.tx.run(label,fn);}}};
  assert.equal((await a.createFirstPartyCheckout(input,{...broken,provider})).ok,false);
  now+=16*60_000;await a.reconcilePayments({...deps,provider,orders:new p.PostgresOrderRepository(db),payments:new p.PostgresPaymentRepository(db)});

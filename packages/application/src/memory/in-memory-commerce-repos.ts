@@ -1,4 +1,4 @@
-import { ok } from "@yubie/domain";
+import { ok,isFinancialException } from "@yubie/domain";
 import type { AuthSession, OrderRecord, PaymentEventRecord, PaymentRecord, UserAccount } from "@yubie/domain";
 import type {
   OrderRepository,
@@ -53,6 +53,9 @@ export class InMemoryOrderRepository implements OrderRepository {
 }
 
 export class InMemoryPaymentRepository implements PaymentRepository {
+  async hasFinancialException(){
+    return [...this.items.values()].some(payment=>isFinancialException(payment.reconciliationState));
+  }
   private readonly items = new Map<string, PaymentRecord>();
 
   private readonly guestOwners = new Map<string, string>();
@@ -124,7 +127,8 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       );
       if (clash) throw new DuplicatePaymentIntentError();
     }
-    this.items.set(payment.id, payment);
+    const existing=this.items.get(payment.id);
+    this.items.set(payment.id,existing&&isFinancialException(existing.reconciliationState)?{...payment,reconciliationState:existing.reconciliationState??null}:payment);
     return ok(undefined);
   }
 }

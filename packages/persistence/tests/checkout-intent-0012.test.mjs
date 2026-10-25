@@ -80,6 +80,9 @@ async function seedLot(database, id, quantity) {
     INSERT INTO inventory_lots (id, product_id, size_id, lot_code, quantity_on_hand, expiry_date, status, released_at, release_reason, created_at, updated_at)
     VALUES (${id}, 'flour', '250g', ${id}, ${quantity}, DATE '2027-06-30', 'released', ${NOW}, 'coa', ${NOW}, ${NOW})
   `;
+    await database.client`UPDATE inventory_lots SET qc_approval_ref='synthetic-qc' WHERE status='released'`;
+    await database.client`INSERT INTO inventory_sku_policies(product_id,size_id,version,components,approval_ref,approved_by,approved_at) VALUES('flour','250g',1,'[{"productId":"flour","sizeId":"250g","quantity":1}]'::jsonb,'synthetic-packaging','fixture',now()) ON CONFLICT DO NOTHING`;
+
 }
 
 async function withDatabase(work, options) {

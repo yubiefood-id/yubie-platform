@@ -74,6 +74,18 @@ export type NewsletterSubmission = z.infer<typeof newsletterSubmissionSchema>;
 export type ProductWaitlistSubmission = z.infer<typeof productWaitlistSchema>;
 export type B2BLead = z.infer<typeof b2bLeadSchema>;
 export type CheckoutRequest = z.infer<typeof checkoutRequestSchema>;
+export const inventoryOnboardingSchema = z.object({
+  operationId:z.string().regex(/^[A-Za-z0-9_-]{1,100}$/),actor:z.string().trim().min(1).max(100),reason:z.string().trim().min(1).max(300),
+  countedAt:z.iso.datetime(),policies:z.array(z.object({
+    productId:z.string().min(1),sizeId:z.string().min(1),version:z.number().int().positive(),approvalRef:z.string().trim().min(1),
+    components:z.array(z.object({productId:z.string().min(1),sizeId:z.string().min(1),quantity:z.number().int().positive()}).strict()).min(1),
+  }).strict()).max(9),
+  lots:z.array(z.object({
+    productId:z.string().min(1),sizeId:z.string().min(1),lotCode:z.string().trim().min(1).max(100),unitOfMeasure:z.string().trim().min(1).max(40),
+    expiryDate:z.iso.date(),countedUncommittedQuantity:z.number().int().nonnegative(),expectedAvailable:z.number().int().nonnegative(),
+    status:z.enum(["received","quarantined","released","recalled","depleted"]),qcApprovalRef:z.string().trim().max(200).optional(),
+  }).strict()).min(1).max(100),
+}).strict();
 export type GoogleLoginRequest = z.infer<typeof googleLoginSchema>;
 
 export * from "./channel.js";

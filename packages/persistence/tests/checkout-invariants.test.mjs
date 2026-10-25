@@ -102,6 +102,9 @@ test("Postgres invariants A, B, C, and E", { skip: !databaseUrl }, async () => {
       VALUES ('lot_inv', 'flour', '250g', 'INV', 100, DATE '2027-06-30', 'released', ${NOW}, 'coa', ${NOW}, ${NOW})
     `;
 
+    await database.client`UPDATE inventory_lots SET qc_approval_ref='synthetic-qc' WHERE status='released'`;
+    await database.client`INSERT INTO inventory_sku_policies(product_id,size_id,version,components,approval_ref,approved_by,approved_at) VALUES('flour','250g',1,'[{"productId":"flour","sizeId":"250g","quantity":1}]'::jsonb,'synthetic-packaging','fixture',now()) ON CONFLICT DO NOTHING`;
+
     // A — one principal and one cart, two submits: one intent.
     const principal = guest(1);
     const first = await createFirstPartyCheckout({ ...CART, idempotencyPrincipal: principal, idempotencyKey: "a-1" }, deps);

@@ -15,6 +15,7 @@ const DISMISSED_KEY = "yubie.promo.dismissed.v1";
 export function StorefrontWidgets() {
   const { openCart, count } = useCart();
   const [offer, setOffer] = useState<{ percentage: number } | null>(null);
+  const [dismissed, setDismissed] = useState(false);
   const pathname = usePathname();
   const hideOffer = /^\/(?:account|checkout|login)(?:\/|$)/.test(pathname);
   const [whatsappOpen, setWhatsappOpen] = useState(false);
@@ -25,12 +26,21 @@ export function StorefrontWidgets() {
 
   useEffect(() => {
     if (hideOffer) return;
-    try { if (window.sessionStorage.getItem(DISMISSED_KEY) === "1") return; } catch { /* Read-only fallback. */ }
     const abort = new AbortController();
-    fetch("/api/promotions/welcome", { cache: "no-store", signal: abort.signal }).then(async response => {
-      const result = await response.json(), data = result.data;
-      if (!abort.signal.aborted) setOffer(response.ok && result.ok && data?.available && typeof data.percentage === "number" && Number.isFinite(data.percentage) && data.percentage > 0 && data.percentage < 100 && Date.parse(data.endsAt) > Date.now() && !["not_eligible", "pending"].includes(data.eligibility) ? { percentage: data.percentage } : null);
-    }).catch(() => { /* No approved offer is advertised during outages. */ });
+    // Session dismissal is read inside the promise chain so every setState
+    // stays asynchronous; a dismissed session also skips the campaign fetch.
+    Promise.resolve()
+      .then(() => { try { return window.sessionStorage.getItem(DISMISSED_KEY) === "1"; } catch { return false; } })
+      .then((alreadyDismissed) => {
+        if (abort.signal.aborted) return;
+        if (alreadyDismissed) { setDismissed(true); return; }
+        fetch("/api/promotions/welcome", { cache: "no-store", signal: abort.signal }).then(async response => {
+          const result = await response.json(), data = result.data;
+          // An inactive or unreachable campaign removes the percentage claim
+          // only — the phone waitlist sign-up itself always stays available.
+          if (!abort.signal.aborted) setOffer(response.ok && result.ok && data?.available && typeof data.percentage === "number" && Number.isFinite(data.percentage) && data.percentage > 0 && data.percentage < 100 && Date.parse(data.endsAt) > Date.now() && !["not_eligible", "pending"].includes(data.eligibility) ? { percentage: data.percentage } : null);
+        }).catch(() => { if (!abort.signal.aborted) setOffer(null); });
+      });
     return () => abort.abort();
   }, [hideOffer, pathname]);
 
@@ -42,7 +52,7 @@ export function StorefrontWidgets() {
   }, [whatsappOpen]);
 
   const closePromo = () => {
-    setOffer(null);
+    setDismissed(true);
     try { window.sessionStorage.setItem(DISMISSED_KEY, "1"); } catch { /* Session-only dismissal remains available. */ }
   };
 
@@ -61,11 +71,13 @@ export function StorefrontWidgets() {
   };
 
   return <>
-    {!hideOffer && offer && <aside className="welcome-offer" aria-label="Promo pelanggan terverifikasi">
+    {!hideOffer && !dismissed && <aside className="welcome-offer" aria-label={offer ? "Promo pelanggan terverifikasi" : "Waitlist promo Yubie"}>
       <button className="icon-button" type="button" onClick={closePromo} aria-label="Tutup promo">×</button>
-      <h2>Promo {offer.percentage}% untuk pelanggan terverifikasi</h2>
+      {offer
+        ? <h2>Promo {offer.percentage}% untuk pelanggan terverifikasi</h2>
+        : <h2>Daftar &amp; dapatkan info promo Yubie</h2>}
       <ul className="offer-terms">
-        <li>Verifikasi nomor HP kamu untuk melihat kelayakan.</li>
+        <li>Verifikasi nomor HP kamu untuk melihat kelayakan promo.</li>
         <li>Join <a href={siteConfig.social.whatsappCommunity} target="_blank" rel="noopener noreferrer">komunitas WhatsApp Yubie</a>.</li>
       </ul>
       <ProductWaitlistForm productId="all" />

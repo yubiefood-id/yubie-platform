@@ -130,3 +130,5 @@ export * from "./phone-identity.js";
 export * from "./delivery-address.js";
 export * from "./promotions.js";
 export * from "./yubi-discovery.js";
+
+export * from "./inventory-onboarding.js";

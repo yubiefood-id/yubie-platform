@@ -9,7 +9,7 @@ import { trackEvent } from "@/lib/analytics";
 import { formatRupiah } from "@/lib/format";
 
 export function CartView() {
-  const { hydrated, setQuantity, removeItem, clear, count, promoCode, applyPromo, clearPromo } = useCart();
+  const { hydrated, setQuantity, removeItem, clear, count, availability, promoCode, applyPromo, clearPromo } = useCart();
   const lines = useCartDisplayLines();
 
   useEffect(() => { if (hydrated && count > 0) trackEvent("view_cart", { item_count: count }); }, [hydrated, count]);
@@ -38,9 +38,9 @@ export function CartView() {
           <div className="quantity-row" aria-label={`Jumlah ${product.name}`}>
             <button aria-label={`Kurangi jumlah ${product.name} ${size.label}`} onClick={() => setQuantity(line.productId, line.sizeId, line.quantity - 1)} disabled={line.quantity <= 1}>−</button>
             <span aria-live="polite">{line.quantity}</span>
-            <button aria-label={`Tambah jumlah ${product.name} ${size.label}`} onClick={() => setQuantity(line.productId, line.sizeId, line.quantity + 1)}>+</button>
+            <button aria-label={`Tambah jumlah ${product.name} ${size.label}`} disabled={line.quantity >= Math.min(20, availability?.find(row=>row.productId===line.productId&&row.sizeId===line.sizeId)?.maxQuantity??0)} onClick={() => setQuantity(line.productId, line.sizeId, line.quantity + 1)}>+</button>
           </div>
-          <strong>{formatRupiah(lineTotal)}</strong>
+          {(!availability || line.quantity>(availability.find(row=>row.productId===line.productId&&row.sizeId===line.sizeId)?.maxQuantity??0))&&<p role="status">Ketersediaan item berubah; periksa sebelum membayar.</p>}<strong>{formatRupiah(lineTotal)}</strong>
           <button className="remove-link" aria-label={`Hapus ${product.name} ${size.label}`} onClick={() => removeItem(line.productId, line.sizeId)}>Hapus</button>
         </article>)}
         <button className="remove-link" onClick={clear}>Kosongkan keranjang</button>

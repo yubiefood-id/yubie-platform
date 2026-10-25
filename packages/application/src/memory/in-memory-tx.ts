@@ -38,7 +38,15 @@ export class InMemoryOutboxRepository implements OutboxRepository {
  * same key + different hash = conflict.
  */
 export class InMemoryIdempotencyRepository implements IdempotencyRepository {
-  private readonly claims = new Map<string, { requestHash: string; responseJson: string | null }>();
+  private readonly claims = new Map<string, { requestHash: string; responseJson: string | null; resourceId?:string }>();
+
+  async attachResource(record:Omit<IdempotencyClaim,"createdAt"|"requestHash">,orderId:string){
+    const key=`${record.scope}:${record.principalKey}:${record.operation}:${record.idempotencyKey}`;
+    const existing=this.claims.get(key);if(existing)this.claims.set(key,{...existing,resourceId:orderId});return ok(undefined);
+  }
+  async findResources(principals:string[],idempotencyKey:string){
+    return ok(principals.flatMap(principal=>{const row=this.claims.get(`checkout:${principal}:createFirstPartyCheckout:${idempotencyKey}`);return row?.resourceId?[row.resourceId]:[];}));
+  }
 
   async lookup(record: Omit<IdempotencyClaim, "createdAt">) {
     const existing = this.claims.get(`${record.scope}:${record.principalKey}:${record.operation}:${record.idempotencyKey}`);

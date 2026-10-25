@@ -51,12 +51,14 @@ import {
   PostgresPaymentRepository,
   PostgresSessionRepository,
   PostgresTransactionManager,
+  PostgresPaymentNotificationInbox,
   PostgresUserRepository,
   PostgresWhatsAppIntentRepository,
 } from "@yubie/persistence";
 import type { MarketplaceListing } from "@yubie/domain";
 
 export interface AppContext {
+  paymentNotifications?: import("@yubie/application").PaymentNotificationInbox;
   listings: InMemoryMarketplaceListingRepository | PostgresMarketplaceListingRepository;
   whatsapp: InMemoryWhatsAppIntentRepository | PostgresWhatsAppIntentRepository;
   outbound: InMemoryOutboundIntentRepository | PostgresOutboundIntentRepository;
@@ -216,6 +218,7 @@ export function createAppContext(): AppContext {
       googleClientId,
       identityTransactions,
       database,
+      paymentNotifications: new PostgresPaymentNotificationInbox(database),
       ...(phoneAuth ? { phoneAuth } : {}),
       ...(deliveryLocations ? { deliveryLocations } : {}),
       tx: transactional

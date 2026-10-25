@@ -18,6 +18,7 @@ export interface IpaymuCallbackInput {
   payloadHash?: string;
   trxId: string | null;
   sessionId: string | null;
+  authoritativeSessionId?: string|null;
   dedupeKey: string;
 }
 
@@ -70,7 +71,7 @@ export async function applyIpaymuCallback(
       if (payment.amount !== input.amount) {
         return { persisted: true, result: "rejected" as const, reason: "payment_amount_mismatch" as const };
       }
-      if (payment.providerSessionId && input.sessionId && payment.providerSessionId !== input.sessionId) {
+      if ((payment.providerSessionId && input.sessionId && payment.providerSessionId !== input.sessionId) || (input.authoritativeSessionId && input.sessionId && input.authoritativeSessionId !== input.sessionId) || (payment.providerSessionId && input.authoritativeSessionId && payment.providerSessionId !== input.authoritativeSessionId)) {
         return { persisted: true, result: "rejected" as const, reason: "session_mismatch" as const };
       }
       // A transaction-check status counts only when that response names this order and this amount.

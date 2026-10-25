@@ -81,6 +81,9 @@ test("migration 0009 creates the inventory core; checkout reserves FEFO atomical
         ('lot_expired', 'flour', '250g', 'L-E', 99, DATE '2026-09-30', 'released', ${NOW}, 'coa', ${NOW}, ${NOW})
     `;
 
+    await database.client`UPDATE inventory_lots SET qc_approval_ref='synthetic-qc' WHERE status='released'`;
+    await database.client`INSERT INTO inventory_sku_policies(product_id,size_id,version,components,approval_ref,approved_by,approved_at) SELECT DISTINCT product_id,size_id,1,jsonb_build_array(jsonb_build_object('productId',product_id,'sizeId',size_id,'quantity',1)),'synthetic-packaging','fixture',now() FROM inventory_lots`;
+
     const input = {
       lines: [{ productId: "flour", sizeId: "250g", quantity: 7 }],
       customerEmail: "inv-pg@example.com",
