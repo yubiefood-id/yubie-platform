@@ -69,3 +69,36 @@ Record final evidence separately for `CODE_READY`, `INVENTORY_VERIFIED`,
 Use PASS only for observed acceptance. A healthy old deployment is not proof
 that this release was deployed. Current privileged image digests, database
 balances and provider reconciliation health remain unverified.
+
+## Frozen source validation receipt
+
+Source: `fe8366a1a46376d901ef4489082b31ffd81dffd9`. Local validation completed
+2026-10-25 UTC; required GitHub checks and immutable image publication are still
+pending. This is not a production deployment receipt.
+
+- `npm run check`: PASS (lint, TypeScript, secret/payment scanners, release
+  tests and workspace tests). Database-gated cases skipped here were exercised
+  by the separate PostgreSQL run below.
+- PostgreSQL 17: persistence 77/77, API 56/56, assistant 40/40, worker 29/29,
+  bot 8/8, integrations 69/69; no failures or skipped cases. An old promotion
+  fixture was corrected to supply complete provider proof; assertions retained.
+- Full mock browser matrix: 224/224 PASS, zero flaky/failed/not-run cases;
+  desktop/mobile Chromium, Firefox and WebKit. Sanitized evidence:
+  `artifacts/qa/2026-10-25T01-31-00-160Z/mock`.
+- Semgrep financial rules: 0 findings across 312 targets. Gitleaks history:
+  no credential findings after an exact fingerprint exclusion for the public
+  backend Git SHA on baseline line 14. No credential pattern was disabled.
+- Browser access-boundary contract: 1 PASS; ERP harness privacy contracts:
+  JavaScript 1 PASS and Python 1 PASS.
+- Clean production-profile Vinext artifact: PASS; release manifest reports
+  the source SHA above and `dirty=false`. Wrangler production dry-run PASS,
+  104 asset files, existing ASSETS binding retained. Build artifact digest:
+  `sha256:16acbf71e40c83b498ccf8b90c6090379d8c3ed89e8efb3a80857d1f430a7de6`.
+- Local worker container build: BLOCKED_EXTERNAL by registry/network failures
+  during npm installation. No image build or scan PASS is claimed from it.
+- Real sandbox acceptance: BLOCKED_EXTERNAL; no real sandbox session/payment
+  was completed. Live merchant/KYC/domain/IP/rotated credentials/Finance,
+  shipping approval and physical lot/QC evidence remain unverified.
+- Production backend and frontend changes: NOT DEPLOYED. Privileged VPS
+  execution is unavailable; sudo requires a password and the release key
+  cannot log in as root. Frontend deployment waits for backend compatibility.
