@@ -31,20 +31,23 @@ export function BuyBox({ product }: { product: Product }) {
     </fieldset>
     <p className="price-tag">Harga katalog · {formatRupiah(size.price)}</p>
     {size.sku && <p className="delivery-note">SKU: {size.sku}</p>}
-    {directCommerce && <CartControls product={product} size={size} />}
-    <p className="delivery-note">{directCommerce ? "Pembelian resmi melalui marketplace partner—harga dan stok final mengikuti toko saat transaksi." : "Informasi katalog. Harga dan stok transaksi mengikuti kanal resmi yang telah disetujui."}</p>
+    {directCommerce && <CartControls key={size.id} product={product} size={size} />}
+    <p className="delivery-note">{directCommerce ? "Harga, stok, dan pengiriman diverifikasi oleh server sebelum pembayaran." : "Informasi katalog. Harga dan stok transaksi mengikuti kanal resmi yang telah disetujui."}</p>
   </div>;
 }
 
 function CartControls({ product, size }: { product: Product; size: ProductSize }) {
-  const { addItem, hydrated } = useCart();
+  const { addItem, hydrated,availability,lines } = useCart();
+  const row=availability?.find(item=>item.productId===product.id&&item.sizeId===size.id);
+  const inCart=lines.find(item=>item.productId===product.id&&item.sizeId===size.id)?.quantity??0;
+  const limit=Math.max(0,Math.min(MAX_CART_LINE_QUANTITY-inCart,(row?.maxQuantity??0)-inCart));
   const [quantity, setQuantity] = useState(1);
-  return <div className="purchase-row">
+  return <><p className="delivery-note" role="status">{row?.status==="available"?`Tersedia hingga ${row.maxQuantity} unit. Dikunci saat checkout.`:row?.status==="unavailable"?"Varian ini belum tersedia.":"Stok varian ini belum terverifikasi."}</p><div className="purchase-row">
       <div className="quantity-control">
         <button type="button" aria-label="Kurangi jumlah" onClick={() => setQuantity((value) => Math.max(1, value - 1))} disabled={quantity <= 1}>−</button>
         <span aria-live="polite">{quantity}</span>
-        <button type="button" aria-label="Tambah jumlah" onClick={() => setQuantity((value) => Math.min(MAX_CART_LINE_QUANTITY, value + 1))} disabled={quantity >= MAX_CART_LINE_QUANTITY}>+</button>
+        <button type="button" aria-label="Tambah jumlah" onClick={() => setQuantity((value) => Math.min(limit, value + 1))} disabled={quantity >= limit}>+</button>
       </div>
-      <button type="button" className="button primary full" disabled={!hydrated} onClick={() => addItem(product.id, size.id, quantity)}>Add to Cart · {formatRupiah((size.price ?? 0) * quantity)}</button>
-    </div>;
+      <button type="button" className="button primary full" disabled={!hydrated||quantity>limit} onClick={() => addItem(product.id, size.id, quantity)}>Add to Cart · {formatRupiah((size.price ?? 0) * quantity)}</button>
+    </div></>;
 }

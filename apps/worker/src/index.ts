@@ -8,6 +8,7 @@ import { startMetricsServer } from "./metrics-server.js";
 import { reconcileSupport } from "./reconcile-handler.js";
 import { deliverSupportOutbox, processPendingOutbox } from "./reply-delivery-handler.js";
 import { runPaymentReconcile } from "./payment-reconcile-handler.js";
+import { runPaymentNotifications } from "./payment-notification-handler.js";
 import { runPhoneDelivery } from "./phone-delivery-handler.js";
 
 // Fail closed before any queue starts processing: an invalid runtime
@@ -113,6 +114,10 @@ async function start() {
     }
   });
   await boss.schedule("payment.reconcile", "*/5 * * * *", {});
+  await boss.createQueue("payment.notifications");
+  await boss.work("payment.notifications",{batchSize:1},async()=>{await runPaymentNotifications(repos.database);});
+  await boss.schedule("payment.notifications","* * * * *",{});
+  await boss.send("payment.notifications",{});
   await boss.createQueue("identity.delivery");
   await boss.work("identity.delivery", { batchSize: 1 }, async () => {
     await runPhoneDelivery(repos.database);

@@ -25,6 +25,11 @@ test("unset commerce defaults to preview with static listings and no database", 
   assert.equal(config.appOrigin, null);
 });
 
+test("production admission remains disabled when the activation variable is absent",()=>{
+ assert.equal(parseCommerceRuntimeConfig({YUBIE_ENV:"production"}).checkoutAdmission,"disabled");
+ assert.equal(parseCommerceRuntimeConfig({YUBIE_ENV:"production",YUBIE_CHECKOUT_ADMISSION:"enabled"}).checkoutAdmission,"enabled");
+});
+
 test("purchase options source defaults to database when DATABASE_URL is present", () => {
   const config = parseCommerceRuntimeConfig({ DATABASE_URL: "postgresql://localhost/yubie" });
   assert.equal(config.purchaseOptionsSource, "database");

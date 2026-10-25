@@ -14,6 +14,8 @@ export type ListingHealthResult =
   | "unknown";
 
 export type ErrorCode =
+  | "shipping_unavailable"
+  | "checkout_safety_hold"
   | "validation"
   | "unauthorized"
   | "forbidden"

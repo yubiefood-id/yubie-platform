@@ -28,4 +28,6 @@ timeout \
   "${SITES_BUILD_TIMEOUT:-3m}" \
   "${vinext}" build
 
+node "${script_dir}/release-identity.mjs" "${SITES_PROJECT_ROOT}"
+
 "${script_dir}/validate-artifact.sh"

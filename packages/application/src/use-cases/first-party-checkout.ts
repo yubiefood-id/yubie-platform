@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { paymentSessionMatches,flagPaymentMismatch,recordPaymentMismatch } from "./payment-session-verification.js";
+import { priceCheckoutLines } from "./checkout-quote.js";
 import {
   MAX_CART_LINE_QUANTITY,
   MAX_CHECKOUT_TOTAL_IDR,
@@ -8,7 +10,6 @@ import {
   ok,
   orderStatusForPayment,
   paymentStatusFromProviderSession,
-  productFamilies,
   normalizePhone,
   resolveShippingPolicy,
   type AppError,
@@ -36,6 +37,8 @@ import { authorizeCheckoutPromotion, reserveCheckoutPromotion, settlePromotionFo
 import type { CustomerProof } from "./phone-auth.js";
 import { lockCheckoutScope, CheckoutScopeError } from "./checkout-principals.js";
 class CheckoutTotalError extends Error {}
+class ShippingUnavailableError extends Error {}
+class CheckoutSafetyHoldError extends Error {}
 
 export interface CheckoutLineInput {
   productId: string;
@@ -58,6 +61,7 @@ export interface CreateFirstPartyCheckoutInput {
   cancelReturnUrl: string;
   /** SHIPPING_POLICY name; resolved server-side, never client-supplied. */
   shippingPolicy?: string;
+  requireApprovedShipping?: boolean;
   /**
    * "lots" reserves sellable lot stock inside TX1 (food-safety sellability
    * gate); "none" is allowed only outside staging/production xendit mode.
@@ -107,6 +111,10 @@ export interface PublicCheckoutStatusView {
   currency: "IDR";
   totalAmount: number;
   expiresAt: string | null;
+  lines: Array<{productName:string;sizeLabel:string;quantity:number;unitPrice:number}>;
+  reconciliationException: boolean;
+  fulfillmentHold: boolean;
+  resumeUrl: string|null;
 }
 
 /** Full view for the authenticated, ownership-checked account endpoint. */
@@ -330,29 +338,11 @@ export async function createFirstPartyCheckout(
   }
   if (recovered) return recovered;
 
-  const priced: OrderLineRecord[] = [];
-  for (const line of input.lines) {
-    const product = productFamilies.find((item) => item.id === line.productId && item.status === "available");
-    const size = product?.sizes.find((item) => item.id === line.sizeId && item.available && typeof item.price === "number");
-    if (!product || !size || typeof size.price !== "number") {
-      return err({ code: "out_of_stock", message: `Line unavailable: ${line.productId}/${line.sizeId}`, retryable: false, requestId: "checkout" });
-    }
-    const quantity = Math.min(Math.max(Math.trunc(line.quantity) || 0, 1), MAX_CART_LINE_QUANTITY);
-    priced.push({
-      id: `${product.id}-${size.id}`,
-      productId: product.id,
-      productName: product.name,
-      sizeId: size.id,
-      sizeLabel: size.label,
-      quantity,
-      unitPrice: size.price,
-    });
-  }
-  if (priced.length === 0) {
-    return err({ code: "validation", message: "Checkout requires at least one available line.", retryable: false, requestId: "checkout" });
-  }
+  let priced: OrderLineRecord[];
+  try { priced = priceCheckoutLines(input.lines); }
+  catch (error) { return err({code:error instanceof RangeError?"validation":"out_of_stock",message:"Unavailable line or invalid quantity.",retryable:false,requestId:"checkout"}); }
 
-  let shipping;
+  let shipping: ReturnType<typeof resolveShippingPolicy>;
   try {
     shipping = resolveShippingPolicy(input.shippingPolicy);
   } catch (error) {
@@ -421,6 +411,13 @@ export async function createFirstPartyCheckout(
         if (idempotencyKey) await attachOutcome(repos, open);
         return outcomeResult(open);
       }
+      if(await repos.payments.hasFinancialException())throw new CheckoutSafetyHoldError();
+      if (input.requireApprovedShipping) {
+        const approved = await repos.shipping?.authorize(input.delivery?.city ?? "", deps.clock.now());
+        if (!approved) throw new ShippingUnavailableError();
+        shipping = approved;
+        draftOrder.shipping = approved;
+      }
       const promotion = await authorizeCheckoutPromotion({
         lines: priced, ...(input.userId === undefined ? {} : { userId: input.userId }),
         ...(input.customerProof ? { actor: input.customerProof } : {}), ...(input.promoCode ? { code: input.promoCode } : {}),
@@ -430,6 +427,10 @@ export async function createFirstPartyCheckout(
       if (!isPayableTotal(totals.grandTotalAmount)) throw new CheckoutTotalError();
       draftOrder.totals = totals; draftOrder.totalAmount = totals.grandTotalAmount; paymentIntent.amount = totals.grandTotalAmount;
       await repos.orders.save(draftOrder);
+      if(idempotencyKey){
+        const bound=await repos.idempotency.attachResource(claimInput,orderId);
+        if(!bound.ok)throw new Error("Checkout recovery binding unavailable");
+      }
       await repos.payments.save(paymentIntent);
       if (promotion) await reserveCheckoutPromotion(promotion, orderId, repos, deps);
       if ((input.inventoryMode ?? "none") === "lots") {
@@ -453,6 +454,8 @@ export async function createFirstPartyCheckout(
     });
     if (tx1 !== null) return tx1; // duplicate replay outcome
   } catch (error) {
+    if(error instanceof CheckoutSafetyHoldError)return err({code:"checkout_safety_hold",message:"New checkout is frozen pending financial reconciliation.",retryable:false,requestId:"checkout"});
+    if (error instanceof ShippingUnavailableError) return err({code:"shipping_unavailable",message:"Shipping policy or destination is not approved.",retryable:false,requestId:"checkout"});
     if (error instanceof CheckoutScopeError) return err({ code: error.code, message: error.message, retryable: error.code === "pending_reconciliation", requestId: "checkout" });
     if (error instanceof PromotionAuthorizationError || error instanceof CheckoutTotalError) {
       if (claimed && idempotencyKey) await deps.tx.run("checkout.idempotency.release", repos => repos.idempotency.releaseClaim(claimInput)).catch(() => undefined);
@@ -490,7 +493,7 @@ export async function createFirstPartyCheckout(
     customerPhone: phone?.e164 ?? null,
     description: `Yubie order ${checkoutRef}`,
     successReturnUrl: `${input.successReturnUrl}${separator}checkout=${token}`,
-    cancelReturnUrl: input.cancelReturnUrl,
+    cancelReturnUrl: `${input.cancelReturnUrl}${input.cancelReturnUrl.includes("?")?"&":"?"}checkout=${token}`,
     expiresAt: orderExpiresAt,
     items: buildProviderLineItems(input.provider, checkoutRef, priced, totals),
   }).catch((): Awaited<ReturnType<PaymentProviderPort["createPaymentSession"]>> =>
@@ -661,8 +664,12 @@ export async function getCheckoutStatus(
   const payment = paymentsResult.value[0] ?? null;
 
   if (options.poll && payment && payment.status === "pending" && payment.providerSessionId && deps.provider && payment.provider !== "preview") {
-    const session = await deps.provider.getPaymentSession(payment.providerSessionId);
-    if (session.ok && session.value) {
+    const session = await deps.provider.getPaymentSession(payment.providerSessionId,{providerPaymentId:payment.providerPaymentId??null,referenceId:order.checkoutRef});
+    if(session.ok&&session.value&&!paymentSessionMatches(payment,order,session.value)){
+      await flagPaymentMismatch(payment.id,deps);
+      return ok(view(order,{...payment,reconciliationState:"provider_mismatch"}));
+    }
+    if (session.ok && session.value && paymentSessionMatches(payment,order,session.value)) {
       const reconciled = paymentStatusFromProviderSession(session.value.rawStatus);
       if (reconciled) {
         await deps.tx.run("checkout.poll_reconcile", async (repos) => {
@@ -670,12 +677,16 @@ export async function getCheckoutStatus(
           const locked = await repos.payments.lockById(payment.id);
           if (locked.ok && locked.value && locked.value.status === "pending") {
             const freshOrder = await repos.orders.findById(order.id);
-            if (freshOrder.ok && freshOrder.value) {
+            if(freshOrder.ok&&freshOrder.value&&!paymentSessionMatches(locked.value,freshOrder.value,session.value!))await recordPaymentMismatch(locked.value,repos,deps.clock.now());
+            if (freshOrder.ok && freshOrder.value && paymentSessionMatches(locked.value,freshOrder.value,session.value!)) {
               await applyPaymentStatus({ ...repos, clock: deps.clock, ids: deps.ids }, locked.value, freshOrder.value, reconciled);
             }
           }
         });
-        return ok(view({ ...order, status: orderStatusForPayment(reconciled) ?? order.status }, { ...payment, status: reconciled }));
+        const actualOrder=await deps.orders.findById(order.id);
+        const actualPayments=await deps.payments.findByOrderId(order.id);
+        if(!actualOrder.ok||!actualOrder.value||!actualPayments.ok)return err({code:"unavailable",message:"Payment confirmation is unavailable.",retryable:true,requestId:"checkout"});
+        return ok(view(actualOrder.value,actualPayments.value.find(row=>row.id===payment.id)??null));
       }
     }
   }
@@ -692,6 +703,10 @@ function view(order: OrderRecord, payment: PaymentRecord | null): PublicCheckout
     currency: "IDR",
     totalAmount: order.totalAmount,
     expiresAt: payment?.expiresAt ?? null,
+    lines: order.lines.map(({productName,sizeLabel,quantity,unitPrice})=>({productName,sizeLabel,quantity,unitPrice})),
+    fulfillmentHold: !!order.fulfillmentHold,
+    reconciliationException: ["late_success_after_terminal","multiple_successful_transactions","provider_mismatch"].includes(payment?.reconciliationState??""),
+    resumeUrl: payment?.status==="pending" && (!payment.reconciliationState||payment.reconciliationState==="none") ? payment.redirectUrl??null : null,
   };
 }
 

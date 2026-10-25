@@ -1,4 +1,4 @@
-import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb, boolean, foreignKey, check } from "drizzle-orm/pg-core";
+import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb, boolean, foreignKey, check, primaryKey } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { PhoneChallenge, AuthIdentity, AddressDetails, DeliveryPin, PromotionCampaign, PromotionRedemption } from "@yubie/domain";
 
@@ -68,6 +68,7 @@ export const whatsappIntents = pgTable("whatsapp_intents", {
 });
 
 export const idempotencyKeys = pgTable("idempotency_keys", {
+  resourceId:text("resource_id").references(()=>firstPartyOrders.id),
   id: text("id").primaryKey(),
   scope: text("scope").notNull(),
   principalKey: text("principal_key").notNull(),
@@ -390,6 +391,7 @@ export const authSessions = pgTable("auth_sessions", {
 export const firstPartyOrders = pgTable("orders", {
   id: text("id").primaryKey(),
   checkoutRef: text("checkout_ref").notNull(),
+  fulfillmentHold: text("fulfillment_hold"),
   checkoutPublicToken: text("checkout_public_token").notNull(),
   status: text("status").notNull().default("pending_payment"),
   userId: text("user_id").references(() => users.id),
@@ -463,6 +465,8 @@ export const inventoryLots = pgTable("inventory_lots", {
   productId: text("product_id").notNull(),
   sizeId: text("size_id").notNull(),
   lotCode: text("lot_code").notNull(),
+  qcApprovalRef: text("qc_approval_ref"),
+  unitOfMeasure: text("unit_of_measure"),
   quantityOnHand: integer("quantity_on_hand").notNull(),
   expiryDate: date("expiry_date").notNull(),
   status: inventoryLotStatusEnum("status").notNull().default("received"),
@@ -612,3 +616,16 @@ export const checkoutGuestBindings = pgTable("checkout_guest_bindings", {
   guestPrincipal: text("guest_principal").primaryKey(), userId: text("user_id").notNull().references(() => users.id),
   linkedAt: timestamp("linked_at", { withTimezone: true, mode: "string" }).notNull(),
 }, table => [index("checkout_guest_bindings_user").on(table.userId)]);
+
+export const inventorySkuPolicies=pgTable("inventory_sku_policies",{
+ productId:text("product_id").notNull(),sizeId:text("size_id").notNull(),version:integer("version").notNull(),components:jsonb("components").notNull(),approvalRef:text("approval_ref").notNull(),approvedBy:text("approved_by").notNull(),approvedAt:timestamp("approved_at",{withTimezone:true,mode:"string"}).notNull(),
+},table=>[primaryKey({columns:[table.productId,table.sizeId]})]);
+export const inventoryOnboardingOperations=pgTable("inventory_onboarding_operations",{
+ operationId:text("operation_id").primaryKey(),inputHash:text("input_hash").notNull(),inputSnapshot:jsonb("input_snapshot").notNull(),result:jsonb("result").notNull(),actor:text("actor").notNull(),reason:text("reason").notNull(),occurredAt:timestamp("occurred_at",{withTimezone:true,mode:"string"}).notNull(),
+});
+export const shippingPolicyApprovals=pgTable("shipping_policy_approvals",{
+ id:text("id").primaryKey(),policy:text("policy").notNull(),cities:jsonb("cities").notNull(),approvalRef:text("approval_ref").notNull(),approvedBy:text("approved_by").notNull(),startsAt:timestamp("starts_at",{withTimezone:true,mode:"string"}).notNull(),endsAt:timestamp("ends_at",{withTimezone:true,mode:"string"}).notNull(),
+});
+export const paymentNotificationInbox=pgTable("payment_notification_inbox",{
+ id:text("id").primaryKey(),dedupeKey:text("dedupe_key").notNull().unique(),notification:jsonb("notification").notNull(),receivedAt:timestamp("received_at",{withTimezone:true,mode:"string"}).notNull().defaultNow(),processedAt:timestamp("processed_at",{withTimezone:true,mode:"string"}),retryAfter:timestamp("retry_after",{withTimezone:true,mode:"string"}).notNull().defaultNow(),attemptCount:integer("attempt_count").notNull().default(0),lastErrorCode:text("last_error_code"),
+});

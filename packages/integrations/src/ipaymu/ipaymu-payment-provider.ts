@@ -116,8 +116,9 @@ export class IpaymuPaymentProvider implements PaymentProviderPort {
     });
   }
 
-  async getPaymentSession(providerSessionId: string): Promise<UseCaseResult<PaymentSessionHandle | null>> {
-    if (!/^\d+$/.test(providerSessionId)) {
+  async getPaymentSession(providerSessionId: string, lookup?: {providerPaymentId?:string|null;referenceId?:string}): Promise<UseCaseResult<PaymentSessionHandle | null>> {
+    const transactionId=lookup?.providerPaymentId ?? providerSessionId;
+    if (!/^[1-9]\d*$/.test(transactionId)) {
       return err({
         code: "unsupported",
         message: "iPaymu transaction check requires transactionId. SessionID lookup is not documented.",
@@ -125,7 +126,7 @@ export class IpaymuPaymentProvider implements PaymentProviderPort {
         requestId: "ipaymu",
       });
     }
-    const body = JSON.stringify({ transactionId: providerSessionId });
+    const body = JSON.stringify({ transactionId });
     const signature = signIpaymuRequest("POST", this.options.va, body, this.options.apiKey);
     let response: { ok: boolean; status: number; json(): Promise<unknown> };
     try {
@@ -146,7 +147,8 @@ export class IpaymuPaymentProvider implements PaymentProviderPort {
     if (!response.ok) {
       return err({ code: "unavailable", message: "iPaymu transaction check failed.", retryable: true, requestId: "ipaymu" });
     }
-    const parsed = asRecord(await response.json());
+    let parsed: Record<string,unknown>|null;
+    try { parsed=asRecord(await response.json()); } catch { return err({code:"unavailable",message:"iPaymu transaction response was unreadable.",retryable:true,requestId:"ipaymu"}); }
     const data = asRecord(parsed?.Data);
     const status = typeof data?.Status === "number" ? data.Status : Number.NaN;
     const sessionId = typeof data?.SessionId === "string" ? data.SessionId : providerSessionId;
@@ -157,7 +159,7 @@ export class IpaymuPaymentProvider implements PaymentProviderPort {
       redirectUrl: "",
       rawStatus: mapIpaymuStatus(status),
       expiresAt: null,
-      providerPaymentId: providerSessionId,
+      providerPaymentId: transactionId,
       referenceId: typeof data?.ReferenceId === "string" ? data.ReferenceId : null,
       amount: amount !== null && Number.isSafeInteger(amount) ? amount : null,
     });

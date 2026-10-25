@@ -8,6 +8,9 @@ import {
 import {
   buildProviderLineItems,
   createFirstPartyCheckout,
+  getCheckoutStatus,
+  currentCheckout,
+  applyIpaymuCallback,
   FixedClock,
   InMemoryAuditRepository,
   InMemoryIdempotencyRepository,
@@ -87,6 +90,61 @@ test("iPaymu line builder includes shipping and discount in the single aggregate
   const priced = [{ id: "flour-250g", productId: "flour", productName: "Yubie Flour", sizeId: "250g", sizeLabel: "250 g", quantity: 1, unitPrice: 35000 }];
   const items = buildProviderLineItems("ipaymu", "co_ref", priced, totals);
   assert.deepEqual(items, [{ referenceId: "co_ref", name: "Pesanan Yubie co_ref", quantity: 1, netUnitAmount: 41750 }]);
+});
+
+test("production checkout refuses unapproved shipping before creating an order or provider session", async () => {
+  const deps = makeDeps();
+  const result = await createFirstPartyCheckout({ ...BASE, requireApprovedShipping: true, lines: [{productId:"flour",sizeId:"250g",quantity:1}] }, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "shipping_unavailable");
+  assert.equal(deps.orders.items.size, 0);
+  assert.equal(deps.provider.created.length, 0);
+});
+
+test("a provider poll with another amount cannot confirm a customer's order",async()=>{
+ const deps=makeDeps();
+ const created=await createFirstPartyCheckout({...BASE,lines:[{productId:"flour",sizeId:"250g",quantity:1}]},deps);
+ assert.equal(created.ok,true);
+ deps.provider.getPaymentSession=async()=>({ok:true,value:{provider:"ipaymu",providerSessionId:"sess-1",redirectUrl:"",rawStatus:"SUCCEEDED",expiresAt:null,referenceId:created.value.checkoutRef,amount:1}});
+ const result=await getCheckoutStatus(created.value.checkoutToken,deps,{poll:true});
+ assert.equal(result.value.orderStatus,"pending_payment");assert.equal(result.value.paymentStatus,"pending");
+  assert.equal(result.value.reconciliationException,true);
+  const next=await createFirstPartyCheckout({...BASE,idempotencyPrincipal:"user:another",lines:[{productId:"flour",sizeId:"250g",quantity:1}]},deps);
+  assert.equal(next.ok,false);assert.equal(next.error.code,"checkout_safety_hold");
+});
+
+test("a poll proof cannot settle a different transaction recorded while the request was in flight",async()=>{
+ const deps=makeDeps();const created=await createFirstPartyCheckout({...BASE,lines:[{productId:"flour",sizeId:"250g",quantity:1}]},deps);
+ const payment=[...deps.payments.items.values()][0];await deps.payments.save({...payment,providerPaymentId:"100"});
+ deps.provider.getPaymentSession=async()=>{await deps.payments.save({...payment,providerPaymentId:"200"});return{ok:true,value:{provider:"ipaymu",providerSessionId:"sess-1",providerPaymentId:"100",redirectUrl:"",rawStatus:"SUCCEEDED",expiresAt:null,referenceId:created.value.checkoutRef,amount:35000}};};
+ const result=await getCheckoutStatus(created.value.checkoutToken,deps,{poll:true});
+ assert.equal(result.value.orderStatus,"pending_payment");assert.equal(result.value.paymentStatus,"pending");
+ assert.equal([...deps.payments.items.values()][0].providerPaymentId,"200");
+  assert.equal(result.value.reconciliationException,true);
+});
+
+test("lost create responses remain recoverable after the callback has already settled the order",async()=>{
+ const deps=makeDeps();deps.provider.createPaymentSession=async()=>({ok:false,error:{code:"timeout",message:"unknown",retryable:true,requestId:"synthetic"}});
+ const created=await createFirstPartyCheckout({...BASE,idempotencyKey:"lost-response",lines:[{productId:"flour",sizeId:"250g",quantity:1}]},deps);
+ assert.equal(created.ok,false);
+ const order=[...deps.orders.items.values()][0];
+ await applyIpaymuCallback({referenceId:order.checkoutRef,merchant:"synthetic",expectedMerchant:"synthetic",amount:35000,authoritativeStatus:"succeeded",authoritativeReferenceId:order.checkoutRef,authoritativeAmount:35000,trxId:"123",sessionId:"lost-session",dedupeKey:"paid-before-recovery"},deps);
+ const recovered=await currentCheckout({userId:"test",guestPrincipal:null,attemptKey:"lost-response"},deps.tx);
+ assert.equal(recovered?.checkoutToken,order.checkoutPublicToken);
+ assert.equal(recovered?.state,"resolved");
+ assert.equal(await currentCheckout({userId:"different-customer",guestPrincipal:null,attemptKey:"lost-response"},deps.tx),null);
+});
+
+test("a financial exception arriving during provider create survives successful session attachment",async()=>{
+ const deps=makeDeps();const create=deps.provider.createPaymentSession.bind(deps.provider);
+ deps.provider.createPaymentSession=async input=>{
+  const payment=[...deps.payments.items.values()][0];
+  await deps.payments.save({...payment,reconciliationState:"provider_mismatch"});
+  return create(input);
+ };
+ const result=await createFirstPartyCheckout({...BASE,lines:[{productId:"flour",sizeId:"250g",quantity:1}]},deps);
+ assert.equal(result.ok,true);assert.equal(await deps.payments.hasFinancialException(),true);
+ assert.equal([...deps.payments.items.values()][0].reconciliationState,"provider_mismatch");
 });
 
 test("rounding remainder from the 15% discount is floored and the line still equals the grand total", () => {

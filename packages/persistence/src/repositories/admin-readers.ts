@@ -120,7 +120,7 @@ export class PostgresAdminReaders {
               (EXTRACT(EPOCH FROM created_at) * 1000000)::bigint::text AS created_micros
             FROM order_payments
             WHERE (id ILIKE ${pattern} OR order_id ILIKE ${pattern})
-              AND (${!query.exceptionsOnly} OR reconciliation_state IN ('ambiguous', 'ambiguous_create', 'pending_reconciliation', 'attach_failed', 'late_success_after_terminal', 'multiple_successful_transactions'))
+              AND (${!query.exceptionsOnly} OR reconciliation_state IN ('ambiguous', 'ambiguous_create', 'pending_reconciliation', 'attach_failed', 'late_success_after_terminal', 'multiple_successful_transactions', 'provider_mismatch', 'other_payment_unresolved'))
               AND ((EXTRACT(EPOCH FROM created_at) * 1000000)::bigint, id)
               < (${cursor.createdAtMicros}::bigint, ${cursor.id})
             ORDER BY created_at DESC, id DESC
@@ -130,7 +130,7 @@ export class PostgresAdminReaders {
               (EXTRACT(EPOCH FROM created_at) * 1000000)::bigint::text AS created_micros
             FROM order_payments
             WHERE (id ILIKE ${pattern} OR order_id ILIKE ${pattern})
-              AND (${!query.exceptionsOnly} OR reconciliation_state IN ('ambiguous', 'ambiguous_create', 'pending_reconciliation', 'attach_failed', 'late_success_after_terminal', 'multiple_successful_transactions'))
+              AND (${!query.exceptionsOnly} OR reconciliation_state IN ('ambiguous', 'ambiguous_create', 'pending_reconciliation', 'attach_failed', 'late_success_after_terminal', 'multiple_successful_transactions', 'provider_mismatch', 'other_payment_unresolved'))
             ORDER BY created_at DESC, id DESC
             LIMIT ${query.limit + 1}`;
     });

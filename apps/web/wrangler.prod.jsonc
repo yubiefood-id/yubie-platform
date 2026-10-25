@@ -11,17 +11,9 @@
 // NEXT_PUBLIC_YUBIE_LAUNCH_PROFILE=DIRECT_COMMERCE_PRODUCTION so customer
 // routes render; the static catalog export path rejects that profile by design.
 //
-// Cutover order (ADR-013 + 2026-10-24/ROLLBACK.md):
-//   1. Deploy first to the candidate hostname (next.yubiefood.com route below),
-//      run the browser acceptance suite against it.
-//   2. Only after acceptance + operator approval, switch the route pattern to
-//      the apex yubiefood.com. The Vercel static catalog stays deployed and
-//      untouched as the rollback origin.
-//
-// Preflight requirements before any production deploy:
-//   - Wrangler token with Workers Scripts:Edit + Zone Workers Routes:Edit.
-//   - api.yubiefood.com DNS + production API live and healthy.
-//   - Snapshot prior apex DNS/Worker state for rollback.
+// Existing production custom domains and ASSETS binding must be preserved.
+// Rollback uses a compatible Worker version; never restore apex DNS to Vercel.
+// Build under DIRECT_COMMERCE_PRODUCTION and retain the complete Vinext assets.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "yubie-web-production",
@@ -43,14 +35,7 @@
   "vars": {
     "YUBIE_API_ORIGIN": "https://api.yubiefood.com"
   },
-  // Cutover (2026-10-24, owner-authorized after candidate acceptance 66/66 +
-  // 6/6 extended): apex joins the candidate route once the existing apex A
-  // records are deleted in Cloudflare (attach fails with error 100117
-  // "externally managed DNS records" until then — that deletion is the
-  // deliberate owner-side risk point). Vercel stays intact as instant
-  // rollback: apex A snapshot 64.29.17.1 / 216.198.79.1, www CNAME
-  // 1cb06cbfd63cf530.vercel-dns-017.com (www keeps pointing at Vercel and
-  // 308s to the apex under either owner).
+  // Existing apex and candidate custom domains; no DNS cutover is required.
   "routes": [
     { "pattern": "next.yubiefood.com", "custom_domain": true },
     { "pattern": "yubiefood.com", "custom_domain": true }

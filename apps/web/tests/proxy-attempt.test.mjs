@@ -2,6 +2,23 @@ import assert from "node:assert/strict";
 import test from "node:test";
 // Native TS type-stripping (node >= 22.18) imports the pure helpers directly.
 import { attemptKeyForCart, attemptOutcomeForHttpStatus, classifyCheckoutResponse, forwardableProxyHeaders, customerProxyHeaders, nextAttemptKey } from "../lib/proxy-headers.ts";
+import {storedAttemptForRequest} from "../lib/proxy-headers.ts";
+import * as attemptHelpers from "../lib/proxy-headers.ts";
+
+test("authoritative recovery can continue when browser pointer storage is corrupt or unavailable",()=>{
+ assert.equal(typeof attemptHelpers.rememberRecoveredCheckout,"function");
+ for(const storage of [
+  {getItem:()=>"{broken",setItem:()=>{}},
+  {getItem:()=>{throw new Error("SecurityError");},setItem:()=>{throw new Error("QuotaExceeded");}},
+ ])assert.doesNotThrow(()=>attemptHelpers.rememberRecoveredCheckout(storage,"a".repeat(32)));
+});
+
+test("an unresolved stored attempt cannot be replaced by editing checkout details",async()=>{
+ const values=new Map();const storage={getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v)};
+ const first=await storedAttemptForRequest(storage,"original",crypto.randomUUID());
+ await assert.rejects(()=>storedAttemptForRequest(storage,"changed",crypto.randomUUID()),/unresolved/);
+ assert.equal(JSON.parse([...values.values()][0]).key,first.key);
+});
 
 test("the proxy forwards ONLY the allowlisted browser headers", () => {
   const headers = new Headers({
@@ -79,6 +96,11 @@ test("checkout responses map to UI outcomes; errors never fall back to preview",
   assert.equal(classifyCheckoutResponse(409, { code: "UNAVAILABLE_LINE" }), "sold_out");
   assert.equal(classifyCheckoutResponse(400, { code: "INVALID_REQUEST" }), "invalid");
   assert.equal(classifyCheckoutResponse(201, { data: { mode: "live" } }), "failed", "a 201 without a redirect is not a success");
+});
+
+test("disabled admission never tells a customer that a payment is pending", () => {
+  assert.equal(classifyCheckoutResponse(503, { code: "CHECKOUT_DISABLED" }), "unavailable");
+  assert.equal(classifyCheckoutResponse(503, { code: "SHIPPING_UNAVAILABLE" }), "unavailable");
 });
 
 test("login return path cannot become an external or script navigation", async () => {

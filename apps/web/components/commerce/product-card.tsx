@@ -30,7 +30,7 @@ export function ProductCard({ product, index }: { product: Product; index: numbe
       <span className="eyebrow">{product.positioning ?? product.eyebrow}</span>
       <h3><Link href={`/products/${product.slug}`} onClick={() => trackCard("product_card_title")}>{product.name}</Link></h3>
       <p>{product.descriptor}</p>
-      <div className="product-pricing">{price !== null ? <><span className="availability-chip available">{directCommerce ? "Tersedia" : "Katalog"}</span><strong className="price-tag">Mulai {formatRupiah(price)}</strong></> : <span className="availability-chip coming">Belum tersedia</span>}</div>
+      <div className="product-pricing">{price !== null ? <>{directCommerce ? <StockBadge productId={product.id} sizeId={selected?.id??""} /> : <span className="availability-chip available">Katalog</span>}<strong className="price-tag">Mulai {formatRupiah(price)}</strong></> : <span className="availability-chip coming">Belum tersedia</span>}</div>
       {selected && typeof selected.price === "number" ? <div className="product-quick-buy">
         <label><span className="sr-only">Pilih varian {product.name}</span><select value={selected.id} onChange={(event) => setSizeId(event.target.value)}>{variants.map((variant) => <option key={variant.id} value={variant.id}>{variant.label} · {formatRupiah(variant.price ?? 0)}</option>)}</select></label>
         {directCommerce && <QuickAdd productId={product.id} sizeId={selected.id} />}
@@ -41,6 +41,13 @@ export function ProductCard({ product, index }: { product: Product; index: numbe
 }
 
 function QuickAdd({ productId, sizeId }: { productId: string; sizeId: string }) {
-  const { addItem, hydrated } = useCart();
-  return <button type="button" className="quick-add" disabled={!hydrated} onClick={() => addItem(productId, sizeId, 1)}>Tambah</button>;
+  const { addItem, hydrated,availability,lines } = useCart();
+  const available=availability?.find(row=>row.productId===productId&&row.sizeId===sizeId)?.maxQuantity??0;
+  const inCart=lines.find(row=>row.productId===productId&&row.sizeId===sizeId)?.quantity??0;
+  return <button type="button" className="quick-add" disabled={!hydrated||inCart>=available} onClick={() => addItem(productId, sizeId, 1)}>Tambah</button>;
+}
+
+function StockBadge({productId,sizeId}:{productId:string;sizeId:string}) {
+  const {availability}=useCart();const row=availability?.find(item=>item.productId===productId&&item.sizeId===sizeId);
+  return <span className="availability-chip">{row?.status==="available"?"Tersedia":row?.status==="unavailable"?"Belum tersedia":"Stok belum terverifikasi"}</span>;
 }

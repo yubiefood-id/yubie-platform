@@ -51,6 +51,7 @@ export interface OrderTotals {
 }
 
 export interface OrderRecord {
+  fulfillmentHold?: string | null;
   id: string;
   /** Xendit reference_id (<=64 chars). */
   checkoutRef: string;
@@ -70,6 +71,12 @@ export interface OrderRecord {
   lines: OrderLineRecord[];
   createdAt: string;
   updatedAt: string;
+}
+
+/** Ordinary lifecycle observations cannot resolve a Finance exception. */
+export const FINANCIAL_EXCEPTION_STATES = ["provider_mismatch","late_success_after_terminal","multiple_successful_transactions","other_payment_unresolved"] as const;
+export function isFinancialException(state:string|null|undefined):boolean {
+  return (FINANCIAL_EXCEPTION_STATES as readonly string[]).includes(state??"");
 }
 
 export type PaymentProviderKind = "xendit" | "ipaymu" | "preview";

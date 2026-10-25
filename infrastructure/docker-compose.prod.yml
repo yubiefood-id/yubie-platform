@@ -42,7 +42,7 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: ghcr.io/yubiefood-id/yubie-api:${RELEASE_SHA}
+    image: ${YUBIE_API_IMAGE:-ghcr.io/yubiefood-id/yubie-api:${RELEASE_SHA}}
     command: ["node", "packages/persistence/dist/scripts/migrate.js"]
     environment:
       DATABASE_URL: ${DATABASE_URL}
@@ -53,7 +53,7 @@ services:
     restart: "no"
 
   api:
-    image: ghcr.io/yubiefood-id/yubie-api:${RELEASE_SHA}
+    image: ${YUBIE_API_IMAGE:-ghcr.io/yubiefood-id/yubie-api:${RELEASE_SHA}}
     # Loopback-only publish: the VPS ingress is a HOST caddy binary (the
     # shared RetroPick caddy), which cannot join a compose bridge network.
     # 127.0.0.1 binding keeps the API unreachable from outside the host —
@@ -69,9 +69,9 @@ services:
       YUBIE_LAUNCH_PROFILE: ${YUBIE_LAUNCH_PROFILE:-PUBLIC_CATALOG_NO_SALES}
       COMMERCE_PROVIDER: ${COMMERCE_PROVIDER:-preview}
       INVENTORY_MODE: ${INVENTORY_MODE:-lots}
-      YUBIE_CHECKOUT_ADMISSION: ${YUBIE_CHECKOUT_ADMISSION:-enabled}
+      YUBIE_CHECKOUT_ADMISSION: ${YUBIE_CHECKOUT_ADMISSION:-disabled}
       PURCHASE_OPTIONS_SOURCE: ${PURCHASE_OPTIONS_SOURCE:-database}
-      SHIPPING_POLICY: ${SHIPPING_POLICY:-free_promotional}
+      SHIPPING_POLICY: ${SHIPPING_POLICY:-}
       XENDIT_SECRET_KEY: ${XENDIT_SECRET_KEY:-}
       XENDIT_WEBHOOK_TOKEN: ${XENDIT_WEBHOOK_TOKEN:-}
       XENDIT_BUSINESS_ID: ${XENDIT_BUSINESS_ID:-}
@@ -101,7 +101,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: ghcr.io/yubiefood-id/yubie-worker:${RELEASE_SHA}
+    image: ${YUBIE_WORKER_IMAGE:-ghcr.io/yubiefood-id/yubie-worker:${RELEASE_SHA}}
     environment:
       DATABASE_URL: ${DATABASE_URL}
       RELEASE_SHA: ${RELEASE_SHA}

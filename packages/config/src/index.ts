@@ -485,7 +485,7 @@ export function parseCommerceRuntimeConfig(env: RuntimeEnvSource = process.env):
 
   let checkoutAdmission: CheckoutAdmissionName = "enabled";
   try {
-    checkoutAdmission = parseCheckoutAdmissionName(env.YUBIE_CHECKOUT_ADMISSION);
+    checkoutAdmission = parseCheckoutAdmissionName(env.YUBIE_CHECKOUT_ADMISSION ?? (env.YUBIE_ENV==="production"?"disabled":undefined));
   } catch (error) {
     errors.push(configMessage(error));
   }

@@ -9,7 +9,7 @@ import { useFocusTrap } from "@/lib/a11y";
 import { formatRupiah } from "@/lib/format";
 
 export function CartDrawer() {
-  const { isOpen, closeCart, setQuantity, removeItem, count, promoCode, clearPromo } = useCart();
+  const { isOpen, closeCart, setQuantity, removeItem, count, availability, promoCode, clearPromo } = useCart();
   const lines = useCartDisplayLines();
   const layerRef = useRef<HTMLDivElement>(null);
   useFocusTrap(layerRef, isOpen);
@@ -38,15 +38,15 @@ export function CartDrawer() {
             <Image src={product.image} alt={product.imageAlt} width={92} height={92} unoptimized />
             <div>
               <h3>{product.name}</h3>
-              <p>{size.label}</p>
+              <p>{size.label}</p>{(!availability || line.quantity>(availability.find(row=>row.productId===line.productId&&row.sizeId===line.sizeId)?.maxQuantity??0))&&<p role="status">Stok item perlu diverifikasi kembali. Isi keranjang tetap tersimpan.</p>}
               <div className="quantity-row">
                 <button aria-label={`Kurangi jumlah ${product.name} ${size.label}`} onClick={() => setQuantity(line.productId, line.sizeId, line.quantity - 1)} disabled={line.quantity <= 1}>−</button>
                 <span aria-live="polite">{line.quantity}</span>
-                <button aria-label={`Tambah jumlah ${product.name} ${size.label}`} onClick={() => setQuantity(line.productId, line.sizeId, line.quantity + 1)}>+</button>
+                <button aria-label={`Tambah jumlah ${product.name} ${size.label}`} disabled={line.quantity >= Math.min(20, availability?.find(row=>row.productId===line.productId&&row.sizeId===line.sizeId)?.maxQuantity??0)} onClick={() => setQuantity(line.productId, line.sizeId, line.quantity + 1)}>+</button>
                 <button className="remove" aria-label={`Hapus ${product.name} ${size.label} dari keranjang`} onClick={() => removeItem(line.productId, line.sizeId)}>Hapus</button>
               </div>
             </div>
-            <strong>{formatRupiah(lineTotal)}</strong>
+            {(!availability || line.quantity>(availability.find(row=>row.productId===line.productId&&row.sizeId===line.sizeId)?.maxQuantity??0))&&<p role="status">Ketersediaan item berubah; periksa sebelum membayar.</p>}<strong>{formatRupiah(lineTotal)}</strong>
           </article>)}
           <p className="drawer-note">Harga dihitung ulang oleh server saat checkout. Pembayaran online menggunakan halaman aman penyedia pembayaran ketika mode pembayaran telah diaktifkan.</p>
         </div>

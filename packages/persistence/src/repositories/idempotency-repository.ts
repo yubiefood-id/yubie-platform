@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { err, ok, type UseCaseResult } from "@yubie/domain";
 import type { IdempotencyClaim, IdempotencyClaimOutcome, IdempotencyRepository } from "@yubie/application";
 import type { Database } from "../client.js";
@@ -31,6 +31,15 @@ function claimFilter(record: { scope: string; principalKey: string; operation: s
  */
 export class PostgresIdempotencyRepository implements IdempotencyRepository {
   constructor(private readonly database: Database) {}
+
+  async attachResource(record:Omit<IdempotencyClaim,"createdAt"|"requestHash">,orderId:string){
+    await this.database.db.update(idempotencyKeys).set({resourceId:orderId}).where(claimFilter(record));return ok(undefined);
+  }
+  async findResources(principals:string[],idempotencyKey:string){
+    if(!principals.length)return ok([]);
+    const rows=await this.database.db.select({resourceId:idempotencyKeys.resourceId}).from(idempotencyKeys).where(and(eq(idempotencyKeys.scope,"checkout"),eq(idempotencyKeys.operation,"createFirstPartyCheckout"),eq(idempotencyKeys.idempotencyKey,idempotencyKey),inArray(idempotencyKeys.principalKey,principals)));
+    return ok(rows.flatMap(row=>row.resourceId?[row.resourceId]:[]));
+  }
 
   async lookup(record: Omit<IdempotencyClaim, "createdAt">): Promise<UseCaseResult<Extract<IdempotencyClaimOutcome, { status: "duplicate" }> | null>> {
     const [row] = await this.database.db.select().from(idempotencyKeys).where(claimFilter(record)).limit(1);

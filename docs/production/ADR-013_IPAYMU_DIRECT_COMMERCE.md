@@ -1,6 +1,6 @@
 # ADR-013: iPaymu First-Party Direct Commerce (production)
 
-**Status:** PROPOSED — owner sign-off pending (G0/G10 of the release checklist)
+**Status:** ACCEPTED for implementation and disabled deployment — live activation still requires all merchant, sandbox, Operations and Finance/release gates below.
 **Date:** 2026-10-24
 **Supersedes (partially):** ADR-012 (provider selection), docs/production/05_ORDER_PAYMENT_INVENTORY_FULFILMENT.md (marketplace-first as the *primary* channel)
 

@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
+import {syntheticCommerceReads} from "./support/synthetic-commerce.js";
 
 async function fillGuestCheckout(page: Page) {
   await page.getByLabel("Email").fill("browser-test@example.invalid");
@@ -16,10 +17,14 @@ async function openGuestCheckout(page: Page) {
   await fillGuestCheckout(page);
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page,context }) => {
+  await syntheticCommerceReads(context);
+  // Keep the always-on waitlist panel out of the checkout journey's way;
+  // its own behaviour is pinned in e2e/mock/verified-promotion.spec.ts.
+  await page.addInitScript(() => sessionStorage.setItem("yubie.promo.dismissed.v1", "1"));
   await page.route("**/api/promotions/welcome", route => route.fulfill({json:{ok:true,data:{available:false}}}));
   await page.route("**/api/checkout/session", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { ready: true } }) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { ready: true,admission:"enabled" } }) });
   });
   await page.route("**/api/purchase-options/**", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { options: [] } }) });
@@ -88,9 +93,11 @@ test("guest bootstrap failure blocks checkout before any order submission", asyn
     submissions++;
     return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ ok: true, data: { status: "preview" } }) });
   });
-  await openGuestCheckout(page);
-  await page.getByRole("button", { name: /^Bayar/ }).click();
-  await expect(page.getByRole("alert")).toContainText(/sesi checkout/i);
+  await page.goto("/products");
+  await page.getByRole("button",{name:"Tambah",exact:true}).first().click();
+  await page.goto("/checkout");
+  await expect(page.getByText("Checkout belum tersedia.",{exact:true})).toBeVisible();
+  await expect(page.getByLabel("Email")).toBeDisabled();
   expect(submissions).toBe(0);
 });
 
@@ -103,14 +110,14 @@ test("an ambiguous checkout survives reload with the same attempt key and no sto
   });
   await openGuestCheckout(page);
   await page.getByRole("button", { name: /^Bayar/ }).click();
-  await expect(page.getByText("Pembayaran Anda sedang kami pastikan.")).toBeVisible();
+  await expect(page.getByText("Status pembayaran belum dapat dipastikan.",{exact:true})).toBeVisible();
+  const held=await page.evaluate(()=>localStorage.getItem("yubie.checkout-attempt.v1"));
   await page.reload();
-  await fillGuestCheckout(page);
-  await page.getByRole("button", { name: /^Bayar/ }).click();
-  await expect(page.getByText("Mode pembayaran demo sedang aktif.")).toBeVisible();
-  expect(keys).toHaveLength(2);
-  expect(keys[1]).toBe(keys[0]);
-  const stored = await page.evaluate(() => JSON.stringify(sessionStorage));
+  await expect(page.getByText("Status pembayaran belum dapat dipastikan.",{exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"Cek status",exact:true}).click();
+  expect(keys).toHaveLength(1);
+  expect(await page.evaluate(()=>localStorage.getItem("yubie.checkout-attempt.v1"))).toBe(held);
+  const stored=await page.evaluate(()=>JSON.stringify(localStorage));
   expect(stored).not.toContain("browser-test@example.invalid");
   expect(stored).not.toContain("Alamat pengujian");
 });
@@ -126,3 +133,34 @@ for (const path of ["/", "/products"]) {
     expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([]);
   });
 }
+
+test("disabled checkout is unavailable rather than a pending payment",async({page})=>{
+ await page.route("**/api/checkout",route=>route.fulfill({status:503,json:{ok:false,code:"CHECKOUT_DISABLED"}}));
+ await openGuestCheckout(page);await page.getByRole("button",{name:/^Bayar/}).click();
+ await expect(page.getByText("Checkout belum tersedia.",{exact:true})).toBeVisible();
+ await expect(page.getByText("Status pembayaran belum dapat dipastikan.",{exact:true})).toHaveCount(0);
+});
+test("unverified stock cannot be added to a cart",async({page})=>{
+ await page.route("**/api/catalog/availability",route=>route.fulfill({json:{ok:true,data:[]}}));
+ await page.goto("/products");
+ for(const button of await page.getByRole("button",{name:"Tambah",exact:true}).all())await expect(button).toBeDisabled();
+ await expect(page.locator(".availability-chip").filter({hasText:"Stok belum terverifikasi"})).toHaveCount(4);
+});
+test("a cancel redirect retains a genuinely pending provider payment",async({page})=>{
+ const token="a".repeat(32);
+ await page.route("**/api/checkout/"+token,route=>route.fulfill({json:{ok:true,data:{checkoutToken:token,checkoutRef:"co_synthetic",orderStatus:"pending_payment",paymentStatus:"pending",totalAmount:35000,lines:[]}}}));
+ await page.goto("/checkout/cancel?checkout="+token);
+ await expect(page.getByText(/Status saat ini/)).toContainText("pending payment");
+ await expect(page.getByRole("heading",{name:"Pembatalan terkonfirmasi."})).toHaveCount(0);
+ await expect(page.locator("body")).not.toContainText("tidak ada dana yang terpotong");
+});
+test("two tabs cannot submit another payment while the first outcome is unknown",async({page,context})=>{
+ let submissions=0;
+ await context.route("**/api/checkout",async route=>{submissions++;await new Promise(resolve=>setTimeout(resolve,300));await route.fulfill({status:503,json:{ok:false,code:"PENDING_RECONCILIATION"}});});
+ await openGuestCheckout(page);const second=await context.newPage();
+ await second.goto("/checkout");await fillGuestCheckout(second);
+ await Promise.all([page.getByRole("button",{name:/^Bayar/}).click(),second.getByRole("button",{name:/^Bayar/}).click()]);
+ await expect(page.getByText("Status pembayaran belum dapat dipastikan.",{exact:true})).toBeVisible();
+ await expect(second.getByText("Status pembayaran belum dapat dipastikan.",{exact:true})).toBeVisible();
+ expect(submissions).toBe(1);await second.close();
+});

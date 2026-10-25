@@ -37,8 +37,8 @@ export async function proxyApi(request: Request, path: string): Promise<Response
   } catch (error) {
     if (error instanceof Error && error.message === "BODY_TOO_LARGE") return Response.json({ ok: false, code: "BODY_TOO_LARGE" }, { status: 413, headers: { "cache-control": "no-store", "x-request-id": correlationId } });
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
-    if (timedOut) return Response.json({ ok: false, code: "API_TIMEOUT" }, { status: 504, headers: { "x-request-id": correlationId } });
-    return Response.json({ ok: false, code: "API_UNREACHABLE" }, { status: 502, headers: { "x-request-id": correlationId } });
+    if (timedOut) return Response.json({ ok: false, code: "API_TIMEOUT" }, { status: 504, headers: { "x-request-id": correlationId, "cache-control":"no-store" } });
+    return Response.json({ ok: false, code: "API_UNREACHABLE" }, { status: 502, headers: { "x-request-id": correlationId, "cache-control":"no-store" } });
   }
 
   const responseHeaders = new Headers();

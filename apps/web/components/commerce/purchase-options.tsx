@@ -60,14 +60,14 @@ function RemotePurchaseOptions({ productSlug, productId, rootId, placement = "pd
   }
 
   if (error || options.length === 0) {
-    return <div className="purchase-options empty" role="status"><strong>Alternatif pembelian belum tersedia</strong><p>Anda tetap dapat menambahkan produk ke keranjang dan melanjutkan ke checkout. Tautan marketplace dan WhatsApp hanya ditampilkan setelah diverifikasi oleh tim Yubie.</p></div>;
+    return null;
   }
 
   const apiOrigin = getApiOrigin();
 
   return <div className={`purchase-options${compact ? " compact" : ""}`}>
     <span className="eyebrow">ALTERNATIF BELANJA</span>
-    <p>Checkout langsung tersedia melalui keranjang. Anda juga dapat memilih kanal resmi berikut; harga dan stok di kanal partner dapat berbeda.</p>
+    <p>Kanal resmi yang telah diverifikasi; harga dan stok di kanal partner dapat berbeda.</p>
     <div className="purchase-option-list">
       {options.map((option) => {
         const href = `${apiOrigin}${option.redirectPath}?source=product_detail&placement=${placement}${rootId ? `&rootId=${rootId}` : ""}&productId=${productId}`;

@@ -19,7 +19,7 @@ for (const path of publicRoutes) {
 import { variants, escapePattern } from "../support/catalog-variants.js";
 
 for (const [productId, sizeId, label, price] of variants) {
-  test(`variant ${productId}/${sizeId} keeps its price and selection through cart refresh`, async ({ page }) => {
+  test(`variant ${productId}/${sizeId} preserves approved pricing and honors authoritative stock`, async ({ page }) => {
     const response = await page.goto(`/products/yubie-${productId}`);
     expect(response?.status()).toBe(200);
     assertAppOrigin(page.url());
@@ -27,6 +27,13 @@ for (const [productId, sizeId, label, price] of variants) {
     await variant.click();
     await expect(variant).toHaveAttribute("aria-pressed", "true");
     await expect(variant).toContainText(price);
+    if(testEnvironment().remote){
+      const stock=await page.evaluate(async()=>{const response=await fetch("/api/catalog/availability",{cache:"no-store"});return {ok:response.ok,cache:response.headers.get("cache-control"),body:await response.json()};});
+      expect(stock.ok).toBe(true);expect(stock.cache).toContain("no-store");
+      const row=stock.body.data?.find((item:{productId:string;sizeId:string})=>item.productId===productId&&item.sizeId===sizeId);
+      expect(row).toBeDefined();expect(Number.isSafeInteger(row.maxQuantity)&&row.maxQuantity>=0).toBe(true);
+      if(row.maxQuantity===0){await expect(page.getByRole("button",{name:/^Add to Cart/})).toBeDisabled();return;}
+    }
     await page.getByRole("button", { name: /^Add to Cart/ }).click();
     await expect.poll(() => page.evaluate(({ productId, sizeId }) => {
       const lines = JSON.parse(localStorage.getItem("yubie.cart.v1") || "[]") as Array<{ productId: string; sizeId: string; quantity: number }>;
