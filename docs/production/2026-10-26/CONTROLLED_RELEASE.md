@@ -53,6 +53,11 @@ The running API/worker URL must also match the proposed configuration; a release
 cannot silently change database credentials or switch its backup target.
 Connection URLs are compared in memory and never included in evidence output.
 
+Browser CI uses Ubuntu's official HTTPS archive instead of the Azure mirror
+that timed out during Playwright dependency installation on 2026-10-26. This
+changes only ephemeral runner package transport; signed Ubuntu package checks,
+the browser matrix and all five required gates remain unchanged.
+
 The artifact contains `backend.tgz`, `web.tgz`, `install_release.py`,
 `release-manifest.json`, `SHA256SUMS`, and `OWNER_SETUP.sh.txt`. Verify the GitHub
 artifact digest and the checksums against the protected job summary. Backend
