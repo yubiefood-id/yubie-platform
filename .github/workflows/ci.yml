@@ -71,6 +71,11 @@ jobs:
       # commerce saga + webhook exactly-once, inventory FEFO, growth consent.
       - run: npm run db:migrate
       - run: npm run db:seed
+      - name: Prove restricted release backup, restore and schema checks
+        run: python3 scripts/tests/release_postgres_test.py
+        env:
+          YUBIE_RELEASE_PG_CONTAINER: ${{ job.services.postgres.id }}
+          YUBIE_RELEASE_ALLOW_LOCAL_PG: synthetic
       - run: npm run test --workspace @yubie/persistence
       # Legacy upgrade tests intentionally leave their shared fixture on an older
       # schema. Restore the current schema before downstream repository consumers.
@@ -150,6 +155,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # The Azure mirror stalled package downloads for >29m on 2026-10-26.
+      # Keep Ubuntu's signed packages and the full browser matrix; change only
+      # the ephemeral runner's mirror, not package versions or production hosts.
+      - name: Use the official Ubuntu HTTPS archive for browser dependencies
+        run: |
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            if [ -f "$source" ]; then
+              sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$source"
+            fi
+          done
       - run: npm run test:e2e:install
       - run: node --test scripts/browser-tests/*.test.mjs
       # Browser requests to checkout/auth APIs are intercepted with synthetic,
@@ -197,6 +212,10 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # Build and scan the exact local images. Publication remains manual.
+      - name: Prove root installer and sudo boundaries in an isolated fixture
+        run: |
+          docker build -f scripts/production/Dockerfile.root-tests -t yubie-release-root-tests:ci scripts
+          docker run --rm --network none yubie-release-root-tests:ci
       - run: docker build -f infrastructure/docker/Dockerfile.api -t yubie-api:ci .
       - run: docker build -f infrastructure/docker/Dockerfile.worker -t yubie-worker:ci .
       - run: docker build -f infrastructure/docker/Dockerfile.bot -t yubie-bot:ci .

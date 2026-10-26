@@ -31,19 +31,18 @@ the merchant account's actual approval state.
 3. Reconcile actual VPS configuration, schema, outstanding payments and stock.
    Keep admission disabled. If real-provider payments are unresolved, preserve
    that PSP and recovery path throughout deployment.
-4. Stage the reviewed Compose artifact separately from the existing production
-   file. On the approved privileged VPS path, run:
+4. Follow [the controlled root-wrapper procedure](../2026-10-26/CONTROLLED_RELEASE.md).
+   The former argument-driven shell entrypoint is disabled. Never delegate it,
+   Bash, Docker or a caller-selected Compose path through passwordless sudo.
+   Root bootstrap, preflight and exact-manifest release authorization are separate
+   operator actions. Changed tooling requires new reviewed/published artifacts;
+   do not pair it with PR #53's historical images.
 
-```sh
-bash scripts/deploy-commerce-safe.sh <full-sha> <api-image-at-digest> <worker-image-at-digest> <reviewed-compose-file>
-```
-
-The script validates pinned artifacts, backs up configuration/PostgreSQL,
-restores into a uniquely named scratch database, verifies that restoration,
-applies additive migrations and starts only API/worker in `yubie-prod`.
-It never enables admission or changes the PSP. Keep backup contents private.
-A partial failure stops execution for inspection; it does not restore an older
-database or automatically roll back to an incompatible payment worker.
+The pinned wrapper validates trusted paths and immutable artifacts, verifies a
+snapshot-consistent backup/scratch restore, applies additive migrations and
+independently checks the exact schema. It targets only API/worker in `yubie-prod`.
+Keep backup contents private. A partial failure blocks automatic rerun; preserve
+payments and use qualified forward repair or schema-compatible rollback.
 
 5. Verify API identity/readiness, schema through 0025, frozen admission, customer
    boundaries, availability, inbox processing, reconciliation and exception metrics.

@@ -12,3 +12,8 @@ test("release execution rejects moving tags and images from another registry",()
   assert.equal(result.status,64);
  }
 });
+
+test("legacy root entrypoint rejects all caller-controlled release arguments",()=>{
+ const result=spawnSync("bash",[script,"a".repeat(40),"ghcr.io/yubiefood-id/yubie-api@sha256:"+"b".repeat(64),"ghcr.io/yubiefood-id/yubie-worker@sha256:"+"c".repeat(64),"/tmp/caller-compose.yml"],{encoding:"utf8"});
+ assert.equal(result.status,64);
+});
