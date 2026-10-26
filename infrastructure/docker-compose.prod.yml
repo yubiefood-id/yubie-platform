@@ -43,6 +43,9 @@ services:
 
   migrate:
     image: ${YUBIE_API_IMAGE:-ghcr.io/yubiefood-id/yubie-api:${RELEASE_SHA}}
+    # This is a one-shot process, not the API HTTP server from this image.
+    healthcheck:
+      disable: true
     command: ["node", "packages/persistence/dist/scripts/migrate.js"]
     environment:
       DATABASE_URL: ${DATABASE_URL}

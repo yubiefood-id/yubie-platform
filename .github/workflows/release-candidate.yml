@@ -99,12 +99,18 @@ jobs:
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
+      - name: Freeze the image context from the exact reviewed Git tree
+        run: |
+          git diff --exit-code HEAD
+          mkdir release-image-source
+          git archive "$TARGET_SHA" | tar -x -C release-image-source
+
       - name: Build release images for pre-push verification
         run: |
-          docker build -f infrastructure/docker/Dockerfile.api -t yubie-api:rc .
-          docker build -f infrastructure/docker/Dockerfile.worker -t yubie-worker:rc .
-          docker build -f infrastructure/docker/Dockerfile.bot -t yubie-bot:rc .
-          docker build -f infrastructure/docker/Dockerfile.admin -t yubie-admin:rc .
+          docker build -f release-image-source/infrastructure/docker/Dockerfile.api -t yubie-api:rc release-image-source
+          docker build -f release-image-source/infrastructure/docker/Dockerfile.worker -t yubie-worker:rc release-image-source
+          docker build -f release-image-source/infrastructure/docker/Dockerfile.bot -t yubie-bot:rc release-image-source
+          docker build -f release-image-source/infrastructure/docker/Dockerfile.admin -t yubie-admin:rc release-image-source
 
       - name: Verify runtime dependency closure before publication
         run: |
@@ -133,8 +139,8 @@ jobs:
         id: build-api
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: .
-          file: infrastructure/docker/Dockerfile.api
+          context: release-image-source
+          file: release-image-source/infrastructure/docker/Dockerfile.api
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/yubie-api:${{ env.TARGET_SHA }}
           labels: org.opencontainers.image.revision=${{ env.TARGET_SHA }}
@@ -145,8 +151,8 @@ jobs:
         id: build-worker
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: .
-          file: infrastructure/docker/Dockerfile.worker
+          context: release-image-source
+          file: release-image-source/infrastructure/docker/Dockerfile.worker
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/yubie-worker:${{ env.TARGET_SHA }}
           labels: org.opencontainers.image.revision=${{ env.TARGET_SHA }}
@@ -157,8 +163,8 @@ jobs:
         id: build-bot
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: .
-          file: infrastructure/docker/Dockerfile.bot
+          context: release-image-source
+          file: release-image-source/infrastructure/docker/Dockerfile.bot
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/yubie-bot:${{ env.TARGET_SHA }}
           labels: org.opencontainers.image.revision=${{ env.TARGET_SHA }}
@@ -169,8 +175,8 @@ jobs:
         id: build-admin
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: .
-          file: infrastructure/docker/Dockerfile.admin
+          context: release-image-source
+          file: release-image-source/infrastructure/docker/Dockerfile.admin
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/yubie-admin:${{ env.TARGET_SHA }}
           labels: org.opencontainers.image.revision=${{ env.TARGET_SHA }}
@@ -253,3 +259,35 @@ jobs:
             echo "| \`ghcr.io/${{ github.repository_owner }}/yubie-bot:${TARGET_SHA}\` | \`${{ steps.build-bot.outputs.digest }}\` |"
             echo "| \`ghcr.io/${{ github.repository_owner }}/yubie-admin:${TARGET_SHA}\` | \`${{ steps.build-admin.outputs.digest }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build the exact production Worker and complete assets
+        run: npm run build --workspace @yubie/web
+        env:
+          NEXT_PUBLIC_YUBIE_LAUNCH_PROFILE: DIRECT_COMMERCE_PRODUCTION
+
+      - name: Verify the complete production Worker packaging without deployment
+        working-directory: apps/web
+        run: npx --no-install wrangler deploy --config wrangler.prod.jsonc --dry-run --outdir dist/production-dry-run
+
+      - name: Seal restricted backend and frontend release artifacts
+        run: |
+          python3 scripts/production/release_bundle.py \
+            --sha "$TARGET_SHA" \
+            --api-image "ghcr.io/yubiefood-id/yubie-api@${{ steps.build-api.outputs.digest }}" \
+            --worker-image "ghcr.io/yubiefood-id/yubie-worker@${{ steps.build-worker.outputs.digest }}" \
+            --output release-bundle
+          {
+            echo '## Restricted release artifact checksums'
+            echo '```text'
+            cat release-bundle/SHA256SUMS
+            echo '```'
+            echo 'Operator setup installs a guarded capability only; backend and frontend deployment remain separately authorized.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sealed release and operator bootstrap instructions
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: commerce-release-${{ env.TARGET_SHA }}
+          path: release-bundle/
+          if-no-files-found: error
+          retention-days: 90

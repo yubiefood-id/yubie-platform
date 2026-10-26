@@ -7,9 +7,14 @@ Principle: financial callback processing and reconciliation remain available in 
 **Primary lever: `YUBIE_CHECKOUT_ADMISSION=disabled`** (implemented 2026-10-24; validated by `apps/api/tests/checkout-admission.test.mjs`). Edit `/etc/yubie/production.env` on the VPS: set `YUBIE_CHECKOUT_ADMISSION=disabled` and keep `COMMERCE_PROVIDER` **unchanged** (still on the PSP), then:
 ```
 docker compose --env-file /etc/yubie/production.env -p yubie-prod \
-  -f infrastructure/docker-compose.prod.yml up -d api worker
+  -f /opt/yubie/production/docker-compose.prod.yml up -d --no-deps api
 ```
 Effect: `POST /v1/checkouts` → 503 `CHECKOUT_DISABLED` before any work; the iPaymu webhook route, payment reconciler, checkout status/recovery reads, reservation resolution and payment-exception outbox keep running normally for every in-flight session.
+
+Run this only through approved operator root access. Use the protected active
+Compose with its accepted immutable images, never a mutable checkout template.
+The admission change requires recreating API only; keep the existing compatible
+worker running. This does not authorize a PSP or image change.
 
 **Do NOT switch `COMMERCE_PROVIDER=preview` during an active incident with in-flight iPaymu payments.** Verified behavior: under preview, the `/v1/webhooks/ipaymu` route returns 503 `WEBHOOK_NOT_CONFIGURED` (gated on `paymentMode==="ipaymu"`) and the reconciler's provider is null (no polling) — callbacks and reconciliation for existing sessions would stop. Only after the reconciler shows zero pending/ambiguous payments may the provider be flipped to `preview`/`disabled` as a deeper rollback.
 
@@ -20,7 +25,9 @@ Proof matrix (all executed in CI): `apps/api/tests/admission-freeze-recovery.tes
 ## R2 — API/worker rollback or forward recovery
 
 Use reviewed immutable image digests from the release receipt through
-`YUBIE_API_IMAGE` and `YUBIE_WORKER_IMAGE`. Preserve the production environment
+the [controlled release procedure](../2026-10-26/CONTROLLED_RELEASE.md).
+Its completed-wrapper replay is verification, not a rollback facility.
+Preserve the production environment
 file, configured PSP, PostgreSQL volume and callback ingress. Deploy only
 `api worker` in project `yubie-prod`; never remove unrelated services.
 

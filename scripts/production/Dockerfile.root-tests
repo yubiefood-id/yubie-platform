@@ -1,0 +1,9 @@
+# Disposable policy fixture. Never run with host mounts or a Docker socket.
+FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+RUN apt-get update -o APT::Update::Error-Mode=any -o Acquire::Retries=3 \
+    && apt-get install -y --no-install-recommends python3 sudo ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 1001 --groups sudo yubie-deploy
+COPY . /src/scripts
+ENV YUBIE_RELEASE_ROOT_FIXTURE=isolated
+CMD ["python3", "/src/scripts/tests/release_installer_root_test.py"]
