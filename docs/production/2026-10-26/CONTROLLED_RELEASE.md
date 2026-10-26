@@ -46,6 +46,13 @@ terminal. Keep the existing SSH key; do not exchange new keys for this release.
    `DIRECT_COMMERCE_PRODUCTION` Worker, verifies its complete client/server byte
    identity and publishes `commerce-release-<sha>`.
 
+The preflight binds the migration, API and worker connection URLs to the same
+`postgres` service and the actual running container's database name. URLs with
+another host/database, a nonstandard port or query overrides are rejected.
+The running API/worker URL must also match the proposed configuration; a release
+cannot silently change database credentials or switch its backup target.
+Connection URLs are compared in memory and never included in evidence output.
+
 The artifact contains `backend.tgz`, `web.tgz`, `install_release.py`,
 `release-manifest.json`, `SHA256SUMS`, and `OWNER_SETUP.sh.txt`. Verify the GitHub
 artifact digest and the checksums against the protected job summary. Backend

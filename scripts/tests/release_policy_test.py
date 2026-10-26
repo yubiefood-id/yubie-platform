@@ -16,6 +16,17 @@ class ReleasePolicy(unittest.TestCase):
    with self.assertRaises(policy.Blocked):policy.validate_manifest(data)
   data=fixture();data["files"]["../outside"]="f"*64
   with self.assertRaises(policy.Blocked):policy.validate_manifest(data)
+ def test_database_target_is_local_and_matches_the_backed_up_database(self):
+  valid="postgresql://yubie:synthetic@postgres:5432/yubie_test"
+  policy.validate_database_target(valid,"yubie_test")
+  for url in [valid.replace("@postgres:","@other:"),valid.replace("/yubie_test","/zammad"),valid+"?host=other",valid+"#fragment",valid.replace(":5432/",":5433/"),"not-a-url",None]:
+   with self.assertRaisesRegex(policy.Blocked,"^DATABASE_TARGET_MISMATCH$"):policy.validate_database_target(url,"yubie_test")
+ def test_running_database_binding_cannot_change_during_release(self):
+  desired={"DATABASE_URL":"postgresql://yubie:synthetic@postgres/yubie_test"}
+  current=dict(desired)
+  policy.validate_database_binding(current,desired,"yubie_test")
+  for other in [{"DATABASE_URL":"postgresql://yubie:synthetic@elsewhere/yubie_test"},{"DATABASE_URL":"postgresql://other:synthetic@postgres/yubie_test"}]:
+   with self.assertRaises(policy.Blocked):policy.validate_database_binding(other,desired,"yubie_test")
  def test_writable_directory_symlinks_and_changed_bytes_are_rejected(self):
   with tempfile.TemporaryDirectory() as d:
    root=pathlib.Path(d);root.chmod(0o700);folder=root/"release";folder.mkdir(mode=0o755);p=folder/"manifest.json";p.write_bytes(b"approved");p.chmod(0o444)
@@ -59,7 +70,13 @@ class ReleasePolicy(unittest.TestCase):
   data=fixture();api={"image":data["apiImage"],"environment":{"RELEASE_SHA":"a"*40,"YUBIE_ENV":"production","YUBIE_LAUNCH_PROFILE":"DIRECT_COMMERCE_PRODUCTION","YUBIE_CHECKOUT_ADMISSION":"disabled","COMMERCE_PROVIDER":"preview","INVENTORY_MODE":"lots","PURCHASE_OPTIONS_SOURCE":"database","APP_ORIGIN":"https://yubiefood.com"},"ports":[{"host_ip":"127.0.0.1","published":"18788","target":8787}]}
   worker={"image":data["workerImage"],"environment":{"RELEASE_SHA":"a"*40,"YUBIE_ENV":"production","YUBIE_LAUNCH_PROFILE":"DIRECT_COMMERCE_PRODUCTION","COMMERCE_PROVIDER":"preview","SUPPORT_PROVIDER":"disabled"}}
   config={"name":"yubie-prod","services":{"api":api,"worker":worker,"migrate":{"image":data["apiImage"],"healthcheck":{"disable":True}},"postgres":{"image":"postgres:17-alpine"},"bot":{"profiles":["bot"]}}}
+  for name in ("api","worker","migrate"):
+   config["services"][name].setdefault("environment",{})["DATABASE_URL"]="postgresql://yubie:synthetic@postgres/yubie_test"
+  config["services"]["postgres"]["environment"]={"POSTGRES_DB":"yubie_test"}
   self.assertEqual(policy.validate_compose(config,data),"preview")
+  config["services"]["migrate"]["environment"]["DATABASE_URL"]="postgresql://yubie:synthetic@postgres/zammad"
+  with self.assertRaises(policy.Blocked):policy.validate_compose(config,data)
+  config["services"]["migrate"]["environment"]["DATABASE_URL"]=api["environment"]["DATABASE_URL"]
   for changed in [dict(config,name="retropick"),dict(config,services={**config["services"],"unreviewed":{}})]:
    with self.assertRaises(policy.Blocked):policy.validate_compose(changed,data)
   api["environment"]["YUBIE_LAUNCH_PROFILE"]="PUBLIC_CATALOG_NO_SALES"

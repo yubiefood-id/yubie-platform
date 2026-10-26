@@ -284,8 +284,11 @@ class Release:
         resolved = json.loads(self.commands.run(self.dc + ["config", "--format", "json"]))
         self.provider = P.validate_compose(resolved, self.manifest)
         rows = self.containers()
+        database_name = self.environment(rows["postgres"]).get("POSTGRES_DB")
+        P.require(database_name == resolved["services"]["postgres"]["environment"].get("POSTGRES_DB"), "POSTGRES_DATABASE_CHANGED")
         for service in ("api", "worker"):
             current = self.environment(rows[service])
+            P.validate_database_binding(current, resolved["services"][service]["environment"], database_name)
             P.require(current.get("YUBIE_ENV") == "production" and current.get("COMMERCE_PROVIDER") == self.provider, "LIVE_CONFIGURATION_DRIFT")
         P.require(self.environment(rows["api"]).get("YUBIE_CHECKOUT_ADMISSION") == "disabled", "LIVE_ADMISSION_NOT_FROZEN")
         P.require(self.environment(rows["worker"]).get("SUPPORT_PROVIDER") == "disabled", "LIVE_SUPPORT_NOT_DISABLED")

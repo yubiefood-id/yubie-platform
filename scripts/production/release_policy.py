@@ -7,6 +7,7 @@ import os
 import pathlib
 import re
 import stat
+import urllib.parse
 
 
 class Blocked(Exception):
@@ -101,12 +102,36 @@ def render_compose(template, manifest):
     return value.encode("utf-8")
 
 
+def validate_database_target(url, database):
+    # SQL backup uses the selected project container, not the application DSN.
+    # Disallow libpq query overrides and cross-database/host migration targets.
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        valid = (isinstance(url, str) and bool(database)
+                 and parsed.scheme in ("postgres", "postgresql")
+                 and parsed.hostname == "postgres" and parsed.port in (None, 5432)
+                 and urllib.parse.unquote(parsed.path) == "/" + database
+                 and not parsed.query and not parsed.fragment)
+    except (ValueError, TypeError, AttributeError):
+        valid = False
+    require(valid, "DATABASE_TARGET_MISMATCH")
+
+
+def validate_database_binding(current, desired, database):
+    validate_database_target(desired.get("DATABASE_URL"), database)
+    require(current.get("DATABASE_URL") == desired.get("DATABASE_URL"), "DATABASE_BINDING_CHANGED")
+
+
 def validate_compose(config, manifest):
     require(config.get("name") == "yubie-prod", "COMPOSE_PROJECT")
     services = config.get("services", {})
     core = {"postgres", "migrate", "api", "worker"}
     require(core <= services.keys() and services.keys() <= core | {"bot"}, "COMPOSE_SERVICES")
     api, worker = services["api"], services["worker"]
+    database = services["postgres"].get("environment", {}).get("POSTGRES_DB")
+    desired = api.get("environment", {})
+    for name in ("api", "worker", "migrate"):
+        validate_database_binding(services[name].get("environment", {}), desired, database)
     require(api.get("image") == manifest["apiImage"] and worker.get("image") == manifest["workerImage"] and services["migrate"].get("image") == manifest["apiImage"], "EFFECTIVE_IMAGE")
     for service in (api, worker):
         env = service.get("environment", {})
