@@ -1,4 +1,4 @@
-import importlib.util, json, os, pathlib, tempfile, unittest, hashlib, datetime, subprocess
+import importlib.util, json, os, pathlib, tempfile, unittest, hashlib, datetime, subprocess, sys
 MODULE=pathlib.Path(__file__).parents[1]/"production"/"release_policy.py"
 policy=None
 if MODULE.exists():
@@ -82,8 +82,11 @@ class ReleasePolicy(unittest.TestCase):
  def test_second_process_cannot_take_deployment_lock(self):
   with tempfile.TemporaryDirectory() as d:
    path=pathlib.Path(d)/"deployment.lock"
+   child="import runpy,pathlib,os,sys; p=runpy.run_path(sys.argv[1]); lock=p['deployment_lock'];\ntry:\n with lock(pathlib.Path(sys.argv[2]),uid=os.getuid(),boundary=pathlib.Path(sys.argv[3])):pass\nexcept p['Blocked']:raise SystemExit(77)"
    with policy.deployment_lock(path,uid=os.getuid(),boundary=pathlib.Path(d)):
-    with self.assertRaises(policy.Blocked):
-     with policy.deployment_lock(path,uid=os.getuid(),boundary=pathlib.Path(d)):pass
+    result=subprocess.run([sys.executable,"-c",child,str(MODULE),str(path),d],capture_output=True,text=True)
+    self.assertEqual(result.returncode,77,result.stderr)
+   result=subprocess.run([sys.executable,"-c",child,str(MODULE),str(path),d],capture_output=True,text=True)
+   self.assertEqual(result.returncode,0,result.stderr)
 
 if __name__=="__main__":unittest.main()

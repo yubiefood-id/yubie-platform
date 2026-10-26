@@ -1,5 +1,6 @@
 """Root and sudoers integration. Only run inside the disposable test image."""
 import hashlib
+import fcntl
 import datetime
 import importlib.util
 import io
@@ -134,6 +135,11 @@ class RootInstaller(unittest.TestCase):
             release.execute()
         self.assertEqual(len(list(backups.iterdir())), backup_count)
         self.assertEqual(compose.read_bytes(), previous)
+        with open("/var/lib/yubie-release/deployment.lock", "rb") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaisesRegex(installer.InstallBlocked, "DEPLOYMENT_BUSY"):
+                installer.install(archive, hashlib.sha256(archive.read_bytes()).hexdigest())
+
 
 
 if __name__ == "__main__":

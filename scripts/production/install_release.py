@@ -4,6 +4,7 @@ The operator first copies this file and the bundle to root-private storage and
 checks their hashes against protected CI output. No password is an input.
 """
 import hashlib
+import fcntl
 import io
 import json
 import os
@@ -127,6 +128,20 @@ def install(bundle, digest):
     trusted(bundle)
     require(bundle.is_file() and bundle.stat().st_nlink == 1 and not bundle.stat().st_mode & 0o077, "PRIVATE_BUNDLE_REQUIRED")
     manifest, contents = verify_archive(bundle, digest)
+    root_directory(STATE, 0o700)
+    write_immutable(STATE / "deployment.lock", b"", 0o600)
+    fd = os.open(STATE / "deployment.lock", os.O_RDWR | os.O_NOFOLLOW)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise InstallBlocked("DEPLOYMENT_BUSY") from None
+        return _install_materials(manifest, contents)
+    finally:
+        os.close(fd)
+
+
+def _install_materials(manifest, contents):
     sha = manifest["sourceSha"]
     for directory, mode in ((STATE, 0o700), (BACKUPS, 0o700), (pathlib.Path("/opt/yubie/releases"), 0o755), (pathlib.Path("/etc/yubie/registry"), 0o700)):
         root_directory(directory, mode)

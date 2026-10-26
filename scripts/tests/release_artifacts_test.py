@@ -5,10 +5,25 @@ def module(name):
  if not p.exists():return None
  spec=importlib.util.spec_from_file_location(name,p);value=importlib.util.module_from_spec(spec);spec.loader.exec_module(value);return value
 class ArtifactBoundaries(unittest.TestCase):
- def test_changed_checkout_cannot_be_labelled_with_the_old_sha(self):
+ def test_unknown_checkout_sha_cannot_be_labelled_as_a_release(self):
   result=subprocess.run([sys.executable,str(ROOT/"scripts/production/release_bundle.py"),"--sha","a"*40,"--api-image","ghcr.io/yubiefood-id/yubie-api@sha256:"+"b"*64,"--worker-image","ghcr.io/yubiefood-id/yubie-worker@sha256:"+"c"*64,"--output","/tmp/never-created-yubie-release"],capture_output=True,text=True)
   self.assertEqual(result.returncode,77,result.stderr)
   self.assertFalse(pathlib.Path('/tmp/never-created-yubie-release').exists())
+ def test_dirty_source_stops_before_material_or_artifact_collection(self):
+  builder=module("release_bundle");self.assertIsNotNone(builder)
+  with tempfile.TemporaryDirectory() as d:
+   root=pathlib.Path(d)
+   subprocess.run(["git","init","-q",str(root)],check=True)
+   subprocess.run(["git","-C",str(root),"config","user.name","Synthetic Test"],check=True)
+   subprocess.run(["git","-C",str(root),"config","user.email","synthetic@example.invalid"],check=True)
+   marker=root/"tracked.txt";marker.write_text("reviewed")
+   subprocess.run(["git","-C",str(root),"add","tracked.txt"],check=True)
+   subprocess.run(["git","-C",str(root),"commit","-qm","synthetic fixture"],check=True)
+   sha=subprocess.check_output(["git","-C",str(root),"rev-parse","HEAD"],text=True).strip()
+   marker.write_text("changed after the reviewed commit")
+   with self.assertRaisesRegex(ValueError,"SOURCE_DIRTY"):
+    builder.build(root,sha,"ghcr.io/yubiefood-id/yubie-api@sha256:"+"b"*64,"ghcr.io/yubiefood-id/yubie-worker@sha256:"+"c"*64,root/"output")
+   self.assertFalse((root/"output").exists())
  def test_archive_path_escape_and_symlinks_are_refused_before_extraction(self):
   installer=module("install_release");self.assertIsNotNone(installer,"root installer is missing")
   for name,symlink in [("../../outside",False),("release-manifest.json",True)]:

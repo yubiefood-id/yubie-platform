@@ -132,7 +132,7 @@ workaround or broad passwordless rule is part of this procedure.
 
 ## Authorized backend execution and recovery
 
-The wrapper serializes all versions using one host lock. It records its commands
+Bootstrap and the wrapper serialize all versions using one host lock. It records its commands
 and durable stage history in root-private state. It validates published immutable
 images and OCI revision labels before any schema/application change.
 
