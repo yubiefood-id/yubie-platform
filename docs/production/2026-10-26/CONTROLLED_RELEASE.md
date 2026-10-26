@@ -55,7 +55,10 @@ Connection URLs are compared in memory and never included in evidence output.
 
 Browser CI uses Ubuntu's official HTTPS archive instead of the Azure mirror
 that timed out during Playwright dependency installation on 2026-10-26. This
-changes only ephemeral runner package transport; signed Ubuntu package checks,
+covers both direct sources and hosted-runner `mirror+file` lists (the main
+runner used `/etc/apt/apt-mirrors.txt`). A regression executes the actual CI step
+against both formats and preserves suite/signing configuration. This changes
+only ephemeral runner package transport; signed Ubuntu package checks,
 the browser matrix and all five required gates remain unchanged.
 
 The artifact contains `backend.tgz`, `web.tgz`, `install_release.py`,
