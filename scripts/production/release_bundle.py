@@ -57,7 +57,7 @@ def build(root, sha, api, worker, output):
     manifest = {"schemaVersion": 1, "sourceSha": sha, "apiImage": api, "workerImage": worker,
                 "files": {name: hashlib.sha256(value).hexdigest() for name, value in contents.items()},
                 "migrations": [path.name for path in migrations], "webArtifact": {**web_manifest, "archiveSha256": web_sha},
-                "acceptedPriorComposeSha256": [PRIOR_COMPOSE]}
+                "acceptedPriorComposeSha256": [PRIOR_COMPOSE, "7befdcf8332861ea8620ca731721a921aa07100032ae7d1d3fc53f0b997b7c4c"]}
     # Also allow idempotent bootstrap after this exact release has been deployed.
     policy = types.ModuleType("frozen_release_policy")
     exec(compile(contents["scripts/production/release_policy.py"], "release_policy.py", "exec"), policy.__dict__)

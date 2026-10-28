@@ -1,0 +1,78 @@
+import { useEffect, useState, type FormEvent } from "react";
+import { canOperate, STAFF_ROLES, type StaffRole, type OperationsPermission } from "@yubie/domain";
+
+export type Row = Record<string, unknown>;
+const encode = encodeURIComponent;
+function message(error: unknown) { return error instanceof Error ? error.message : "Layanan belum dapat dikonfirmasi. Muat ulang status sebelum mencoba tindakan lain."; }
+export async function read(path: string): Promise<Row> {
+  const response = await fetch(path, { cache: "no-store", credentials: "same-origin" });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.ok) throw new Error(response.status === 403 ? "Peran Anda tidak memiliki izin." : "Data tidak tersedia; hasil kosong belum diasumsikan.");
+  return payload.data as Row;
+}
+let csrf: Promise<string> | undefined;
+export async function command(path: string, body: unknown) {
+  csrf ??= read("/auth/config").then(data => String(data.csrfToken));
+  const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(path+JSON.stringify(body))))].map(n=>n.toString(16).padStart(2,"0")).join("");
+  // Only an opaque identity/hash is retained, never the submitted evidence or PII.
+  const slot = "yubie-ops-command:"+digest;
+  let key = localStorage.getItem(slot);
+  if (!key) { key = crypto.randomUUID(); localStorage.setItem(slot,key); }
+  const response = await fetch(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", "x-yubie-csrf": await csrf, "idempotency-key": key }, body: JSON.stringify(body) });
+  const result = await response.json().catch(()=>null);
+  if (!response.ok || !result?.ok) {
+    const code = result?.code;
+    throw new Error(code === "CONFLICT" ? "Versi atau keadaan berubah. Muat ulang dan periksa catatan terbaru." : code === "WRITES_DISABLED" ? "Perubahan operasional belum diaktifkan operator rilis." : code === "VALIDATION" ? "Data/bukti belum memenuhi validasi. Periksa formulir dan intake." : code === "FORBIDDEN" ? "Izin atau pemisahan pemberi persetujuan tidak terpenuhi." : "Hasil tindakan belum dikonfirmasi. Coba ulang data yang sama untuk memakai identitas yang sama; jangan membuat tindakan baru.");
+  }
+  return result.data as Row;
+}
+function Fields({ names }: { names: Array<[string,string,string?]> }) {
+  return <>{names.map(([name,label,type])=><label key={name}>{label}<input name={name} type={type ?? "text"} required maxLength={300} {...(type === "number" ? {min:0,step:1}: {})} /></label>)}</>;
+}
+function values(event: FormEvent<HTMLFormElement>) { event.preventDefault(); return Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string,string>; }
+function Evidence({ data }: { data: unknown }) { return <details><summary>Lihat bukti dan rincian tersimpan</summary><pre>{JSON.stringify(data,null,2)}</pre></details>; }
+
+export function DailyReport() {
+  const [date,setDate]=useState(()=>new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date()));
+  const [data,setData]=useState<Row|null>(null),[error,setError]=useState("");
+  useEffect(()=>{let active=true;setData(null);void read("/v1/reports/daily?date="+encode(date)).then(value=>{if(active){setData(value);setError("");}}).catch(e=>{if(active)setError(message(e));});return()=>{active=false;};},[date]);
+  return <><header className="page-heading"><div><h1>Ringkasan operasional</h1><p>Hari bisnis WIB. PostgreSQL adalah sumber catatan.</p></div><label>Tanggal<input type="date" value={date} onChange={e=>setDate(e.target.value)} /></label></header>{error&&<p role="alert" className="error">{error}</p>}{data ? <><div className="metric-grid">{[["Pesanan dibuat",(data.orders as Row)?.orders],["Stok tersedia saat ini",(data.inventory as Row)?.available_units],["Unit direservasi",(data.inventory as Row)?.reserved_units],["Lot kedaluwarsa / ≤30 hari",(data.inventory as Row)?.expiring_or_expired_lots],["Admission checkout",data.checkoutAdmission]].map(([label,value])=><article key={String(label)}><p>{String(label)}</p><strong>{String(value ?? "—")}</strong></article>)}</div><h2>Fulfillment saat ini</h2><Evidence data={data.fulfillment}/>{data.finance&&<><h2>Pembayaran kohort tanggal dipilih</h2><p>Status terkini pembayaran yang dibuat pada tanggal ini. Ini bukan laporan settlement atau mutasi rekening harian.</p><Evidence data={data.finance}/></>}</> : !error&&<p role="status">Memuat ringkasan…</p>}</>;
+}
+
+export function RequestActions({ row, roles, refresh }: { row: Row; roles: StaffRole[]; refresh: () => void }) {
+  const [reason,setReason]=useState(""),[status,setStatus]=useState(""),[busy,setBusy]=useState(false);
+  const kind=String(row.kind),permission:OperationsPermission=kind==="inventory_count"?"inventory:approve":kind==="shipping_policy"?"shipping:approve":"refunds:approve";
+  async function act(action: string, extra: Row={}) { setBusy(true);try{await command(`/v1/requests/${encode(String(row.id))}/${action}`,{expectedVersion:row.version,reason,...extra});setStatus("Tindakan tercatat. Periksa versi terbaru.");refresh();}catch(e){setStatus(message(e));}finally{setBusy(false);} }
+  const applyPermission:OperationsPermission=kind==="inventory_count"?"inventory:apply":kind==="shipping_policy"?"shipping:apply":"refunds:record";
+  return <section className="request-card"><h3>{String(row.id)}</h3><p>{kind} · {String(row.status)} · versi {String(row.version)}</p><p>Pembuat: {String(row.created_by)} · Penyetuju: {String(row.approved_by ?? "belum ada")}</p><Evidence data={row.payload_json}/><label>Alasan tindakan<input value={reason} minLength={3} maxLength={300} onChange={e=>setReason(e.target.value)}/></label><div className="actions">{row.status==="draft"&&canOperate(roles,permission)&&<button disabled={busy||reason.trim().length<3} onClick={()=>void act("approve")}>Setujui sebagai pemeriksa berbeda</button>}{row.status==="approved"&&canOperate(roles,applyPermission)&&<button disabled={busy||reason.trim().length<3} onClick={()=>void act("apply")}>Terapkan transaksi yang disetujui</button>}</div>{kind==="refund_full"&&row.status==="applied"&&canOperate(roles,"refunds:record")&&<form onSubmit={e=>{const v=values(e);void act("refund-execution",{merchantReference:v.merchantReference,evidenceRef:v.evidenceRef});}}><p>Catatan ini tidak mengirim uang atau mengubah status provider.</p><Fields names={[["merchantReference","Referensi refund merchant"],["evidenceRef","Bukti pelaksanaan asli"]]}/><button disabled={busy||reason.trim().length<3||row.refund_state!=="awaiting_merchant"}>Catat pelaksanaan manual</button><button type="button" disabled={busy||reason.trim().length<3||row.refund_state!=="merchant_execution_recorded"} onClick={()=>void act("refund-confirmation")}>Konfirmasi Finance kedua setelah provider terverifikasi</button></form>}{status&&<p role="status">{status}</p>}</section>;
+}
+
+export function IntakeForm({ refresh }: { refresh: () => void }) {
+  const [intake,setIntake]=useState<Row|null>(null),[result,setResult]=useState<unknown>(null),[status,setStatus]=useState(""),[busy,setBusy]=useState(false);
+  async function run(apply: boolean) {if(!intake)return;setBusy(true);try{setResult(await command(apply?"/v1/requests":"/v1/inventory/preview",apply?{kind:"inventory_count",payload:intake}:intake));setStatus(apply?"Draft tersimpan. QC berbeda harus menyetujui sebelum penerapan.":"Dry-run selesai; belum ada stok ditambahkan.");if(apply)refresh();}catch(e){setStatus(message(e));}finally{setBusy(false);} }
+  return <section className="panel"><h2>Intake hitung fisik</h2><p>Unggah JSON terverifikasi dari konverter workbook. Usulan, placeholder, lot tanpa bukti QC, dan hitung kedaluwarsa ditolak server.</p><label>JSON intake terverifikasi<input type="file" accept="application/json,.json" onChange={e=>{setResult(null);setIntake(null);const file=e.target.files?.[0];if(!file)return;if(file.size>131072){setStatus("Berkas maksimal 128 KiB.");return;}void file.text().then(text=>{setIntake(JSON.parse(text) as Row);setStatus("Berkas dibaca; belum tervalidasi.");}).catch(()=>{setIntake(null);setStatus("JSON tidak valid.");});}}/></label><div className="actions"><button disabled={!intake||busy} onClick={()=>void run(false)}>Validasi dan dry-run</button><button disabled={!intake||busy||!result} onClick={()=>void run(true)}>Ajukan untuk persetujuan QC</button></div>{status&&<p role="status">{status}</p>}{result!=null&&<Evidence data={result}/>}</section>;
+}
+
+export function ShippingForm({ refresh }: { refresh: () => void }) {
+  const [status,setStatus]=useState(""),[busy,setBusy]=useState(false);
+  async function submit(event:FormEvent<HTMLFormElement>){const v=values(event);setBusy(true);try{await command("/v1/requests",{kind:"shipping_policy",payload:{policy:"free_promotional",amount:0,cities:v.cities!.split(",").map(s=>s.trim()),serviceCoverage:v.serviceCoverage,costOwner:v.costOwner,startsAt:new Date(v.startsAt!).toISOString(),endsAt:new Date(v.endsAt!).toISOString(),approvalRef:v.approvalRef,verification:{status:"VERIFIED",evidenceRef:v.evidenceRef,verifiedBy:v.verifiedBy,verifiedAt:new Date(v.verifiedAt!).toISOString()}}});setStatus("Draft pengiriman tercatat; persetujuan Finance berbeda diperlukan.");refresh();}catch(e){setStatus(message(e));}finally{setBusy(false);}}
+  return <section className="panel"><h2>Ajukan cakupan pengiriman</h2><p>Hanya free_promotional IDR 0 yang didukung. Pengisian tidak memberikan persetujuan otomatis.</p><form onSubmit={e=>void submit(e)}><Fields names={[["cities","Kota/kabupaten disetujui (pisahkan koma)"],["serviceCoverage","Layanan dan batas cakupan"],["costOwner","Penanggung biaya"],["startsAt","Mulai (waktu perangkat)","datetime-local"],["endsAt","Berakhir (waktu perangkat)","datetime-local"],["approvalRef","Referensi persetujuan"],["evidenceRef","Referensi bukti asli"],["verifiedBy","Penanggung jawab verifikasi"],["verifiedAt","Waktu verifikasi asli (waktu perangkat)","datetime-local"]]}/><button disabled={busy}>Ajukan draft pengiriman</button></form>{status&&<p role="status">{status}</p>}</section>;
+}
+
+export function OrderWork({ roles }: { roles:StaffRole[] }) {
+  const [id,setId]=useState(""),[order,setOrder]=useState<Row|null>(null),[status,setStatus]=useState(""),[busy,setBusy]=useState(false);
+  async function load(){try{setOrder(await read("/v1/orders/"+encode(id)));setStatus("");}catch(e){setOrder(null);setStatus(message(e));}}
+  async function submit(e:FormEvent<HTMLFormElement>,action:string){const v=values(e);setBusy(true);try{const input=action==="notes"?{body:v.body,reason:v.reason}:{stage:v.stage,expectedVersion:(order?.fulfillment as Row)?.version ?? 0,reason:v.reason,...(v.carrier?{carrier:v.carrier}:{}),...(v.trackingNumber?{trackingNumber:v.trackingNumber}:{})};await command(`/v1/orders/${encode(id)}/${action}`,input);await load();setStatus("Tindakan tercatat.");}catch(error){setStatus(message(error));}finally{setBusy(false);}}
+  return <section className="panel"><h2>Rincian dan fulfillment pesanan</h2><form onSubmit={e=>{e.preventDefault();void load();}}><label>ID pesanan<input value={id} onChange={e=>{setId(e.target.value);setOrder(null);}} required maxLength={100}/></label><button>Buka pesanan</button></form>{order&&<><p>Status: {String(order.status)} · Total IDR {String(order.grand_total_amount)} · Hold: {String(order.fulfillment_hold ?? "tidak ada")}</p><Evidence data={{lines:order.lines_jsonb,delivery:order.delivery,fulfillment:order.fulfillment,payments:order.payments}}/>{canOperate(roles,"fulfillment:write")&&<form onSubmit={e=>void submit(e,"fulfillment")}><label>Tahap berikutnya<select name="stage"><option value="packing">Mulai packing</option><option value="packed">Selesai packing</option><option value="shipped">Kirim</option><option value="delivered">Terkirim</option></select></label><label>Kurir<input name="carrier" maxLength={100}/></label><label>Nomor resi<input name="trackingNumber" maxLength={120}/></label><Fields names={[["reason","Alasan fulfillment"]]}/><button disabled={busy}>Simpan tahap berikutnya</button></form>}{canOperate(roles,"notes:write")&&<form onSubmit={e=>void submit(e,"notes")}><label>Catatan internal<textarea name="body" required maxLength={1000}/></label><Fields names={[["reason","Alasan catatan"]]}/><button disabled={busy}>Tambah catatan</button></form>}</>}{status&&<p role="status">{status}</p>}</section>;
+}
+
+export function FinanceWork({ refresh }: { refresh:()=>void }) {
+  const [status,setStatus]=useState(""),[busy,setBusy]=useState(false);
+  async function run(e:FormEvent<HTMLFormElement>,action:string){const v=values(e);setBusy(true);try{let path:string,body:unknown;if(action==="refund"){path="/v1/requests";body={kind:"refund_full",payload:{orderId:v.orderId,amount:Number(v.amount),reason:v.reason,evidenceRef:v.evidenceRef}};}else{path=`/v1/payments/${encode(v.paymentId!)}/${action}`;body=action==="reconcile"?{reason:v.reason}:{reason:v.reason,expectedVersion:Number(v.expectedVersion),state:v.state};}await command(path,body);setStatus("Permintaan tercatat; status uang tetap ditentukan provider dan rekonsiliasi.");refresh();}catch(error){setStatus(message(error));}finally{setBusy(false);}}
+  return <section className="panel"><h2>Tindakan Finance</h2><form onSubmit={e=>void run(e,"reconcile")}><h3>Jadwalkan rekonsiliasi</h3><Fields names={[["paymentId","ID pembayaran"],["reason","Alasan pemeriksaan"]]}/><button disabled={busy}>Antrekan pemeriksaan status</button></form><form onSubmit={e=>void run(e,"triage")}><h3>Catatan penanganan pengecualian</h3><Fields names={[["paymentId","ID pembayaran"],["expectedVersion","Versi kasus (0 untuk baru)","number"],["reason","Alasan penanganan"]]}/><label>Status penanganan<select name="state"><option value="investigating">Diperiksa</option><option value="escalated">Eskalasi</option><option value="resolved">Selesai (ledger harus sudah pulih)</option></select></label><button disabled={busy}>Simpan penanganan</button></form><form onSubmit={e=>void run(e,"refund")}><h3>Ajukan refund penuh manual</h3><p>Memerlukan Finance kedua. Tidak mengirim refund ke provider dan tidak menambah stok.</p><Fields names={[["orderId","ID pesanan"],["amount","Jumlah penuh IDR","number"],["evidenceRef","Referensi bukti"],["reason","Alasan refund"]]}/><button disabled={busy}>Ajukan refund penuh</button></form>{status&&<p role="status">{status}</p>}</section>;
+}
+
+export function StaffForm({ refresh }: { refresh:()=>void }) {
+  const [status,setStatus]=useState(""),[busy,setBusy]=useState(false);
+  return <section className="panel"><h2>Hak staf</h2><p>Gunakan Google subject akun staf yang telah disetujui. Perubahan hak diri sendiri ditolak.</p><form onSubmit={e=>{const v=values(e);setBusy(true);void command("/v1/staff",v).then(()=>{setStatus("Perubahan hak tercatat.");refresh();}).catch(error=>setStatus(message(error))).finally(()=>setBusy(false));}}><Fields names={[["subject","Google subject staf"],["approvalRef","Referensi persetujuan pemilik"],["reason","Alasan perubahan"]]}/><label>Peran<select name="role">{STAFF_ROLES.map(role=><option key={role}>{role}</option>)}</select></label><label>Tindakan<select name="action"><option value="grant">Berikan</option><option value="revoke">Cabut</option></select></label><button disabled={busy}>Simpan hak staf</button></form>{status&&<p role="status">{status}</p>}</section>;
+}

@@ -2,7 +2,8 @@ import PgBoss from "pg-boss";
 import { inspectServiceRuntimeConfig } from "@yubie/config";
 import { checkListingHealth, SystemClock, purgePhoneChallenges, purgeAddressPins } from "@yubie/application";
 import { createSupportProvider, HttpLinkHealthChecker } from "@yubie/integrations";
-import { closeDatabase, createWorkerRepositories, PostgresAssistantWorkRepository, PostgresTransactionManager } from "@yubie/persistence";
+import { closeDatabase, createWorkerRepositories, PostgresAssistantWorkRepository, PostgresTransactionManager, PostgresOperationsOutbox } from "@yubie/persistence";
+import { processOperationsOutbox } from "./operations-outbox-handler.js";
 import { processAssistantJob } from "./assistant-handler.js";
 import { startMetricsServer } from "./metrics-server.js";
 import { reconcileSupport } from "./reconcile-handler.js";
@@ -118,6 +119,15 @@ async function start() {
   await boss.work("payment.notifications",{batchSize:1},async()=>{await runPaymentNotifications(repos.database);});
   await boss.schedule("payment.notifications","* * * * *",{});
   await boss.send("payment.notifications",{});
+  await boss.createQueue("operations.outbox");
+  await boss.work("operations.outbox", { batchSize: 1 }, async () => {
+    await processOperationsOutbox(new PostgresOperationsOutbox(repos.database), async () => {
+      // Existing reconciliation looks up provider state; it never creates a payable session.
+      await runPaymentReconcile(repos.database, "worker_operations_request");
+    });
+  });
+  await boss.schedule("operations.outbox", "* * * * *", {});
+  await boss.send("operations.outbox", {});
   await boss.createQueue("identity.delivery");
   await boss.work("identity.delivery", { batchSize: 1 }, async () => {
     await runPhoneDelivery(repos.database);

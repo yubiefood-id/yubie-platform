@@ -7,6 +7,7 @@ COPY apps/worker/package.json ./apps/worker/package.json
 COPY apps/bot/package.json ./apps/bot/package.json
 COPY packages ./packages
 COPY apps/admin ./apps/admin
+COPY scripts/operations/bootstrap-staff.mjs scripts/operations/admin-database-grants.sql ./scripts/operations/
 RUN npm ci
 RUN npm run build --workspace @yubie/config \
   && npm run build --workspace @yubie/domain \
@@ -20,11 +21,14 @@ RUN npm prune --omit=dev
 
 FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402
 WORKDIR /app
+ARG RELEASE_SHA=dev
+LABEL org.opencontainers.image.revision=$RELEASE_SHA
+ENV RELEASE_SHA=$RELEASE_SHA
 ENV NODE_ENV=production ADMIN_HOST=0.0.0.0 ADMIN_PORT=4174
-RUN addgroup -S yubie && adduser -S yubie -G yubie \
+RUN addgroup -S -g 10001 yubie && adduser -S -u 10001 yubie -G yubie \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build /app /app
 USER yubie
 EXPOSE 4174
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://127.0.0.1:4174/healthz || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD node -e 'const tls=!!process.env.ADMIN_TLS_CERT_FILE;const options={hostname:"127.0.0.1",port:4174,path:"/readyz",timeout:4000,...(tls?{servername:"localhost",ca:[...require("node:tls").rootCertificates,require("node:fs").readFileSync(process.env.ADMIN_TLS_CERT_FILE)]}:{})};const r=require(tls?"node:https":"node:http").get(options,s=>{s.resume();process.exit(s.statusCode===200?0:1)});r.on("error",()=>process.exit(1));r.on("timeout",()=>{r.destroy();process.exit(1)});'
 CMD ["node", "apps/admin/dist/runtime.js"]

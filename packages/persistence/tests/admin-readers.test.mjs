@@ -86,7 +86,7 @@ test("admin readers page orders and payments without customer PII", { skip }, as
       await sql`INSERT INTO inventory_lots (id, product_id, size_id, lot_code, quantity_on_hand, expiry_date, status, created_at, updated_at)
         VALUES ('lot_admin', 'flour', '250g', 'QA-ADMIN', 9, DATE '2027-06-30', 'quarantined', NOW(), NOW())`;
       const inventory = await readers.listInventory({ limit: 50, cursor: null });
-      assert.deepEqual(inventory.items, [{ id: "lot_admin", productId: "flour", sizeId: "250g", quantity: 9, status: "quarantined", expiryDate: "2027-06-30" }]);
+      assert.deepEqual(inventory.items, [{ id: "lot_admin", productId: "flour", sizeId: "250g", quantity: 9, status: "quarantined", expiryDate: "2027-06-30", lotCode: "QA-ADMIN", unitOfMeasure: null, qcApprovalRef: null, availableQuantity: 0, reservedQuantity: 0 }]);
       const sessions = new PostgresAdminSessionRepository(database);
       const tokenHash = "a".repeat(64);
       assert.equal(await sessions.isRevoked(tokenHash), false);

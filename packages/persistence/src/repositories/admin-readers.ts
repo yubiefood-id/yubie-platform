@@ -157,8 +157,10 @@ export class PostgresAdminReaders {
     if (cursor === "invalid") throw new RangeError("invalid admin cursor");
     const rows = await this.database.client.begin("read only", async (sql) => {
       await sql`SET LOCAL statement_timeout = '5s'`;
-      return sql<Array<{ id: string; product_id: string; size_id: string; quantity_on_hand: number; status: string; expiry_date: string; created_micros: string }>>`
-        SELECT id, product_id, size_id, quantity_on_hand, status, expiry_date::text,
+      return sql<Array<{ id: string; product_id: string; size_id: string; quantity_on_hand: number; status: string; expiry_date: string; lot_code: string; unit_of_measure: string | null; qc_approval_ref: string | null; available_quantity: number; reserved_quantity: number; created_micros: string }>>`
+        SELECT id, product_id, size_id, lot_code, unit_of_measure, qc_approval_ref, quantity_on_hand, status, expiry_date::text,
+          CASE WHEN status='released' AND expiry_date>CURRENT_DATE THEN quantity_on_hand ELSE 0 END available_quantity,
+          coalesce((SELECT sum(r.quantity)::int FROM inventory_reservations r WHERE r.lot_id=inventory_lots.id AND r.status='active'),0) reserved_quantity,
           (EXTRACT(EPOCH FROM created_at) * 1000000)::bigint::text AS created_micros
         FROM inventory_lots
         WHERE (id ILIKE ${pattern} OR product_id ILIKE ${pattern})
@@ -167,7 +169,7 @@ export class PostgresAdminReaders {
         LIMIT ${query.limit + 1}`;
     });
     return {
-      items: rows.slice(0, query.limit).map((row) => ({ id: row.id, productId: row.product_id, sizeId: row.size_id, quantity: row.quantity_on_hand, status: row.status, expiryDate: row.expiry_date })),
+      items: rows.slice(0, query.limit).map((row) => ({ id: row.id, productId: row.product_id, sizeId: row.size_id, quantity: row.quantity_on_hand, status: row.status, expiryDate: row.expiry_date, lotCode: row.lot_code, unitOfMeasure: row.unit_of_measure, qcApprovalRef: row.qc_approval_ref, availableQuantity: row.available_quantity, reservedQuantity: row.reserved_quantity })),
       nextCursor: nextCursor(rows, query.limit),
     };
   }

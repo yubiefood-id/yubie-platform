@@ -303,7 +303,7 @@ class Release:
                           "database": database, "productionComposeSha256": hashlib.sha256(P.read_trusted(PRODUCTION)).hexdigest()}
         P.require(rows["migrate"]["State"]["Status"] == "exited" and rows["migrate"]["State"]["ExitCode"] == 0, "PREVIOUS_MIGRATION_FAILED_OR_RUNNING")
         expected = self.manifest["migrations"]
-        P.require(database["migrations"] in (expected[:22], expected), "UNREVIEWED_SCHEMA_BASELINE")
+        P.validate_migration_baseline(database["migrations"], expected)
         P.require(170000 <= database["serverVersionNumber"] < 180000, "UNREVIEWED_POSTGRES_VERSION")
         P.require(database["negativeStock"] == 0 and database["criticalExceptions"] == 0, "FINANCIAL_OR_STOCK_EXCEPTION")
         P.require(all(item["provider"] == self.provider for item in database["unresolved"]), "UNRESOLVED_OTHER_PROVIDER")

@@ -15,3 +15,8 @@
 **/*.log
 **/test-results
 **/playwright-report
+apps/admin/tests
+!scripts/
+!scripts/operations/
+!scripts/operations/bootstrap-staff.mjs
+!scripts/operations/admin-database-grants.sql

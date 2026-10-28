@@ -8,5 +8,9 @@ SELECT json_build_object(
  'notificationInbox', (SELECT count(*)=5 FROM information_schema.columns WHERE table_schema='public' AND table_name='payment_notification_inbox' AND column_name IN ('notification','processed_at','retry_after','attempt_count','last_error_code')),
  'notificationDueIndex', EXISTS(SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.payment_notification_due') AND indisvalid AND indisready AND pg_get_expr(indpred,indrelid)='(processed_at IS NULL)'),
  'recoveryForeignKey', EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.idempotency_keys') AND confrelid=to_regclass('public.orders') AND contype='f' AND convalidated AND pg_get_constraintdef(oid)='FOREIGN KEY (resource_id) REFERENCES orders(id)'),
- 'recoveryIndex', EXISTS(SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.idempotency_keys_resource') AND indisvalid AND indisready AND pg_get_expr(indpred,indrelid)='(resource_id IS NOT NULL)')
+ 'recoveryIndex', EXISTS(SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.idempotency_keys_resource') AND indisvalid AND indisready AND pg_get_expr(indpred,indrelid)='(resource_id IS NOT NULL)'),
+ 'operationsTables', (SELECT count(*)=8 FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('ops_staff_grants','ops_requests','ops_command_receipts','ops_events','ops_fulfillments','ops_order_notes','ops_exception_cases','ops_refund_executions')),
+ 'operationsImmutablePayload', EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.ops_requests') AND tgname='ops_requests_immutable' AND tgenabled IN ('O','A')),
+ 'operationsAppendOnly', (SELECT count(*)=2 FROM pg_trigger WHERE tgrelid IN (to_regclass('public.ops_events'),to_regclass('public.ops_command_receipts')) AND NOT tgisinternal AND tgenabled IN ('O','A')),
+ 'operationsShippingProvenance', (SELECT count(*)=3 FROM information_schema.columns WHERE table_schema='public' AND table_name='shipping_policy_approvals' AND column_name IN ('service_coverage','cost_owner','source_request_id'))
 );

@@ -132,3 +132,4 @@ export * from "./promotions.js";
 export * from "./yubi-discovery.js";
 
 export * from "./inventory-onboarding.js";
+export * from "./operations.js";

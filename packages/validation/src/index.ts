@@ -86,6 +86,36 @@ export const inventoryOnboardingSchema = z.object({
     status:z.enum(["received","quarantined","released","recalled","depleted"]),qcApprovalRef:z.string().trim().max(200).optional(),
   }).strict()).min(1).max(100),
 }).strict();
+const operationalReference = z.string().trim().min(1).max(300).refine(value => !/(?:^|[\s_-])(PENDING|PROPOSED|MISSING|BELUM|USULAN|NOT_FOR_IMPORT)(?:$|[\s_-])/i.test(value), "Bukti asli diperlukan; placeholder/usulan tidak diterima");
+export const operationalVerificationSchema = z.object({
+  status: z.literal("VERIFIED"), evidenceRef: operationalReference, verifiedBy: operationalReference, verifiedAt: z.iso.datetime(),
+}).strict();
+export const verifiedInventoryIntakeSchema = z.object({
+  documentType: z.literal("YUBIE_VERIFIED_INVENTORY_INTAKE_V1"), purpose: z.enum(["initial_inventory", "operational_count"]),
+  sourceSha256: z.string().regex(/^[a-f0-9]{64}$/), verification: operationalVerificationSchema, inventory: inventoryOnboardingSchema,
+}).strict();
+export const shippingPolicyDraftSchema = z.object({
+  policy: z.literal("free_promotional"), cities: z.array(operationalReference).min(1).max(100), amount: z.literal(0),
+  serviceCoverage: operationalReference, costOwner: operationalReference, startsAt: z.iso.datetime(), endsAt: z.iso.datetime(),
+  approvalRef: operationalReference, verification: operationalVerificationSchema,
+}).strict().refine(input => Date.parse(input.endsAt) > Date.parse(input.startsAt), "Waktu akhir harus sesudah waktu mulai")
+  .refine(input => new Set(input.cities.map(city => city.normalize("NFKC").trim().toLowerCase())).size === input.cities.length, "Kota tidak boleh duplikat");
+export const operationsApprovalSchema = z.object({ expectedVersion: z.number().int().positive(), reason: z.string().trim().min(3).max(300) }).strict();
+export const operationsCreateSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("inventory_count"), payload: verifiedInventoryIntakeSchema }).strict(),
+  z.object({ kind: z.literal("shipping_policy"), payload: shippingPolicyDraftSchema }).strict(),
+  z.object({ kind: z.literal("refund_full"), payload: z.object({ orderId: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/), amount: z.number().int().positive(), reason: z.string().trim().min(3).max(300), evidenceRef: operationalReference }).strict() }).strict(),
+]);
+export const fulfillmentCommandSchema = z.object({
+  expectedVersion: z.number().int().nonnegative(), stage: z.enum(["packing", "packed", "shipped", "delivered"]),
+  carrier: z.string().trim().min(1).max(100).optional(), trackingNumber: z.string().trim().min(1).max(120).optional(), reason: z.string().trim().min(3).max(300),
+}).strict();
+export const operationNoteSchema = z.object({ body: z.string().trim().min(1).max(1000), reason: z.string().trim().min(3).max(300) }).strict();
+export const refundExecutionSchema = z.object({ expectedVersion: z.number().int().positive(), merchantReference: operationalReference, evidenceRef: operationalReference, reason: z.string().trim().min(3).max(300) }).strict();
+export type OperationsCreate = z.infer<typeof operationsCreateSchema>;
+export type ShippingPolicyDraft = z.infer<typeof shippingPolicyDraftSchema>;
+export type FulfillmentCommand = z.infer<typeof fulfillmentCommandSchema>;
+export const staffGrantSchema = z.object({ subject: z.string().regex(/^[A-Za-z0-9_-]{1,255}$/), role: z.enum(["viewer", "operator", "qc", "fulfillment", "finance", "admin"]), action: z.enum(["grant", "revoke"]), approvalRef: operationalReference, reason: z.string().trim().min(3).max(300) }).strict();
 export type GoogleLoginRequest = z.infer<typeof googleLoginSchema>;
 
 export * from "./channel.js";
