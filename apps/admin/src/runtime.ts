@@ -1,11 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer as createSecureServer } from "node:https";
 import { readFile } from "node:fs/promises";
 import { resolve, sep, extname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createDatabase, closeDatabase, PostgresAdminReaders, PostgresAdminSessionRepository, PostgresAuditRepository } from "@yubie/persistence";
+import { createDatabase, closeDatabase, PostgresAdminReaders, PostgresAdminSessionRepository, PostgresAuditRepository, PostgresOperations } from "@yubie/persistence";
 import { GoogleIdTokenVerifier } from "@yubie/integrations";
 import { handleAdminRequest, type AdminServerOptions } from "./server.js";
-import type { AdminRole } from "./rbac.js";
 
 const securityHeaders = {
   "cache-control": "no-store",
@@ -18,10 +18,18 @@ const securityHeaders = {
 /** Node adapter, also used by isolated tests with real policy and injected providers. */
 export function adminHttpHandler(options: () => AdminServerOptions, origin: string, assetsDirectory: string) {
   const assets = resolve(assetsDirectory);
+  const rate = new Map<string, { start: number; count: number }>();
   return async (incoming: IncomingMessage, outgoing: ServerResponse) => {
     try {
       const url = new URL(incoming.url || "/", origin);
       if (url.origin !== origin) { outgoing.writeHead(400); outgoing.end(); return; }
+      const now = Date.now(), address = incoming.socket.remoteAddress || "unknown";
+      const category = url.pathname === "/auth/google" ? "login" : incoming.method !== "GET" && incoming.method !== "HEAD" ? "write" : url.pathname.startsWith("/v1/") || url.pathname.startsWith("/auth/") ? "read" : "asset";
+      const budget = category === "login" ? 20 : category === "write" ? 60 : 120;
+      const bucket = address+":"+category;
+      for (const [key, value] of rate) if (now - value.start > 60_000) rate.delete(key);
+      const counter = rate.get(bucket) ?? { start: now, count: 0 }; counter.count++; rate.set(bucket, counter);
+      if (counter.count > budget || rate.size > 1000) { outgoing.writeHead(429, { ...securityHeaders, "retry-after": "60" }); outgoing.end(); return; }
       let response: Response;
       if (incoming.method === "GET" && (url.pathname === "/" || url.pathname.startsWith("/assets/"))) {
         const path = url.pathname === "/" ? resolve(assets, "index.html") : resolve(assets, `.${decodeURIComponent(url.pathname)}`);
@@ -37,7 +45,7 @@ export function adminHttpHandler(options: () => AdminServerOptions, origin: stri
         for await (const chunk of incoming) {
           const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
           size += buffer.length;
-          if (size > 16_384) { outgoing.writeHead(413, securityHeaders); outgoing.end(); return; }
+          if (size > (url.pathname.startsWith("/v1/") ? 131_072 : 16_384)) { outgoing.writeHead(413, securityHeaders); outgoing.end(); return; }
           chunks.push(buffer);
         }
         response = await handleAdminRequest(new Request(url, { method: incoming.method || "GET", headers, ...(size ? { body: Buffer.concat(chunks) } : {}) }), options());
@@ -52,24 +60,37 @@ export function adminHttpHandler(options: () => AdminServerOptions, origin: stri
   };
 }
 
-export async function startAdmin(env: NodeJS.ProcessEnv = process.env) {
+export function adminRuntimeConfig(env: NodeJS.ProcessEnv) {
+  if (["IPAYMU_VA", "IPAYMU_API_KEY", "XENDIT_SECRET_KEY", "API_PROXY_TOKEN", "OPS_API_TOKEN", "SMSGATE_PASSWORD", "ZAMMAD_API_TOKEN"].some(key => Boolean(env[key]))) throw new Error("Admin must not receive payment provider or customer-service secrets");
   const origin = new URL(env.ADMIN_ORIGIN || "");
   if (origin.protocol !== "https:" || origin.origin !== env.ADMIN_ORIGIN) throw new Error("ADMIN_ORIGIN must be the approved HTTPS origin");
-  if (!env.DATABASE_URL || !env.ADMIN_GOOGLE_CLIENT_ID || !env.ADMIN_SESSION_SECRET || env.ADMIN_SESSION_SECRET.length < 32 || !env.ADMIN_STAFF_SUBJECT_ROLES) throw new Error("Admin database, separate staff OIDC, role mapping and session secret are required");
+  if (!env.DATABASE_URL || !env.ADMIN_GOOGLE_CLIENT_ID || !env.ADMIN_SESSION_SECRET || env.ADMIN_SESSION_SECRET.length < 32) throw new Error("Admin database, separate staff OIDC and session secret are required");
   if (env.GOOGLE_CLIENT_ID && env.ADMIN_GOOGLE_CLIENT_ID === env.GOOGLE_CLIENT_ID) throw new Error("Staff and customer OAuth clients must be separate");
-  const staffRoles: unknown = JSON.parse(env.ADMIN_STAFF_SUBJECT_ROLES);
-  if (!staffRoles || typeof staffRoles !== "object" || Array.isArray(staffRoles) || !Object.keys(staffRoles).length || Object.entries(staffRoles).some(([sub, role]) => !/^[A-Za-z0-9_-]{1,255}$/.test(sub) || !["viewer", "operator", "finance"].includes(String(role)))) throw new Error("ADMIN_STAFF_SUBJECT_ROLES must contain approved subject-to-role mappings");
+  if (env.ADMIN_WRITES_ENABLED && !["true", "false"].includes(env.ADMIN_WRITES_ENABLED)) throw new Error("ADMIN_WRITES_ENABLED must be true or false");
+  const writesEnabled = env.ADMIN_WRITES_ENABLED === "true";
+  const checkoutAdmission = env.YUBIE_CHECKOUT_ADMISSION ?? "unknown";
+  if (writesEnabled && !["enabled", "disabled"].includes(checkoutAdmission)) throw new Error("Authoritative checkout admission posture required");
+  if ((env.ADMIN_TLS_CERT_FILE && !env.ADMIN_TLS_KEY_FILE) || (!env.ADMIN_TLS_CERT_FILE && env.ADMIN_TLS_KEY_FILE) || (env.YUBIE_ENV === "production" && !env.ADMIN_TLS_KEY_FILE)) throw new Error("Private production admin requires direct TLS certificate and key");
   const port = Number(env.ADMIN_PORT || 4174);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid ADMIN_PORT");
-  const database = createDatabase(env.DATABASE_URL);
-  const verifier = new GoogleIdTokenVerifier({ clientId: env.ADMIN_GOOGLE_CLIENT_ID });
+  return { origin, port, host: env.ADMIN_HOST || "127.0.0.1", writesEnabled, checkoutAdmission };
+}
+
+export async function startAdmin(env: NodeJS.ProcessEnv = process.env) {
+  const { origin, port, host, writesEnabled, checkoutAdmission } = adminRuntimeConfig(env);
+  const database = createDatabase(env.DATABASE_URL!);
+  const verifier = new GoogleIdTokenVerifier({ clientId: env.ADMIN_GOOGLE_CLIENT_ID! });
   const readers = new PostgresAdminReaders(database);
   const audit = new PostgresAuditRepository(database);
   const sessions = new PostgresAdminSessionRepository(database);
-  const options = () => ({ sessionSecret: env.ADMIN_SESSION_SECRET!, googleClientId: env.ADMIN_GOOGLE_CLIENT_ID!, staffRoles: staffRoles as Record<string, AdminRole>, verifier, readers, audit, sessions, nowMs: Date.now() });
-  const server = createServer(adminHttpHandler(options, origin.origin, fileURLToPath(new URL("./public/", import.meta.url))));
+  const operations = new PostgresOperations(database, { writesEnabled, checkoutAdmission, ...(env.YUBIE_ENV ? { environment: env.YUBIE_ENV } : {}) });
+  const options = () => ({ operations, releaseSha: env.RELEASE_SHA || "dev", ready: async () => { await database.client`SELECT 1 FROM ops_staff_grants LIMIT 1`; }, sessionSecret: env.ADMIN_SESSION_SECRET!, googleClientId: env.ADMIN_GOOGLE_CLIENT_ID!, verifier, readers, audit, sessions, nowMs: Date.now() });
+  const handler = adminHttpHandler(options, origin.origin, fileURLToPath(new URL("./public/", import.meta.url)));
+  const server = env.ADMIN_TLS_CERT_FILE && env.ADMIN_TLS_KEY_FILE
+    ? createSecureServer({ cert: await readFile(env.ADMIN_TLS_CERT_FILE), key: await readFile(env.ADMIN_TLS_KEY_FILE), minVersion: "TLSv1.2" }, handler)
+    : createServer(handler);
   try {
-    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, env.ADMIN_HOST || "127.0.0.1", resolve); });
+    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, host, resolve); });
   } catch (error) {
     await closeDatabase(database);
     throw error;

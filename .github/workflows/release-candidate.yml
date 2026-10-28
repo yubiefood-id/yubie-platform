@@ -178,6 +178,7 @@ jobs:
           context: release-image-source
           file: release-image-source/infrastructure/docker/Dockerfile.admin
           push: true
+          build-args: RELEASE_SHA=${{ env.TARGET_SHA }}
           tags: ghcr.io/${{ github.repository_owner }}/yubie-admin:${{ env.TARGET_SHA }}
           labels: org.opencontainers.image.revision=${{ env.TARGET_SHA }}
           provenance: mode=max
@@ -276,6 +277,8 @@ jobs:
             --api-image "ghcr.io/yubiefood-id/yubie-api@${{ steps.build-api.outputs.digest }}" \
             --worker-image "ghcr.io/yubiefood-id/yubie-worker@${{ steps.build-worker.outputs.digest }}" \
             --output release-bundle
+          node scripts/operations/seal-release.mjs "$TARGET_SHA" \
+            "ghcr.io/yubiefood-id/yubie-admin@${{ steps.build-admin.outputs.digest }}" release-bundle
           {
             echo '## Restricted release artifact checksums'
             echo '```text'

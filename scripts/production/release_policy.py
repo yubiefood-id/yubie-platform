@@ -85,9 +85,17 @@ def validate_authorization(auth, digest, now):
         raise Blocked("AUTHORIZATION_WINDOW") from None
 
 
+def validate_migration_baseline(actual, expected):
+    # Explicit reviewed release boundaries only; never resume a partial 0023/24 upgrade.
+    require(actual in (expected[:22], expected[:25], expected), "UNREVIEWED_SCHEMA_BASELINE")
+
+
 def validate_schema(expected, actual, checks):
     require(sorted(actual) == sorted(expected), "EXACT_MIGRATIONS_REQUIRED")
     require(SCHEMA_CHECKS <= checks.keys() and all(checks[key] is True for key in SCHEMA_CHECKS), "SCHEMA_OBJECTS_REQUIRED")
+    if "0026_operations_workflows.sql" in expected:
+        operations = {"operationsTables", "operationsImmutablePayload", "operationsAppendOnly", "operationsShippingProvenance"}
+        require(operations <= checks.keys() and all(checks[key] is True for key in operations), "OPERATIONS_SCHEMA_OBJECTS_REQUIRED")
 
 
 def render_compose(template, manifest):

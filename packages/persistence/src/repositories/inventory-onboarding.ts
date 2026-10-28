@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {validateInventoryOnboarding,assertInventoryLotChange,assertInventoryPackagingChange,type InventoryOnboardingInput} from "@yubie/domain";
 export type {InventoryOnboardingInput} from "@yubie/domain";
 import type { Database } from "../client.js";
+import type { TransactionSql } from "postgres";
 
 /** Explicit count reconciliation, never a seed. Counted quantity EXCLUDES
  * committed/reserved customer stock; the operator must reconcile those units
@@ -10,9 +11,13 @@ export class PostgresInventoryOnboarding {
   constructor(private readonly database: Database) {}
 
   async run(input: InventoryOnboardingInput, apply: boolean) {
+    return this.database.client.begin(tx => this.runInTransaction(tx,input,apply));
+  }
+
+  /** Share the caller's transaction so approval, stock, audit and outbox commit together. */
+  async runInTransaction(tx: TransactionSql, input: InventoryOnboardingInput, apply: boolean, packagingApprover = input.actor) {
     if(!input||!/^[A-Za-z0-9_-]{1,100}$/.test(input.operationId))throw new Error("Invalid operation identity");
     const inputHash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
-    return this.database.client.begin(async tx => {
       await tx`SELECT pg_advisory_xact_lock(hashtextextended('inventory-onboarding',0))`;
       const prior = await tx`SELECT input_hash, result FROM inventory_onboarding_operations WHERE operation_id=${input.operationId}`;
       if (prior[0]) {
@@ -22,6 +27,10 @@ export class PostgresInventoryOnboarding {
       validateInventoryOnboarding(input,new Date().toISOString());
       // Lock packaging before lots, matching checkout's lock order.
       await tx`SELECT product_id FROM inventory_sku_policies ORDER BY product_id,size_id FOR UPDATE`;
+      for (const policy of input.policies) {
+        const priorPolicy = await tx`SELECT version,components,approval_ref FROM inventory_sku_policies WHERE product_id=${policy.productId} AND size_id=${policy.sizeId}`;
+        assertInventoryPackagingChange(priorPolicy[0]?{productId:policy.productId,sizeId:policy.sizeId,version:Number(priorPolicy[0].version),approvalRef:String(priorPolicy[0].approval_ref),components:priorPolicy[0].components}:null,policy);
+      }
       const adjustments = [];
       for (const lot of [...input.lots].sort((a,b)=>a.productId.localeCompare(b.productId)||a.sizeId.localeCompare(b.sizeId)||a.lotCode.localeCompare(b.lotCode))) {
         const rows = await tx`SELECT id,quantity_on_hand,status,expiry_date::text,unit_of_measure FROM inventory_lots WHERE product_id=${lot.productId} AND size_id=${lot.sizeId} AND lot_code=${lot.lotCode} FOR UPDATE`;
@@ -44,13 +53,11 @@ export class PostgresInventoryOnboarding {
             await tx`INSERT INTO outbox_events(id,event_type,aggregate_type,aggregate_id,payload_json,dedupe_key,status,available_at,attempt_count) VALUES(${'outbox_'+randomUUID()},'inventory.recall_hold','order',${order.id},${JSON.stringify({orderId:order.id,operationId:input.operationId,reason:'lot_recalled'})},${'inventory:recall:'+input.operationId+':'+order.id},'pending',now(),0) ON CONFLICT(dedupe_key) DO NOTHING`;
           }
         }
-        await tx`INSERT INTO inventory_movements(id,lot_id,product_id,size_id,movement_type,quantity_delta,reason,occurred_at) VALUES(${'mov_'+randomUUID()},${id},${lot.productId},${lot.sizeId},${current?"adjust":"receive"},${delta},${input.operationId+":"+input.reason},now())`;
+        if (delta !== 0) await tx`INSERT INTO inventory_movements(id,lot_id,product_id,size_id,movement_type,quantity_delta,reason,occurred_at) VALUES(${'mov_'+randomUUID()},${id},${lot.productId},${lot.sizeId},${current?"adjust":"receive"},${delta},${input.operationId+":"+input.reason},now())`;
       }
       if (apply) {
         for (const policy of input.policies) {
-          const priorPolicy = await tx`SELECT version,components,approval_ref FROM inventory_sku_policies WHERE product_id=${policy.productId} AND size_id=${policy.sizeId}`;
-          assertInventoryPackagingChange(priorPolicy[0]?{productId:policy.productId,sizeId:policy.sizeId,version:Number(priorPolicy[0].version),approvalRef:String(priorPolicy[0].approval_ref),components:priorPolicy[0].components}:null,policy);
-          await tx`INSERT INTO inventory_sku_policies(product_id,size_id,version,components,approval_ref,approved_by,approved_at) VALUES(${policy.productId},${policy.sizeId},${policy.version},${JSON.stringify(policy.components)}::jsonb,${policy.approvalRef},${input.actor},now()) ON CONFLICT(product_id,size_id) DO UPDATE SET version=EXCLUDED.version,components=EXCLUDED.components,approval_ref=EXCLUDED.approval_ref,approved_by=EXCLUDED.approved_by,approved_at=EXCLUDED.approved_at`;
+          await tx`INSERT INTO inventory_sku_policies(product_id,size_id,version,components,approval_ref,approved_by,approved_at) VALUES(${policy.productId},${policy.sizeId},${policy.version},${JSON.stringify(policy.components)}::jsonb,${policy.approvalRef},${packagingApprover},now()) ON CONFLICT(product_id,size_id) DO UPDATE SET version=EXCLUDED.version,components=EXCLUDED.components,approval_ref=EXCLUDED.approval_ref,approved_by=EXCLUDED.approved_by,approved_at=EXCLUDED.approved_at`;
         }
       }
       const result = {applied:apply,adjustments};
@@ -60,6 +67,5 @@ export class PostgresInventoryOnboarding {
         await tx`INSERT INTO outbox_events(id,event_type,aggregate_type,aggregate_id,payload_json,dedupe_key,status,available_at,attempt_count) VALUES(${'outbox_'+randomUUID()},'inventory.count_applied','inventory-operation',${input.operationId},${JSON.stringify({operationId:input.operationId})},${'inventory:'+input.operationId},'pending',now(),0)`;
       }
       return result;
-    });
   }
 }

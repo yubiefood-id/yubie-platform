@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { AdminRole } from "./rbac.js";
+import { STAFF_ROLES } from "@yubie/domain";
 
 export interface AdminSession {
   sub: string;
@@ -7,7 +8,7 @@ export interface AdminSession {
   exp: number;
 }
 
-const ROLES: ReadonlySet<string> = new Set(["viewer", "operator", "finance"]);
+const ROLES: ReadonlySet<string> = new Set(STAFF_ROLES);
 
 export function issueAdminSession(session: AdminSession, secret: string): string {
   const body = Buffer.from(JSON.stringify(session)).toString("base64url");

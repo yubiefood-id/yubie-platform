@@ -27,6 +27,7 @@ interface PageQuery {
   cursor: string | null;
   search?: string;
   exceptionsOnly?: boolean;
+  status?: string;
 }
 
 interface KeysetCursor {
@@ -84,6 +85,7 @@ export class PostgresAdminReaders {
               (EXTRACT(EPOCH FROM created_at) * 1000000)::bigint::text AS created_micros
             FROM orders
             WHERE (id ILIKE ${pattern} OR checkout_ref ILIKE ${pattern})
+              AND (${!query.status} OR status::text=${query.status ?? ""})
               AND ((EXTRACT(EPOCH FROM created_at) * 1000000)::bigint, id)
               < (${cursor.createdAtMicros}::bigint, ${cursor.id})
             ORDER BY created_at DESC, id DESC
@@ -92,7 +94,7 @@ export class PostgresAdminReaders {
             SELECT id, checkout_ref, status, grand_total_amount,
               (EXTRACT(EPOCH FROM created_at) * 1000000)::bigint::text AS created_micros
             FROM orders
-            WHERE id ILIKE ${pattern} OR checkout_ref ILIKE ${pattern}
+            WHERE (id ILIKE ${pattern} OR checkout_ref ILIKE ${pattern}) AND (${!query.status} OR status::text=${query.status ?? ""})
             ORDER BY created_at DESC, id DESC
             LIMIT ${query.limit + 1}`;
     });
@@ -120,6 +122,7 @@ export class PostgresAdminReaders {
               (EXTRACT(EPOCH FROM created_at) * 1000000)::bigint::text AS created_micros
             FROM order_payments
             WHERE (id ILIKE ${pattern} OR order_id ILIKE ${pattern})
+              AND (${!query.status} OR status::text=${query.status ?? ""})
               AND (${!query.exceptionsOnly} OR reconciliation_state IN ('ambiguous', 'ambiguous_create', 'pending_reconciliation', 'attach_failed', 'late_success_after_terminal', 'multiple_successful_transactions', 'provider_mismatch', 'other_payment_unresolved'))
               AND ((EXTRACT(EPOCH FROM created_at) * 1000000)::bigint, id)
               < (${cursor.createdAtMicros}::bigint, ${cursor.id})
@@ -130,6 +133,7 @@ export class PostgresAdminReaders {
               (EXTRACT(EPOCH FROM created_at) * 1000000)::bigint::text AS created_micros
             FROM order_payments
             WHERE (id ILIKE ${pattern} OR order_id ILIKE ${pattern})
+              AND (${!query.status} OR status::text=${query.status ?? ""})
               AND (${!query.exceptionsOnly} OR reconciliation_state IN ('ambiguous', 'ambiguous_create', 'pending_reconciliation', 'attach_failed', 'late_success_after_terminal', 'multiple_successful_transactions', 'provider_mismatch', 'other_payment_unresolved'))
             ORDER BY created_at DESC, id DESC
             LIMIT ${query.limit + 1}`;
@@ -157,23 +161,26 @@ export class PostgresAdminReaders {
     if (cursor === "invalid") throw new RangeError("invalid admin cursor");
     const rows = await this.database.client.begin("read only", async (sql) => {
       await sql`SET LOCAL statement_timeout = '5s'`;
-      return sql<Array<{ id: string; product_id: string; size_id: string; quantity_on_hand: number; status: string; expiry_date: string; created_micros: string }>>`
-        SELECT id, product_id, size_id, quantity_on_hand, status, expiry_date::text,
+      return sql<Array<{ id: string; product_id: string; size_id: string; quantity_on_hand: number; status: string; expiry_date: string; lot_code: string; unit_of_measure: string | null; qc_approval_ref: string | null; available_quantity: number; reserved_quantity: number; created_micros: string }>>`
+        SELECT id, product_id, size_id, lot_code, unit_of_measure, qc_approval_ref, quantity_on_hand, status, expiry_date::text,
+          CASE WHEN status='released' AND expiry_date>CURRENT_DATE AND released_at IS NOT NULL AND length(trim(qc_approval_ref))>0 AND EXISTS(SELECT 1 FROM inventory_sku_policies p WHERE p.product_id=inventory_lots.product_id AND p.size_id=inventory_lots.size_id) THEN quantity_on_hand ELSE 0 END available_quantity,
+          coalesce((SELECT sum(r.quantity)::int FROM inventory_reservations r WHERE r.lot_id=inventory_lots.id AND r.status='active'),0) reserved_quantity,
           (EXTRACT(EPOCH FROM created_at) * 1000000)::bigint::text AS created_micros
         FROM inventory_lots
         WHERE (id ILIKE ${pattern} OR product_id ILIKE ${pattern})
+          AND (${!query.status} OR status::text=${query.status ?? ""})
           AND (${cursor === null} OR ((EXTRACT(EPOCH FROM created_at) * 1000000)::bigint, id) < (${cursor?.createdAtMicros ?? "0"}::bigint, ${cursor?.id ?? ""}))
         ORDER BY created_at DESC, id DESC
         LIMIT ${query.limit + 1}`;
     });
     return {
-      items: rows.slice(0, query.limit).map((row) => ({ id: row.id, productId: row.product_id, sizeId: row.size_id, quantity: row.quantity_on_hand, status: row.status, expiryDate: row.expiry_date })),
+      items: rows.slice(0, query.limit).map((row) => ({ id: row.id, productId: row.product_id, sizeId: row.size_id, quantity: row.quantity_on_hand, status: row.status, expiryDate: row.expiry_date, lotCode: row.lot_code, unitOfMeasure: row.unit_of_measure, qcApprovalRef: row.qc_approval_ref, availableQuantity: row.available_quantity, reservedQuantity: row.reserved_quantity })),
       nextCursor: nextCursor(rows, query.limit),
     };
   }
 }
 
 function searchPattern(query: PageQuery): string {
-  if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 50 || (query.search?.length ?? 0) > 80) throw new RangeError("invalid admin query");
+  if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 50 || (query.search?.length ?? 0) > 80 || query.status && !/^[a-z_]{1,32}$/.test(query.status)) throw new RangeError("invalid admin query");
   return `%${(query.search ?? "").replace(/[\\%_]/g, "\\$&")}%`;
 }

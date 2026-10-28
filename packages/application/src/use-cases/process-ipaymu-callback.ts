@@ -4,6 +4,9 @@ import type { Clock, IdGenerator, TransactionManager } from "../ports.js";
 import { applyPaymentStatus } from "./process-payment-webhook.js";
 
 export interface IpaymuCallbackInput {
+  /** Internal provenance only; HTTP notifications never select this field. */
+  observationSource?: "callback" | "poll";
+  expectedPaymentId?: string;
   referenceId: string;
   merchant: string;
   expectedMerchant: string;
@@ -39,7 +42,8 @@ export type IpaymuCallbackResult =
   | { persisted: false; result: "unavailable" };
 
 /**
- * Applies an already signature-checked iPaymu callback.
+ * Applies a signature-checked callback or an authenticated server-side poll.
+ * Polls are explicitly labelled ipaymu.poll and never count as callback evidence.
  * A claimed success does not mark the order paid unless authoritativeStatus
  * is succeeded from the transaction-check API. Stock is not released here
  * unless that check says the payment is expired, failed, or cancelled.
@@ -48,17 +52,18 @@ export async function applyIpaymuCallback(
   input: IpaymuCallbackInput,
   deps: { tx: TransactionManager; clock: Clock; ids: IdGenerator },
 ): Promise<IpaymuCallbackResult> {
+  const eventType = input.observationSource === "poll" ? "ipaymu.poll" : "ipaymu.callback";
   if (input.merchant !== input.expectedMerchant) return { persisted: true, result: "rejected", reason: "merchant_mismatch" };
   if (input.amount === null || !Number.isInteger(input.amount)) return { persisted: true, result: "rejected", reason: "callback_amount_invalid" };
   if (input.currency != null && input.currency !== "IDR") return { persisted: true, result: "rejected", reason: "currency_mismatch" };
   try {
-    return await deps.tx.run("ipaymu.callback", async (repos) => {
+    return await deps.tx.run(eventType, async (repos) => {
       const orderResult = await repos.orders.findByCheckoutRef(input.referenceId);
       if (!orderResult.ok || !orderResult.value) return { persisted: false, result: "unavailable" as const };
       const order = orderResult.value;
       const payments = await repos.payments.findByOrderId(order.id);
       if (!payments.ok) return { persisted: false, result: "unavailable" as const };
-      const candidate = payments.value.find((payment) => payment.provider === "ipaymu");
+      const candidate = payments.value.find((payment) => payment.provider === "ipaymu" && (!input.expectedPaymentId || payment.id === input.expectedPaymentId));
       if (!candidate) {
         return { persisted: false, result: "unavailable" as const };
       }
@@ -93,7 +98,7 @@ export async function applyIpaymuCallback(
           input.sessionId,
           input.authoritativeStatus,
         ])).digest("hex"),
-        eventType: "ipaymu.callback",
+        eventType,
         receivedAt: deps.clock.now(),
       });
       if (requireResult(inboxAppend) === "duplicate") return { persisted: true, result: "duplicate" as const };
@@ -109,7 +114,7 @@ export async function applyIpaymuCallback(
         id: `pev_${deps.ids.nextId()}`,
         paymentId: payment.id,
         dedupeKey: input.dedupeKey,
-        event: "ipaymu.callback",
+        event: eventType,
         outcome: exceptionReason ?? input.authoritativeStatus ?? "pending",
         receivedAt: deps.clock.now(),
       });
@@ -129,7 +134,7 @@ export async function applyIpaymuCallback(
           reconciliationState: exceptionReason,
           updatedAt: now,
         }));
-        requireResult(await repos.audit.append({ action: "payment.exception", resourceType: "payment", resourceId: payment.id, actor: "payment-webhook", occurredAt: now }));
+        requireResult(await repos.audit.append({ action: "payment.exception", resourceType: "payment", resourceId: payment.id, actor: input.observationSource === "poll" ? "payment-reconciliation" : "payment-webhook", occurredAt: now }));
         requireResult(await repos.outbox.enqueue({
           eventType: "payment.exception", aggregateType: "payment", aggregateId: payment.id,
           dedupeKey: `payment:exception:${payment.id}:${exceptionReason}:${input.trxId ?? "unknown"}`,
@@ -140,11 +145,14 @@ export async function applyIpaymuCallback(
       }
       if (!input.authoritativeStatus || input.authoritativeStatus === "pending") {
         if (payment.status !== "pending") return { persisted: true, result: "stale" as const };
-        requireResult(await repos.payments.save({ ...nextPayment, reconciliationState: "pending_reconciliation" }));
+        const reconciliationState = input.observationSource === "poll"
+          ? payment.reconciliationState ?? (payment.providerSessionId && payment.redirectUrl ? null : "pending_reconciliation")
+          : "pending_reconciliation";
+        requireResult(await repos.payments.save({ ...nextPayment, reconciliationState }));
         return { persisted: true, result: "pending" as const };
       }
       const effect = await applyPaymentStatus(
-        { ...repos, clock: deps.clock, ids: deps.ids },
+        { ...repos, clock: deps.clock, ids: deps.ids, actor: input.observationSource === "poll" ? "payment-reconciliation" : "payment-webhook" },
         nextPayment,
         currentOrder,
         input.authoritativeStatus,

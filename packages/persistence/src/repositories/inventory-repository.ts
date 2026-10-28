@@ -20,6 +20,11 @@ import { inventoryLots, inventoryMovements, inventoryReservations } from "../sch
  */
 export class PostgresInventoryRepository implements InventoryRepository {
   constructor(private readonly database: Database) {}
+  async checkoutFrozen(): Promise<boolean> {
+    await this.database.db.execute(sql`SELECT pg_advisory_xact_lock_shared(hashtextextended('commerce-admission',0))`);
+    const rows = await this.database.db.execute(sql`SELECT EXISTS(SELECT 1 FROM ops_checkout_freeze WHERE expires_at>now()) frozen`);
+    return rows[0]?.frozen === true;
+  }
 
   async reserveForOrder(input: InventoryReserveInput): Promise<UseCaseResult<InventoryReserveOutcome>> {
     const onDate = input.now.slice(0, 10);

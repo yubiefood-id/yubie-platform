@@ -311,6 +311,8 @@ export class DuplicatePaymentIntentError extends Error {
  * are locked so concurrent checkouts cannot oversell.
  */
 export interface InventoryRepository {
+  /** Shared DB admission gate. Implementations hold its shared lock until checkout commits. */
+  checkoutFrozen?(): Promise<boolean>;
   availability?(onDate: string): Promise<Array<{productId:string;sizeId:string;maxQuantity:number;status:"available"|"unavailable"|"unverified"}>>;
   canFulfill?(lines: InventoryReserveLine[], onDate: string): Promise<boolean>;
   reserveForOrder(input: InventoryReserveInput): Promise<UseCaseResult<InventoryReserveOutcome>>;

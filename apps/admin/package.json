@@ -16,6 +16,7 @@
     "@yubie/integrations": "*",
     "@yubie/persistence": "*",
     "@yubie/ui": "*",
+    "@yubie/validation": "*",
     "@refinedev/core": "5.0.12",
     "@tanstack/react-query": "5.90.21",
     "react": "19.2.8",

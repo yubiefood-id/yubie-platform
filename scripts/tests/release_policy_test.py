@@ -57,6 +57,14 @@ class ReleasePolicy(unittest.TestCase):
   self.assertEqual(policy.journal_decision({"manifestSha256":"a","stage":"preflight"},"a"),"preflight")
   for stage in ["migration_started","worker_started","api_started","failed"]:
    with self.assertRaises(policy.Blocked):policy.journal_decision({"manifestSha256":"a","stage":stage},"a")
+ def test_operations_schema_cannot_be_accepted_from_migration_history_alone(self):
+  wanted=fixture()["migrations"]+["0026_operations_workflows.sql"]
+  checks={name:True for name in policy.SCHEMA_CHECKS}
+  with self.assertRaises(policy.Blocked):policy.validate_schema(wanted,wanted,checks)
+ def test_operations_upgrade_accepts_reviewed_0025_baseline_but_not_partial_upgrade(self):
+  expected=[f'{i:04d}_migration.sql' for i in range(1,27)]
+  policy.validate_migration_baseline(expected[:25],expected)
+  with self.assertRaises(policy.Blocked):policy.validate_migration_baseline(expected[:24],expected)
  def test_rendered_compose_uses_literal_reviewed_images_and_source(self):
   self.assertTrue(hasattr(policy,"render_compose"),"safe compose renderer is missing")
   template=b'image: ${YUBIE_API_IMAGE:-ghcr.io/yubiefood-id/yubie-api:${RELEASE_SHA}}\nworker: ${YUBIE_WORKER_IMAGE:-ghcr.io/yubiefood-id/yubie-worker:${RELEASE_SHA}}\nsha: ${RELEASE_SHA}\n'

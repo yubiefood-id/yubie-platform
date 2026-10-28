@@ -33,3 +33,5 @@ export * from "./repositories/promotion-repository.js";
 export * from "./repositories/admin-readers.js";
 export * from "./schema/index.js";
 export * from "./repositories/admin-session-repository.js";
+export * from "./repositories/operations-repository.js";
+export * from "./repositories/operations-outbox.js";

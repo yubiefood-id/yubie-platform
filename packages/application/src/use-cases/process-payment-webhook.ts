@@ -39,7 +39,7 @@ function requireWrite(result: UseCaseResult<unknown>): void {
  * so state, audit, outbox and inventory effects commit together.
  */
 export async function applyPaymentStatus(
-  deps: { orders: OrderRepository; payments: PaymentRepository; paymentEvents: PaymentEventRepository; audit?: AuditRepository; outbox?: OutboxRepository; inventory?: InventoryRepository; promotions?: PromotionRepository; clock: Clock; ids: IdGenerator },
+  deps: { orders: OrderRepository; payments: PaymentRepository; paymentEvents: PaymentEventRepository; audit?: AuditRepository; outbox?: OutboxRepository; inventory?: InventoryRepository; promotions?: PromotionRepository; clock: Clock; ids: IdGenerator; actor?: string },
   payment: PaymentRecord,
   order: OrderRecord,
   status: PaymentStatus,
@@ -54,7 +54,7 @@ export async function applyPaymentStatus(
   if (targetOrderStatus !== null && order.status !== targetOrderStatus && canTransitionOrder(order.status, targetOrderStatus)) {
     requireWrite(await deps.orders.save({ ...order, status: targetOrderStatus, updatedAt: now }));
     if (deps.audit) {
-      requireWrite(await deps.audit.append({ action: `order.${targetOrderStatus}`, resourceType: "order", resourceId: order.id, actor: "payment-webhook", occurredAt: now }));
+      requireWrite(await deps.audit.append({ action: `order.${targetOrderStatus}`, resourceType: "order", resourceId: order.id, actor: deps.actor ?? "payment-webhook", occurredAt: now }));
     }
     if (deps.outbox) {
       requireWrite(await deps.outbox.enqueue({

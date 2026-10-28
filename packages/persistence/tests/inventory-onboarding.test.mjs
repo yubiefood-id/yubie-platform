@@ -24,6 +24,7 @@ test('PostgreSQL onboarding replay, stale counts, QC gating, bundle contention a
   const first=await service.run(input,true);assert.equal(first.applied,true);
   assert.deepEqual(await service.run(input,true),first);
   assert.equal((await db.client`SELECT quantity_on_hand FROM inventory_lots`)[0].quantity_on_hand,20);
+  await assert.rejects(()=>service.run({...input,operationId:'bad-packaging-dry-run',policies:input.policies.map(p=>({...p,approvalRef:'different-approval-without-version'})),lots:input.lots.map(l=>({...l,expectedAvailable:20}))},false),/version/i);
   await assert.rejects(()=>service.run({...input,reason:'changed'},true),/identity/);
   await assert.rejects(()=>service.run({...input,operationId:'stale-count'},true),/stale/);
   const repo=new persistence.PostgresInventoryRepository(db);

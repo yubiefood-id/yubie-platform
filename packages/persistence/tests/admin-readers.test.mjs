@@ -80,13 +80,14 @@ test("admin readers page orders and payments without customer PII", { skip }, as
       const searched = await readers.listOrders({ limit: 50, cursor: null, search: "ord_b" });
       assert.deepEqual(searched.items.map((item) => item.id), ["ord_b"]);
       assert.equal((await readers.listOrders({ limit: 50, cursor: null, search: "' OR TRUE;--" })).items.length, 0);
+      assert.equal((await readers.listOrders({ limit: 50, cursor: null, status: "cancelled" })).items.length, 0);
       await sql`UPDATE order_payments SET status = 'expired', reconciliation_state = 'late_success_after_terminal' WHERE id = 'pay_ord_a'`;
       const exceptions = await readers.listExceptions({ limit: 50, cursor: null });
       assert.deepEqual(exceptions.items.map((item) => item.id).sort(), ["pay_ord_a", "pay_ord_b"]);
       await sql`INSERT INTO inventory_lots (id, product_id, size_id, lot_code, quantity_on_hand, expiry_date, status, created_at, updated_at)
         VALUES ('lot_admin', 'flour', '250g', 'QA-ADMIN', 9, DATE '2027-06-30', 'quarantined', NOW(), NOW())`;
       const inventory = await readers.listInventory({ limit: 50, cursor: null });
-      assert.deepEqual(inventory.items, [{ id: "lot_admin", productId: "flour", sizeId: "250g", quantity: 9, status: "quarantined", expiryDate: "2027-06-30" }]);
+      assert.deepEqual(inventory.items, [{ id: "lot_admin", productId: "flour", sizeId: "250g", quantity: 9, status: "quarantined", expiryDate: "2027-06-30", lotCode: "QA-ADMIN", unitOfMeasure: null, qcApprovalRef: null, availableQuantity: 0, reservedQuantity: 0 }]);
       const sessions = new PostgresAdminSessionRepository(database);
       const tokenHash = "a".repeat(64);
       assert.equal(await sessions.isRevoked(tokenHash), false);

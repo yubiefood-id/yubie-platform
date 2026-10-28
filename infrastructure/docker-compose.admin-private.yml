@@ -1,0 +1,31 @@
+# Separate private project; no shared Caddy or public route changes.
+name: yubie-ops-production
+services:
+  admin:
+    image: ${ADMIN_IMAGE:?Reviewed immutable admin digest required}
+    restart: unless-stopped
+    init: true
+    env_file: ${ADMIN_ENV_FILE:?Protected minimal admin env file required}
+    environment:
+      ADMIN_HOST: 0.0.0.0
+      ADMIN_PORT: "4174"
+      ADMIN_ORIGIN: https://localhost:4174
+      ADMIN_TLS_CERT_FILE: /run/secrets/admin.crt
+      ADMIN_TLS_KEY_FILE: /run/secrets/admin.key
+    ports: ["127.0.0.1:4174:4174"]
+    volumes:
+      - ${ADMIN_TLS_DIRECTORY:?Protected TLS directory required}:/run/secrets:ro
+    networks: [database]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+networks:
+  database:
+    external: true
+    name: yubie-prod_internal

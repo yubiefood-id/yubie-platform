@@ -444,7 +444,7 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     const guest = guestCheckoutToken(request);
     const headers: Record<string, string> = guest.existing ? {} : { "set-cookie": checkoutCookie(guest.token, (ctx.appOrigin ?? url.origin).startsWith("https://")) };
     try{
-      const held=ctx.paymentMode!=="preview"&&await ctx.tx.run("checkout.admission.read",repos=>repos.payments.hasFinancialException());
+      const held=ctx.paymentMode!=="preview"&&await ctx.tx.run("checkout.admission.read",async repos=>Boolean(await repos.inventory.checkoutFrozen?.()) || await repos.payments.hasFinancialException());
       return json({ok:true,data:{ready:true,admission:process.env.YUBIE_CHECKOUT_ADMISSION==="enabled"&&ctx.paymentMode!=="preview"&&!held?"enabled":"disabled"}},{headers:{...headers,"cache-control":"no-store"}});
     }catch{return json({ok:false,data:{ready:false},code:"CHECKOUT_UNAVAILABLE"},{status:503,headers:{"cache-control":"no-store"}});}
   }
