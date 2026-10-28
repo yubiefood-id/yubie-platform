@@ -121,10 +121,11 @@ async function start() {
   await boss.send("payment.notifications",{});
   await boss.createQueue("operations.outbox");
   await boss.work("operations.outbox", { batchSize: 1 }, async () => {
-    await processOperationsOutbox(new PostgresOperationsOutbox(repos.database), async () => {
+    const result = await processOperationsOutbox(new PostgresOperationsOutbox(repos.database), async () => {
       // Existing reconciliation looks up provider state; it never creates a payable session.
       await runPaymentReconcile(repos.database, "worker_operations_request");
     });
+    if (result.failed) throw new Error("OPERATIONS_OUTBOX_RETRY_PENDING");
   });
   await boss.schedule("operations.outbox", "* * * * *", {});
   await boss.send("operations.outbox", {});

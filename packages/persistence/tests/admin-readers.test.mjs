@@ -80,6 +80,7 @@ test("admin readers page orders and payments without customer PII", { skip }, as
       const searched = await readers.listOrders({ limit: 50, cursor: null, search: "ord_b" });
       assert.deepEqual(searched.items.map((item) => item.id), ["ord_b"]);
       assert.equal((await readers.listOrders({ limit: 50, cursor: null, search: "' OR TRUE;--" })).items.length, 0);
+      assert.equal((await readers.listOrders({ limit: 50, cursor: null, status: "cancelled" })).items.length, 0);
       await sql`UPDATE order_payments SET status = 'expired', reconciliation_state = 'late_success_after_terminal' WHERE id = 'pay_ord_a'`;
       const exceptions = await readers.listExceptions({ limit: 50, cursor: null });
       assert.deepEqual(exceptions.items.map((item) => item.id).sort(), ["pay_ord_a", "pay_ord_b"]);

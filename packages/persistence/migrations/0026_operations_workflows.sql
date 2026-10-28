@@ -1,4 +1,12 @@
 -- Additive operations controls. No stock, shipping coverage, staff or money seeded.
+CREATE TABLE ops_checkout_freeze (
+  id TEXT PRIMARY KEY CHECK(id='operations'),
+  requested_by TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  CHECK(expires_at>started_at AND expires_at<=started_at+interval '30 minutes')
+);
 CREATE TABLE ops_staff_grants (
   subject TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('viewer','operator','qc','fulfillment','finance','admin')),
@@ -98,5 +106,6 @@ CREATE TABLE ops_refund_executions (
 );
 CREATE UNIQUE INDEX ops_refund_once_per_payment ON ops_refund_executions(payment_id);
 ALTER TABLE shipping_policy_approvals ADD COLUMN service_coverage TEXT;
+ALTER TABLE shipping_policy_approvals ADD COLUMN scope TEXT CHECK(scope='whole_city');
 ALTER TABLE shipping_policy_approvals ADD COLUMN cost_owner TEXT;
 ALTER TABLE shipping_policy_approvals ADD COLUMN source_request_id TEXT REFERENCES ops_requests(id);

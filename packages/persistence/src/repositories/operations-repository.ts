@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { TransactionSql } from "postgres";
-import { canOperate, assertOperationsApproval, validateVerifiedInventoryIntake, assertFulfillmentTransition, assertFullRefund, type StaffRole, type OperationsPermission, type OperationsKind, type FulfillmentStage, type VerifiedInventoryIntake } from "@yubie/domain";
+import { canOperate, assertOperationsApproval, validateVerifiedInventoryIntake, assertFulfillmentTransition, assertFullRefund, productFamilies, type StaffRole, type OperationsPermission, type OperationsKind, type FulfillmentStage, type VerifiedInventoryIntake } from "@yubie/domain";
 import type { OperationsPort, OperationDraft, OperationRecord, VersionedOperation, FulfillmentOperation, ShippingPolicyDraft } from "@yubie/application";
 import { operationsCreateSchema, operationsApprovalSchema, fulfillmentCommandSchema, operationNoteSchema, refundExecutionSchema, staffGrantSchema } from "@yubie/validation";
 import type { Database } from "../client.js";
 import { PostgresInventoryOnboarding } from "./inventory-onboarding.js";
+import { PostgresInventoryRepository } from "./inventory-repository.js";
 
 export class OperationsError extends Error {
   constructor(readonly code: string, readonly status: number, message: string) { super(message); this.name = "OperationsError"; }
@@ -26,6 +27,11 @@ export class PostgresOperations implements OperationsPort {
     const rows = await this.database.client<{ role: StaffRole }[]>`SELECT role FROM ops_staff_grants WHERE subject=${subject} AND revoked_at IS NULL ORDER BY role`;
     return rows.map(row => row.role);
   }
+  async stock(actor: string) {
+    this.permit(await this.rolesFor(actor), "inventory:read");
+    const availability = await new PostgresInventoryRepository(this.database).availability(new Date().toISOString());
+    return availability.map(row => ({ ...row, id: row.productId+"_"+row.sizeId, sku: productFamilies.find(product=>product.id===row.productId)?.sizes.find(size=>size.id===row.sizeId)?.sku }));
+  }
   private async roles(tx: TransactionSql, subject: string): Promise<StaffRole[]> {
     const rows = await tx<{ role: StaffRole }[]>`SELECT role FROM ops_staff_grants WHERE subject=${subject} AND revoked_at IS NULL ORDER BY role FOR SHARE`;
     need(rows.length > 0, "FORBIDDEN", 403, "Staff permission revoked / izin dicabut");
@@ -45,7 +51,7 @@ export class PostgresOperations implements OperationsPort {
     const committed = await this.database.client.begin(async tx => {
       const roles = await this.roles(tx, actor);
       // A replay is still a protected read: losing a capability must revoke it too.
-      const fixedPermissions: Record<string, OperationsPermission> = { staff: "staff:manage", fulfill: "fulfillment:write", note: "notes:write", reconcile: "reconciliation:request", triage: "exceptions:triage", record_refund: "refunds:record", confirm_refund: "refunds:record" };
+      const fixedPermissions: Record<string, OperationsPermission> = { freeze: "inventory:apply", staff: "staff:manage", fulfill: "fulfillment:write", note: "notes:write", reconcile: "reconciliation:request", triage: "exceptions:triage", record_refund: "refunds:record", confirm_refund: "refunds:record" };
       let permission = fixedPermissions[action];
       if (action === "create") permission = proposePermission[(input as OperationDraft).kind];
       if (action === "approve" || action === "apply") {
@@ -62,6 +68,21 @@ export class PostgresOperations implements OperationsPort {
       return { value: result };
     });
     return committed.value;
+  }
+  async freezeCheckout(actor: string, key: string, input: { reason: string }) {
+    need(input.reason.trim().length>=3 && input.reason.length<=300, "VALIDATION", 400, "Freeze reason required");
+    return this.command(actor, key, "freeze", input, async tx => {
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended('commerce-admission',0))`;
+      const rows = await tx`INSERT INTO ops_checkout_freeze(id,requested_by,reason,started_at,expires_at) VALUES('operations',${actor},${input.reason},now(),now()+interval '30 minutes') ON CONFLICT(id) DO UPDATE SET requested_by=EXCLUDED.requested_by,reason=EXCLUDED.reason,started_at=EXCLUDED.started_at,expires_at=EXCLUDED.expires_at RETURNING started_at,expires_at`;
+      await this.audit(tx, actor, "ops.checkout_frozen", "admission", { reason: input.reason });
+      return { state: "disabled", ...rows[0], callbacksAndRecoveryPreserved: true };
+    });
+  }
+  private async requireFreeze(tx: TransactionSql, countedAt?: string) {
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended('commerce-admission',0))`;
+    const rows = await tx`SELECT started_at FROM ops_checkout_freeze WHERE expires_at>now() FOR UPDATE`;
+    need(rows[0] && this.options.checkoutAdmission === "disabled", "CHECKOUT_MUST_BE_DISABLED", 409, "An active shared checkout freeze is required");
+    if (countedAt) need(Date.parse(countedAt)>=new Date(rows[0].started_at).getTime()-1000, "VALIDATION", 400, "Physical count must occur after the shared freeze starts");
   }
   private async request(tx: TransactionSql, id: string): Promise<RequestRow> {
     const rows = await tx<RequestRow[]>`SELECT * FROM ops_requests WHERE id=${id} FOR UPDATE`;
@@ -126,19 +147,23 @@ export class PostgresOperations implements OperationsPort {
       let result: unknown;
       if (request.kind === "inventory_count") {
         need(this.options.checkoutAdmission === "disabled", "CHECKOUT_MUST_BE_DISABLED", 409, "Checkout must be disabled / freeze before inventory apply");
+        await this.requireFreeze(tx, (request.payload_json as VerifiedInventoryIntake).inventory.countedAt);
         this.inventory(request.payload_json);
         result = await new PostgresInventoryOnboarding(this.database).runInTransaction(tx, { ...request.payload_json.inventory, actor }, true, request.approved_by);
       } else if (request.kind === "shipping_policy") {
         need(this.options.checkoutAdmission === "disabled", "CHECKOUT_MUST_BE_DISABLED", 409, "Checkout must be disabled before shipping apply");
+        await this.requireFreeze(tx);
         const draft = operationsCreateSchema.parse({ kind: "shipping_policy", payload: request.payload_json }).payload as ShippingPolicyDraft;
         const now = Date.now();
         need(Date.parse(draft.startsAt) <= now && Date.parse(draft.endsAt) > now, "VALIDATION", 400, "Shipping approval must be active");
-        await tx`INSERT INTO shipping_policy_approvals(id,policy,cities,approval_ref,approved_by,starts_at,ends_at,service_coverage,cost_owner,source_request_id) VALUES(${id},'free_promotional',${JSON.stringify(draft.cities)}::jsonb,${draft.approvalRef},${request.approved_by},${draft.startsAt},${draft.endsAt},${draft.serviceCoverage},${draft.costOwner},${id})`;
+        await tx`INSERT INTO shipping_policy_approvals(id,policy,cities,approval_ref,approved_by,starts_at,ends_at,scope,service_coverage,cost_owner,source_request_id) VALUES(${id},'free_promotional',${JSON.stringify(draft.cities)}::jsonb,${draft.approvalRef},${request.approved_by},${draft.startsAt},${draft.endsAt},'whole_city',${draft.serviceCoverage},${draft.costOwner},${id})`;
         result = { policyId: id, cities: draft.cities, policy: draft.policy, amount: 0 };
       } else {
         const payload = request.payload_json as { orderId: string; amount: number };
         const payment = await this.refundPayment(tx, payload.orderId, payload.amount);
         await tx`INSERT INTO ops_refund_executions(request_id,order_id,payment_id,amount,state,updated_at) VALUES(${id},${payload.orderId},${payment.id},${payload.amount},'awaiting_merchant',now())`;
+        await tx`UPDATE orders SET fulfillment_hold=coalesce(fulfillment_hold,'refund_in_progress'),updated_at=now() WHERE id=${payload.orderId}`;
+        await this.audit(tx, actor, "ops.refund_fulfillment_hold", payload.orderId, { requestId: id });
         result = { state: "awaiting_merchant", orderId: payload.orderId, amount: payload.amount, moneyMoved: false };
       }
       const rows = await tx<RequestRow[]>`UPDATE ops_requests SET status='applied',version=version+1,result_json=${JSON.stringify(result)}::jsonb,updated_at=now() WHERE id=${id} RETURNING *`;
@@ -158,15 +183,17 @@ export class PostgresOperations implements OperationsPort {
   async list(actor: string, resource: string, limit: number, cursor: string | null) {
     need(Number.isInteger(limit) && limit >= 1 && limit <= 50, "VALIDATION", 400, "Bounded page required");
     const roles = await this.rolesFor(actor);
-    const permission: Record<string, OperationsPermission> = { requests: "inventory:read", shipping: "shipping:read", audit: "audit:read", staff: "staff:manage", refunds: "payments:read", fulfillment: "fulfillment:read", notes: "notes:write" };
+    const permission: Record<string, OperationsPermission> = { movements: "inventory:read", cases: "exceptions:read", requests: "inventory:read", shipping: "shipping:read", audit: "audit:read", staff: "staff:manage", refunds: "payments:read", fulfillment: "fulfillment:read", notes: "notes:write" };
     need(permission[resource], "NOT_FOUND", 404, "Resource not found"); this.permit(roles, permission[resource]!);
     const decoded = cursor?.match(/^(\d{1,19})_([A-Za-z0-9_-]{1,60})$/);
     need(!cursor || decoded, "VALIDATION", 400, "Invalid cursor");
     const micros = decoded?.[1] ?? "0", id = decoded?.[2] ?? "";
     const rows = await this.database.client.begin("read only", async tx => {
       await tx`SET LOCAL statement_timeout='5s'`;
+      if (resource === "movements") return tx`SELECT id,lot_id,product_id,size_id,movement_type,quantity_delta,order_id,reason,occurred_at,(extract(epoch from occurred_at)*1000000)::bigint::text created_micros FROM inventory_movements WHERE (${cursor === null} OR ((extract(epoch from occurred_at)*1000000)::bigint,id)<(${micros}::bigint,${id})) ORDER BY occurred_at DESC,id DESC LIMIT ${limit + 1}`;
+      if (resource === "cases") return tx`SELECT p.id,p.order_id,p.status,p.reconciliation_state,coalesce(c.state,'untriaged') case_state,coalesce(c.version,0) version,c.updated_by,(extract(epoch from p.created_at)*1000000)::bigint::text created_micros FROM order_payments p LEFT JOIN ops_exception_cases c ON c.payment_id=p.id WHERE (c.payment_id IS NOT NULL OR p.reconciliation_state IN ('ambiguous','ambiguous_create','pending_reconciliation','attach_failed','late_success_after_terminal','multiple_successful_transactions','provider_mismatch','other_payment_unresolved')) AND (${cursor === null} OR ((extract(epoch from p.created_at)*1000000)::bigint,p.id)<(${micros}::bigint,${id})) ORDER BY p.created_at DESC,p.id DESC LIMIT ${limit + 1}`;
       if (resource === "requests") return tx`SELECT id,kind,status,version,created_by,approved_by,created_at,payload_json,result_json,(SELECT state FROM ops_refund_executions r WHERE r.request_id=ops_requests.id) refund_state,(extract(epoch from created_at)*1000000)::bigint::text created_micros FROM ops_requests WHERE (kind<>'refund_full' OR ${canOperate(roles, "payments:read")}) AND (${cursor === null} OR ((extract(epoch from created_at)*1000000)::bigint,id)<(${micros}::bigint,${id})) ORDER BY created_at DESC,id DESC LIMIT ${limit + 1}`;
-      if (resource === "shipping") return tx`SELECT id,policy,cities,approval_ref,approved_by,starts_at,ends_at,service_coverage,cost_owner,(extract(epoch from starts_at)*1000000)::bigint::text created_micros FROM shipping_policy_approvals WHERE (${cursor === null} OR ((extract(epoch from starts_at)*1000000)::bigint,id)<(${micros}::bigint,${id})) ORDER BY starts_at DESC,id DESC LIMIT ${limit + 1}`;
+      if (resource === "shipping") return tx`SELECT id,policy,cities,approval_ref,approved_by,starts_at,ends_at,scope,service_coverage,cost_owner,(extract(epoch from starts_at)*1000000)::bigint::text created_micros FROM shipping_policy_approvals WHERE (${cursor === null} OR ((extract(epoch from starts_at)*1000000)::bigint,id)<(${micros}::bigint,${id})) ORDER BY starts_at DESC,id DESC LIMIT ${limit + 1}`;
       if (resource === "audit") return tx`SELECT id,actor,action,resource_id,metadata_json,occurred_at,(extract(epoch from occurred_at)*1000000)::bigint::text created_micros FROM ops_events WHERE (${cursor === null} OR ((extract(epoch from occurred_at)*1000000)::bigint,id)<(${micros}::bigint,${id})) ORDER BY occurred_at DESC,id DESC LIMIT ${limit + 1}`;
       if (resource === "staff") return tx`SELECT md5(subject||':'||role) id,subject,role,granted_by,approval_ref,granted_at,revoked_at,(extract(epoch from granted_at)*1000000)::bigint::text created_micros FROM ops_staff_grants WHERE (${cursor === null} OR ((extract(epoch from granted_at)*1000000)::bigint,md5(subject||':'||role))<(${micros}::bigint,${id})) ORDER BY granted_at DESC,id DESC LIMIT ${limit + 1}`;
       if (resource === "refunds") return tx`SELECT request_id id,order_id,payment_id,amount,state,merchant_reference,evidence_ref,recorded_by,confirmed_by,updated_at,(extract(epoch from updated_at)*1000000)::bigint::text created_micros FROM ops_refund_executions WHERE (${cursor === null} OR ((extract(epoch from updated_at)*1000000)::bigint,request_id)<(${micros}::bigint,${id})) ORDER BY updated_at DESC,request_id DESC LIMIT ${limit + 1}`;
@@ -191,10 +218,13 @@ export class PostgresOperations implements OperationsPort {
     const input = fulfillmentCommandSchema.parse(raw);
     return this.command(actor, key, "fulfill", { id, ...input }, async (tx, roles) => {
       this.permit(roles, "fulfillment:write");
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended('inventory-onboarding',0))`;
       const orders = await tx`SELECT status,fulfillment_hold,grand_total_amount,currency FROM orders WHERE id=${id} FOR UPDATE`; need(orders[0], "NOT_FOUND", 404, "Order not found");
       const payments = await tx`SELECT status,amount,currency,reconciliation_state FROM order_payments WHERE order_id=${id} AND status IN ('pending','succeeded','refunded') FOR UPDATE`;
       const previous = await tx`SELECT stage,version,carrier,tracking_number FROM ops_fulfillments WHERE order_id=${id} FOR UPDATE`;
       const row = previous[0]; need((row ? Number(row.version) : 0) === input.expectedVersion, "CONFLICT", 409, "Fulfillment version changed");
+      const refunds = await tx`SELECT request_id FROM ops_refund_executions WHERE order_id=${id} LIMIT 1`;
+      need(!refunds.length, "CONFLICT", 409, "Refund fulfillment hold requires resolution");
       const badLots = await tx`SELECT r.id FROM inventory_reservations r JOIN inventory_lots l ON l.id=r.lot_id WHERE r.order_id=${id} AND r.status IN ('active','consumed') AND (l.status IN ('recalled','quarantined','received') OR l.expiry_date<=CURRENT_DATE) LIMIT 1`;
       assertFulfillmentTransition(row?.stage as FulfillmentStage | undefined ?? null, input.stage, { orderStatus: String(orders[0].status), paymentVerified: payments.length === 1 && payments[0]!.status === "succeeded" && reconciled(payments[0]!.reconciliation_state) && payments[0]!.amount === orders[0]!.grand_total_amount && payments[0]!.currency === orders[0]!.currency && orders[0]!.currency === "IDR", hold: orders[0].fulfillment_hold || badLots.length ? "unresolved_fulfillment_hold" : null, carrier: input.carrier ?? row?.carrier, trackingNumber: input.trackingNumber ?? row?.tracking_number });
       const version = input.expectedVersion + 1;
@@ -265,11 +295,21 @@ export class PostgresOperations implements OperationsPort {
     need(/^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date)), "VALIDATION", 400, "Business date required");
     return this.database.client.begin("read only", async tx => {
       const [orders] = await tx`SELECT count(*)::int orders, count(*) FILTER(WHERE status='pending_payment')::int awaiting_payment, count(*) FILTER(WHERE status='cancelled')::int cancelled FROM orders WHERE (created_at AT TIME ZONE 'Asia/Jakarta')::date=${date}::date`;
-      const [lots] = await tx`SELECT count(*)::int lots,coalesce(sum(quantity_on_hand) FILTER(WHERE status='released' AND expiry_date>CURRENT_DATE),0)::int available_units,count(*) FILTER(WHERE expiry_date<=CURRENT_DATE+30)::int expiring_or_expired_lots FROM inventory_lots`;
+      const [lots] = await tx`SELECT count(*)::int lots,coalesce(sum(quantity_on_hand) FILTER(WHERE status='released' AND expiry_date>CURRENT_DATE AND released_at IS NOT NULL AND length(trim(qc_approval_ref))>0 AND EXISTS(SELECT 1 FROM inventory_sku_policies p WHERE p.product_id=inventory_lots.product_id AND p.size_id=inventory_lots.size_id)),0)::int available_units,count(*) FILTER(WHERE expiry_date<=CURRENT_DATE+30)::int expiring_or_expired_lots FROM inventory_lots`;
       const [reserved] = await tx`SELECT coalesce(sum(quantity),0)::int reserved_units FROM inventory_reservations WHERE status='active'`;
       const [shipments] = await tx`SELECT count(*) FILTER(WHERE stage='packing')::int packing,count(*) FILTER(WHERE stage='packed')::int packed,count(*) FILTER(WHERE stage='shipped')::int shipped,count(*) FILTER(WHERE stage='delivered')::int delivered FROM ops_fulfillments`;
       const [money] = canOperate(roles, "payments:read") ? await tx`SELECT count(*) FILTER(WHERE status='succeeded')::int paid_payments,coalesce(sum(amount) FILTER(WHERE status='succeeded'),0)::bigint::text captured_idr,coalesce(sum(amount) FILTER(WHERE status='refunded'),0)::bigint::text refunded_idr FROM order_payments WHERE (created_at AT TIME ZONE 'Asia/Jakarta')::date=${date}::date` : [];
-      return { businessDate: date, timeZone: "Asia/Jakarta", orders, inventory: { ...lots, ...reserved, reservationAlreadyExcludedFromAvailable: true }, fulfillment: shipments, finance: money ? { ...money, basis: "current_status_of_payments_created_on_business_date", settlementReport: false } : null, checkoutAdmission: this.options.checkoutAdmission };
+      const [freeze] = await tx`SELECT requested_by,started_at,expires_at FROM ops_checkout_freeze WHERE expires_at>now()`;
+      const [shipping] = await tx`SELECT count(*)::int active FROM shipping_policy_approvals WHERE scope='whole_city' AND starts_at<=now() AND ends_at>now() AND length(trim(approval_ref))>0 AND length(trim(approved_by))>0`;
+      const [backlog] = await tx`SELECT count(*) FILTER(WHERE status='pending')::int pending,count(*) FILTER(WHERE status='failed')::int failed FROM outbox_events WHERE event_type IN ('ops.changed','ops.payment_reconcile_requested','inventory.count_applied','inventory.recall_hold')`;
+      const checklist = [
+        { label: "Lot QC dan stok layak jual", state: Number(lots?.available_units)>0 ? "AVAILABLE_PARTIAL" : "MISSING_EVIDENCE" },
+        { label: "Persetujuan pengiriman aktif", state: Number(shipping?.active)>0 ? "ACTIVE_APPROVAL" : "MISSING_APPROVAL" },
+        { label: "Antrean operasional", state: Number(backlog?.failed)>0 ? "ACTION_REQUIRED" : "NO_FAILED_EVENTS", pending: backlog?.pending ?? 0 },
+        { label: "Bukti pembayaran positif dan Finance", state: "EXTERNAL_EVIDENCE_REQUIRED" },
+        { label: "Izin pembukaan checkout", state: "SEPARATE_RELEASE_REQUIRED" },
+      ];
+      return { checklist, checkoutFreeze: freeze ?? null, businessDate: date, timeZone: "Asia/Jakarta", orders, inventory: { ...lots, ...reserved, reservationAlreadyExcludedFromAvailable: true }, fulfillment: shipments, finance: money ? { ...money, basis: "current_status_of_payments_created_on_business_date", settlementReport: false } : null, checkoutAdmission: this.options.checkoutAdmission };
     });
   }
 }

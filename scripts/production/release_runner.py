@@ -103,13 +103,15 @@ def check_scratch_identity(name, oid, marker, actual):
     P.require(actual.get("oid") == oid and actual.get("marker") == marker, "SCRATCH_IDENTITY_CHANGED")
 
 
-def validate_worker_evidence(evidence, provider):
+def validate_worker_evidence(evidence, provider, operations=False):
     P.require(all(evidence.get(key) is True for key in ("reconcileSchedule", "notificationSchedule", "recentNotificationCompletion")), "WORKER_QUEUE_NOT_READY")
     P.require(evidence.get("notificationExceptions") == 0 and evidence.get("notificationPending", -1) >= 0 and evidence.get("notificationOldestSeconds", 999999) <= 180, "NOTIFICATION_BACKLOG_NOT_READY")
     if provider != "ipaymu":
         P.require(evidence.get("notificationPending") == 0, "INBOX_PROVIDER_MISMATCH")
     if provider != "preview":
         P.require(evidence.get("recentReconciliation") is True, "RECONCILIATION_NOT_READY")
+    if operations:
+        P.require(evidence.get("operationsSchedule") is True and evidence.get("recentOperationsCompletion") is True and evidence.get("failedOperations") == 0, "OPERATIONS_OUTBOX_NOT_READY")
 
 
 def worker_evidence_sql(started_at):
@@ -118,6 +120,9 @@ def worker_evidence_sql(started_at):
     return """SELECT json_build_object(
  'reconcileSchedule',EXISTS(SELECT 1 FROM pgboss.schedule WHERE name='payment.reconcile'),
  'notificationSchedule',EXISTS(SELECT 1 FROM pgboss.schedule WHERE name='payment.notifications'),
+ 'operationsSchedule',EXISTS(SELECT 1 FROM pgboss.schedule WHERE name='operations.outbox'),
+ 'recentOperationsCompletion',EXISTS(SELECT 1 FROM pgboss.job WHERE name='operations.outbox' AND state='completed' AND started_on>=""" + since + " AND completed_on>=" + since + """ AND completed_on>now()-interval '3 minutes'),
+ 'failedOperations',(SELECT count(*) FROM outbox_events WHERE status='failed' AND event_type IN ('ops.changed','ops.payment_reconcile_requested','inventory.count_applied','inventory.recall_hold')),
  'recentNotificationCompletion',EXISTS(SELECT 1 FROM pgboss.job WHERE name='payment.notifications' AND state='completed' AND started_on>=""" + since + " AND completed_on>=" + since + """ AND completed_on>now()-interval '3 minutes'),
  'recentReconciliation',EXISTS(SELECT 1 FROM pgboss.job WHERE name='payment.reconcile' AND state='completed' AND started_on>=""" + since + " AND completed_on>=" + since + """ AND completed_on>now()-interval '7 minutes'),
  'notificationPending',(SELECT count(*) FROM payment_notification_inbox WHERE processed_at IS NULL),
@@ -358,7 +363,7 @@ console.log(JSON.stringify({releaseSha:h.releaseSha,ready:true,admission:"disabl
         evidence = json.loads(self.pg.query(worker_evidence_sql(row["State"]["StartedAt"])))
         evidence["containerId"] = row["Id"]
         evidence["startedAt"] = row["State"]["StartedAt"]
-        validate_worker_evidence(evidence, self.provider)
+        validate_worker_evidence(evidence, self.provider, operations="0026_operations_workflows.sql" in self.manifest["migrations"])
         return evidence
 
     def execute(self):

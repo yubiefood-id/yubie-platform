@@ -12,7 +12,7 @@ Rilis lama `3d5330797d53f5572819c446caf77363eaf6aa3c` tetap menjadi baseline
 produksi sampai PR baru direview, lima CI wajib lulus, dan publikasi RC mendapat
 approval environment. Jangan memberi label SHA lama pada source yang berubah.
 RC menerbitkan API/worker/admin immutable, bundle backend/web, dan
-`admin-release-manifest.json` yang mengikat admin digest dan hash prosedurnya.
+`admin-release-manifest.json` dan `admin-materials.tgz` yang mengikat admin digest, archive, dan hash prosedurnya.
 Approval deployment backend root-private dan approval frontend yang diwajibkan
 prosedur tetap diperlukan; keberadaan root gateway bukan pengganti approval.
 
@@ -24,7 +24,7 @@ prosedur tetap diperlukan; keberadaan root gateway bukan pengganti approval.
 2. Jalankan hanya runner baru yang dipublikasikan dari SHA yang direview. Backup
    konsisten dan restore scratch harus lolos sebelum migration 0026. Runner
    menerima baseline tepat 0022, 0025, atau schema target; 0023/24 parsial ditolak.
-   Pemeriksaan independen mencakup delapan tabel operasi, trigger immutability,
+   Pemeriksaan independen mencakup sembilan tabel operasi, trigger immutability,
    append-only audit/receipt, dan provenance pengiriman.
 3. Verifikasi API/worker digest/revision, readiness, job payment dan operations
    outbox setelah start. Tidak ada PSP switch atau aktivasi admission dari admin.
@@ -32,7 +32,7 @@ prosedur tetap diperlukan; keberadaan root gateway bukan pengganti approval.
    jangan gunakan seluruh production.env sebagai env_file admin. Variabel:
    `DATABASE_URL`, `ADMIN_GOOGLE_CLIENT_ID`, `ADMIN_SESSION_SECRET`,
    `ADMIN_WRITES_ENABLED`, `YUBIE_ENV`, `YUBIE_CHECKOUT_ADMISSION`, `RELEASE_SHA`.
-   Default writes false. Gunakan DB role khusus `yubie_ops` tanpa superuser,
+   Default writes false. API dan admin memakai freeze database bersama; freeze harus dibuat sebelum hitung dan aktif saat apply. Env admin bukan sumber admission pelanggan. Gunakan DB role khusus `yubie_ops` tanpa superuser,
    CREATEDB, CREATEROLE, REPLICATION atau BYPASSRLS. Provision password melalui
    terminal privat, lalu jalankan `scripts/operations/admin-database-grants.sql`
    dengan psql ON_ERROR_STOP. Tidak ada izin UPDATE status/amount pembayaran.

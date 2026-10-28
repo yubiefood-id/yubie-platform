@@ -3,11 +3,36 @@ import test from "node:test";
 import {readFileSync,readdirSync} from "node:fs";
 import postgres from "postgres";
 import * as persistence from "../dist/index.js";
+import { PostgresShippingPolicyRepository } from '../dist/repositories/shipping-policy-repository.js';
+import { createFirstPartyCheckout, FixedClock, CryptoIdGenerator } from '@yubie/application';
 
 test("operations repository exposes the shared transactional workflow",()=>assert.equal(typeof persistence.PostgresOperations,"function"));
 test("PG: release independently verifies operations tables and triggers",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db)=>{
  const rows=await db.client.unsafe(readFileSync(new URL('../../../scripts/production/schema_checks.sql',import.meta.url),'utf8'));
  const checks=Object.values(rows[0])[0];assert.deepEqual(Object.entries(checks).filter(([,value])=>value!==true),[]);
+}));
+test("PG: admin never labels a released lot without QC evidence as sellable",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db,ops)=>{
+ await db.client`INSERT INTO inventory_lots(id,product_id,size_id,lot_code,quantity_on_hand,expiry_date,status,created_at,updated_at) VALUES('TEST_ONLY_NO_QC','shake','sachet','TEST_ONLY_NO_QC',20,'2100-01-01','released',now(),now())`;
+ const rows=await new persistence.PostgresAdminReaders(db).listInventory({limit:20,cursor:null});assert.equal(rows.items[0].availableQuantity,0);
+ assert.equal((await ops.report('reader',new Date().toISOString().slice(0,10))).inventory.available_units,0);
+}));
+test("PG: operational freeze is shared with customer checkout and required for stock apply",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db,ops)=>{
+ await db.client`DELETE FROM ops_checkout_freeze`;
+ const inventory=new persistence.PostgresInventoryRepository(db);
+ assert.equal(await inventory.checkoutFrozen(),false);
+ await ops.freezeCheckout('counter','freeze',{reason:'TEST_ONLY physical count freeze'});
+ assert.equal(await inventory.checkoutFrozen(),true);
+ let creates=0;
+ const result=await createFirstPartyCheckout({lines:[{productId:'shake',sizeId:'sachet',quantity:1}],provider:'ipaymu',inventoryMode:'lots',customerEmail:'TEST_ONLY@example.invalid',successReturnUrl:'https://sandbox.example.invalid/return',cancelReturnUrl:'https://sandbox.example.invalid/cancel',idempotencyPrincipal:'guest:'+'a'.repeat(64),idempotencyKey:'TEST_ONLY_FREEZE'}, {tx:new persistence.PostgresTransactionManager(db),provider:{createPaymentSession:async()=>{creates++;throw new Error('Must never create a session');}},clock:new FixedClock(new Date().toISOString()),ids:new CryptoIdGenerator()});
+ assert.equal(result.ok,false);assert.equal(result.error.code,'checkout_safety_hold');assert.equal(creates,0);
+ const input=intake(),draft=await ops.create('counter','frozen_count',{kind:'inventory_count',payload:input});
+ await ops.approve('reviewer','frozen_qc',draft.id,{expectedVersion:1,reason:'TEST_ONLY QC'});
+ await db.client`UPDATE ops_checkout_freeze SET started_at=now()-interval '30 minutes',expires_at=now()-interval '1 second'`;
+ await assert.rejects(()=>ops.apply('counter','unfrozen_apply',draft.id,{expectedVersion:2,reason:'TEST_ONLY count'}),/freeze|disabled/i);
+}));
+test("PG: release schema proof rejects no-op audit and immutability functions",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db)=>{
+ await db.client.unsafe("CREATE OR REPLACE FUNCTION ops_event_is_append_only() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$; CREATE OR REPLACE FUNCTION ops_request_payload_is_immutable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$;");
+ const rows=await db.client.unsafe(readFileSync(new URL('../../../scripts/production/schema_checks.sql',import.meta.url),'utf8'));const checks=Object.values(rows[0])[0];assert.equal(checks.operationsAppendOnly,false);assert.equal(checks.operationsImmutablePayload,false);
 }));
 
 async function isolated(work){
@@ -17,6 +42,7 @@ async function isolated(work){
  try{
   for(const file of readdirSync(new URL('../migrations/',import.meta.url)).filter(n=>n.endsWith('.sql')).sort())await db.client.unsafe(readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8'));
   for(const [sub,roles] of [['counter',['operator','qc']],['reviewer',['qc']],['finance1',['finance']],['finance2',['finance']],['packer',['fulfillment']],['reader',['viewer']],['owner',['admin']]])for(const role of roles)await db.client`INSERT INTO ops_staff_grants(subject,role,granted_by,approval_ref,granted_at) VALUES(${sub},${role},'TEST_ONLY_BOOTSTRAP','TEST_ONLY_APPROVAL',now())`;
+  await db.client`INSERT INTO ops_checkout_freeze(id,requested_by,reason,started_at,expires_at) VALUES('operations','TEST_ONLY_OPERATOR','TEST_ONLY count freeze',now(),now()+interval '30 minutes')`;
   await work(db,new persistence.PostgresOperations(db,{writesEnabled:true,checkoutAdmission:'disabled'}));
  }finally{await persistence.closeDatabase(db);await admin`DROP DATABASE ${admin(name)} WITH (FORCE)`;await admin.end();}
 }
@@ -44,13 +70,17 @@ test("PG: revoked QC grant and admission enabled prevent inventory apply",{skip:
  assert.equal((await db.client`SELECT count(*)::int n FROM inventory_lots`)[0].n,0);
 }));
 test("PG: shipping requires Finance approval and writes the audited approval once",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db,ops)=>{
- const now=Date.now();const payload={policy:'free_promotional',cities:['TEST_ONLY_CITY'],amount:0,serviceCoverage:'TEST_ONLY_SERVICE',costOwner:'TEST_ONLY_FINANCE',startsAt:new Date(now-60000).toISOString(),endsAt:new Date(now+3600000).toISOString(),approvalRef:'TEST_ONLY_SHIPPING',verification:{status:'VERIFIED',evidenceRef:'TEST_ONLY_DOC',verifiedBy:'finance1',verifiedAt:new Date(now).toISOString()}};
+ const now=Date.now();const payload={scope:'whole_city',policy:'free_promotional',cities:['TEST_ONLY_CITY'],amount:0,serviceCoverage:'TEST_ONLY_SERVICE',costOwner:'TEST_ONLY_FINANCE',startsAt:new Date(now-60000).toISOString(),endsAt:new Date(now+3600000).toISOString(),approvalRef:'TEST_ONLY_SHIPPING',verification:{status:'VERIFIED',evidenceRef:'TEST_ONLY_DOC',verifiedBy:'finance1',verifiedAt:new Date(now).toISOString()}};
  const draft=await ops.create('counter','shipping_create',{kind:'shipping_policy',payload});
  await assert.rejects(()=>ops.approve('reviewer','wrong_role',draft.id,{expectedVersion:1,reason:'QC is not Finance'}),/permission|izin/i);
  await ops.approve('finance1','shipping_approve',draft.id,{expectedVersion:1,reason:'TEST_ONLY budget approval'});
  await ops.apply('counter','shipping_apply',draft.id,{expectedVersion:2,reason:'TEST_ONLY explicit coverage'});
  assert.equal((await db.client`SELECT count(*)::int n FROM shipping_policy_approvals`)[0].n,1);
  assert.equal((await db.client`SELECT approved_by FROM shipping_policy_approvals`)[0].approved_by,'finance1');
+ assert.equal((await new PostgresShippingPolicyRepository(db).authorize('TEST_ONLY_CITY',new Date().toISOString())).amount,0);
+ assert.equal(await new PostgresShippingPolicyRepository(db).authorize('TEST_ONLY_OTHER_CITY',new Date().toISOString()),null);
+ await db.client`UPDATE shipping_policy_approvals SET scope=NULL`;
+ assert.equal(await new PostgresShippingPolicyRepository(db).authorize('TEST_ONLY_CITY',new Date().toISOString()),null);
 }));
 test("PG: missing audit capability rolls back draft creation",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db,ops)=>{
  await db.client.unsafe("CREATE FUNCTION test_audit_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'TEST_ONLY audit failure'; END; $$; CREATE TRIGGER test_audit_failure BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION test_audit_failure();");
@@ -86,7 +116,7 @@ test("PG: known webhook reconciliation permits fulfillment but an ambiguous stat
 }));
 test("PG: production refuses synthetic shipping evidence",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db)=>{
  const ops=new persistence.PostgresOperations(db,{writesEnabled:true,checkoutAdmission:'disabled',environment:'production'});
- await assert.rejects(()=>ops.create('counter','fake_shipping',{kind:'shipping_policy',payload:{policy:'free_promotional',cities:['TEST_ONLY_CITY'],amount:0,serviceCoverage:'TEST_ONLY_SERVICE',costOwner:'TEST_ONLY_OWNER',startsAt:new Date(Date.now()-1000).toISOString(),endsAt:new Date(Date.now()+60000).toISOString(),approvalRef:'TEST_ONLY_DOC',verification:{status:'VERIFIED',evidenceRef:'TEST_ONLY_DOC',verifiedBy:'counter',verifiedAt:new Date().toISOString()}}}),/synthetic/i);
+ await assert.rejects(()=>ops.create('counter','fake_shipping',{kind:'shipping_policy',payload:{scope:'whole_city',policy:'free_promotional',cities:['TEST_ONLY_CITY'],amount:0,serviceCoverage:'TEST_ONLY_SERVICE',costOwner:'TEST_ONLY_OWNER',startsAt:new Date(Date.now()-1000).toISOString(),endsAt:new Date(Date.now()+60000).toISOString(),approvalRef:'TEST_ONLY_DOC',verification:{status:'VERIFIED',evidenceRef:'TEST_ONLY_DOC',verifiedBy:'counter',verifiedAt:new Date().toISOString()}}}),/synthetic/i);
 }));
 test("PG: staff grants require admin and forbid self escalation or last-admin removal",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db,ops)=>{
  const input={subject:'reader',role:'finance',action:'grant',approvalRef:'TEST_ONLY_OWNER',reason:'TEST_ONLY approved Finance account'};
@@ -150,12 +180,33 @@ test("PG: fulfillment preserves privacy and enforces paid packing tracking and h
  await ops.fulfill('packer','shipped','TEST_ONLY_ORDER',{expectedVersion:2,stage:'shipped',carrier:'TEST_ONLY_CARRIER',trackingNumber:'TEST_ONLY_TRACKING',reason:'TEST_ONLY shipment'});
  assert.equal((await db.client`SELECT status FROM orders WHERE id='TEST_ONLY_ORDER'`)[0].status,'shipped');
 }));
+test("PG: a recall committed during fulfillment blocks dispatch",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db,ops)=>{
+ await paid(db);
+ await db.client`INSERT INTO inventory_lots(id,product_id,size_id,lot_code,quantity_on_hand,expiry_date,status,created_at,updated_at) VALUES('TEST_ONLY_RECALL_LOT','shake','sachet','TEST_ONLY_RECALL',0,'2100-01-01','depleted',now(),now())`;
+ await db.client`INSERT INTO inventory_reservations(id,order_id,lot_id,product_id,size_id,quantity,status,expires_at,created_at,updated_at) VALUES('TEST_ONLY_RECALL_RES','TEST_ONLY_ORDER','TEST_ONLY_RECALL_LOT','shake','sachet',1,'consumed',now(),now(),now())`;
+ const started=Promise.withResolvers(),release=Promise.withResolvers();
+ const recall=db.client.begin(async tx=>{
+  await tx`SELECT pg_advisory_xact_lock(hashtextextended('inventory-onboarding',0))`;
+  await tx`UPDATE inventory_lots SET status='recalled' WHERE id='TEST_ONLY_RECALL_LOT'`;started.resolve();await release.promise;
+  await tx`UPDATE orders SET fulfillment_hold='lot_recalled' WHERE id='TEST_ONLY_ORDER' AND status NOT IN ('shipped','completed','cancelled')`;
+ });
+ await started.promise;
+ let finished=false;const packing=ops.fulfill('packer','race_pack','TEST_ONLY_ORDER',{expectedVersion:0,stage:'packing',reason:'TEST_ONLY packing'}).then(value=>{finished=true;return{value};},error=>{finished=true;return{error};});
+ try{
+  for(let i=0;i<100&&!finished;i++){
+   const [{waiting}]=await db.client`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event='advisory' AND query LIKE '%inventory-onboarding%') waiting`;
+   if(waiting)break;await new Promise(r=>setTimeout(r,10));
+  }
+ }finally{release.resolve();await recall;}
+ const result=await packing;assert.match(result.error?.message??'Unexpected successful fulfillment',/hold/i);
+}));
 test("PG: manual full refund never claims a provider refund or restocks without evidence",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db,ops)=>{
  await paid(db);
  await assert.rejects(()=>ops.create('finance1','partial',{kind:'refund_full',payload:{orderId:'TEST_ONLY_ORDER',amount:1000,reason:'TEST_ONLY partial',evidenceRef:'TEST_ONLY_REFUND_DOC'}}),/full|penuh/i);
  const draft=await ops.create('finance1','refund_create',{kind:'refund_full',payload:{orderId:'TEST_ONLY_ORDER',amount:35000,reason:'TEST_ONLY full refund',evidenceRef:'TEST_ONLY_REFUND_DOC'}});
  await ops.approve('finance2','refund_approve',draft.id,{expectedVersion:1,reason:'TEST_ONLY Finance review'});
  await ops.apply('finance1','refund_handoff',draft.id,{expectedVersion:2,reason:'TEST_ONLY merchant handoff'});
+ await assert.rejects(()=>ops.fulfill('packer','refund_pending_pack','TEST_ONLY_ORDER',{expectedVersion:0,stage:'packing',reason:'TEST_ONLY packing'}),/hold|refund/i);
  const record=await ops.recordRefund('finance1','record_execution',draft.id,{expectedVersion:3,merchantReference:'TEST_ONLY_MERCHANT',evidenceRef:'TEST_ONLY_RECEIPT',reason:'TEST_ONLY manual execution'});
  assert.equal(record.paymentStatusChanged,false);
  assert.equal((await db.client`SELECT status FROM order_payments WHERE id='TEST_ONLY_PAYMENT'`)[0].status,'succeeded');

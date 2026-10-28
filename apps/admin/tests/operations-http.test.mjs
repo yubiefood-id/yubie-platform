@@ -11,7 +11,7 @@ function fixture(role='operator'){
  }
  return{request,calls,port};
 }
-const shipping={kind:'shipping_policy',payload:{policy:'free_promotional',cities:['TEST_ONLY_CITY'],amount:0,serviceCoverage:'TEST_ONLY_COURIER',costOwner:'TEST_ONLY_BUDGET',startsAt:new Date(now-1000).toISOString(),endsAt:new Date(now+60000).toISOString(),approvalRef:'TEST_ONLY_APPROVAL',verification:{status:'VERIFIED',evidenceRef:'TEST_ONLY_DOC',verifiedBy:'TEST_ONLY_OWNER',verifiedAt:new Date(now).toISOString()}}};
+const shipping={kind:'shipping_policy',payload:{scope:'whole_city',policy:'free_promotional',cities:['TEST_ONLY_CITY'],amount:0,serviceCoverage:'TEST_ONLY_COURIER',costOwner:'TEST_ONLY_BUDGET',startsAt:new Date(now-1000).toISOString(),endsAt:new Date(now+60000).toISOString(),approvalRef:'TEST_ONLY_APPROVAL',verification:{status:'VERIFIED',evidenceRef:'TEST_ONLY_DOC',verifiedBy:'TEST_ONLY_OWNER',verifiedAt:new Date(now).toISOString()}}};
 test('staff operation draft requires idempotency and authenticated server identity',async()=>{
  const f=fixture();
  const missing=await f.request('/v1/requests',{method:'POST',body:shipping});assert.equal(missing.status,400);assert.equal(f.calls.length,0);
@@ -29,4 +29,16 @@ test('revoked staff identity cannot read using a still-valid signed cookie',asyn
 test('viewer cannot approve requests, trigger refunds or access payment details',async()=>{
  const f=fixture('viewer');assert.equal((await f.request('/v1/requests/test_request/approve',{method:'POST',body:{expectedVersion:1,reason:'TEST_ONLY'}})).status,403);
  assert.equal((await f.request('/v1/refunds')).status,403);
+});
+test('Finance can open a new exception case at version zero',async()=>{
+ const f=fixture('finance');f.port.triage=async(_sub,_key,_id,input)=>({version:input.expectedVersion+1,state:input.state});
+ const token=issueAdminSession({sub:'test_staff',role:'finance',exp:now+60000},secret);
+ const response=await handleAdminRequest(new Request('https://ops.test/v1/payments/test_payment/triage',{method:'POST',headers:{cookie:`yubie_ops=${token}; yubie_ops_csrf=test_csrf`,origin:'https://ops.test','x-yubie-csrf':'test_csrf','content-type':'application/json','idempotency-key':'test_triage'},body:JSON.stringify({expectedVersion:0,state:'investigating',reason:'TEST_ONLY investigation'})}),{sessionSecret:secret,nowMs:now,operations:f.port});
+ assert.equal(response.status,200);assert.equal((await response.json()).data.version,1);
+});
+test('reading staff auth config preserves an existing valid CSRF nonce across tabs',async()=>{
+ const options={sessionSecret:secret,nowMs:now};
+ const first=await handleAdminRequest(new Request('https://ops.test/auth/config'),options);const nonce=(await first.json()).data.csrfToken;
+ const second=await handleAdminRequest(new Request('https://ops.test/auth/config',{headers:{cookie:'yubie_ops_csrf='+nonce}}),options);
+ assert.equal((await second.json()).data.csrfToken,nonce);
 });

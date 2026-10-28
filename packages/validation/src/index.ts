@@ -95,12 +95,14 @@ export const verifiedInventoryIntakeSchema = z.object({
   sourceSha256: z.string().regex(/^[a-f0-9]{64}$/), verification: operationalVerificationSchema, inventory: inventoryOnboardingSchema,
 }).strict();
 export const shippingPolicyDraftSchema = z.object({
+  scope: z.literal("whole_city"),
   policy: z.literal("free_promotional"), cities: z.array(operationalReference).min(1).max(100), amount: z.literal(0),
   serviceCoverage: operationalReference, costOwner: operationalReference, startsAt: z.iso.datetime(), endsAt: z.iso.datetime(),
   approvalRef: operationalReference, verification: operationalVerificationSchema,
 }).strict().refine(input => Date.parse(input.endsAt) > Date.parse(input.startsAt), "Waktu akhir harus sesudah waktu mulai")
   .refine(input => new Set(input.cities.map(city => city.normalize("NFKC").trim().toLowerCase())).size === input.cities.length, "Kota tidak boleh duplikat");
 export const operationsApprovalSchema = z.object({ expectedVersion: z.number().int().positive(), reason: z.string().trim().min(3).max(300) }).strict();
+export const exceptionTriageSchema = z.object({ expectedVersion: z.number().int().nonnegative(), state: z.enum(["investigating", "escalated", "resolved"]), reason: z.string().trim().min(3).max(300) }).strict();
 export const operationsCreateSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("inventory_count"), payload: verifiedInventoryIntakeSchema }).strict(),
   z.object({ kind: z.literal("shipping_policy"), payload: shippingPolicyDraftSchema }).strict(),

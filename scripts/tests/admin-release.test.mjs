@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
+import {createHash} from 'node:crypto';
 test('admin release seal requires clean exact source and immutable image',()=>{
  const root=mkdtempSync(join(tmpdir(),'yubie-admin-seal-'));
  try{
@@ -16,6 +17,7 @@ test('admin release seal requires clean exact source and immutable image',()=>{
   assert.equal(run('ghcr.io/yubiefood-id/yubie-admin:latest').status,77);
   assert.equal(run('ghcr.io/yubiefood-id/yubie-admin@sha256:'+'a'.repeat(64)).status,0);
   const manifest=JSON.parse(readFileSync(join(root,'out/admin-release-manifest.json'),'utf8'));assert.equal(manifest.sourceSha,sha);assert.equal(manifest.productionDeployed,false);
+  assert.equal(manifest.archiveSha256,createHash('sha256').update(readFileSync(join(root,'out/admin-materials.tgz'))).digest('hex'));
   writeFileSync(join(root,'infrastructure/docker-compose.admin-private.yml'),'TAMPERED');
   assert.equal(run('ghcr.io/yubiefood-id/yubie-admin@sha256:'+'a'.repeat(64)).status,77);
  }finally{rmSync(root,{recursive:true,force:true});}

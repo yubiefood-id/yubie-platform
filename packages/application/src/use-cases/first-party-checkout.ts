@@ -411,7 +411,7 @@ export async function createFirstPartyCheckout(
         if (idempotencyKey) await attachOutcome(repos, open);
         return outcomeResult(open);
       }
-      if(await repos.payments.hasFinancialException())throw new CheckoutSafetyHoldError();
+      if(await repos.inventory.checkoutFrozen?.() || await repos.payments.hasFinancialException())throw new CheckoutSafetyHoldError();
       if (input.requireApprovedShipping) {
         const approved = await repos.shipping?.authorize(input.delivery?.city ?? "", deps.clock.now());
         if (!approved) throw new ShippingUnavailableError();
@@ -454,7 +454,7 @@ export async function createFirstPartyCheckout(
     });
     if (tx1 !== null) return tx1; // duplicate replay outcome
   } catch (error) {
-    if(error instanceof CheckoutSafetyHoldError)return err({code:"checkout_safety_hold",message:"New checkout is frozen pending financial reconciliation.",retryable:false,requestId:"checkout"});
+    if(error instanceof CheckoutSafetyHoldError)return err({code:"checkout_safety_hold",message:"New checkout is frozen for operational or financial safety checks.",retryable:false,requestId:"checkout"});
     if (error instanceof ShippingUnavailableError) return err({code:"shipping_unavailable",message:"Shipping policy or destination is not approved.",retryable:false,requestId:"checkout"});
     if (error instanceof CheckoutScopeError) return err({ code: error.code, message: error.message, retryable: error.code === "pending_reconciliation", requestId: "checkout" });
     if (error instanceof PromotionAuthorizationError || error instanceof CheckoutTotalError) {

@@ -10,20 +10,21 @@ export async function read(path: string): Promise<Row> {
   if (!response.ok || !payload?.ok) throw new Error(response.status === 403 ? "Peran Anda tidak memiliki izin." : "Data tidak tersedia; hasil kosong belum diasumsikan.");
   return payload.data as Row;
 }
-let csrf: Promise<string> | undefined;
-export async function command(path: string, body: unknown) {
-  csrf ??= read("/auth/config").then(data => String(data.csrfToken));
+export async function command(path: string, body: unknown, newAction = false) {
+  const csrf = String((await read("/auth/config")).csrfToken);
   const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(path+JSON.stringify(body))))].map(n=>n.toString(16).padStart(2,"0")).join("");
   // Only an opaque identity/hash is retained, never the submitted evidence or PII.
   const slot = "yubie-ops-command:"+digest;
   let key = localStorage.getItem(slot);
+  if (newAction && localStorage.getItem(slot+":confirmed") === "true") { key = null; localStorage.removeItem(slot+":confirmed"); }
   if (!key) { key = crypto.randomUUID(); localStorage.setItem(slot,key); }
-  const response = await fetch(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", "x-yubie-csrf": await csrf, "idempotency-key": key }, body: JSON.stringify(body) });
+  const response = await fetch(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", "x-yubie-csrf": csrf, "idempotency-key": key }, body: JSON.stringify(body) });
   const result = await response.json().catch(()=>null);
   if (!response.ok || !result?.ok) {
     const code = result?.code;
     throw new Error(code === "CONFLICT" ? "Versi atau keadaan berubah. Muat ulang dan periksa catatan terbaru." : code === "WRITES_DISABLED" ? "Perubahan operasional belum diaktifkan operator rilis." : code === "VALIDATION" ? "Data/bukti belum memenuhi validasi. Periksa formulir dan intake." : code === "FORBIDDEN" ? "Izin atau pemisahan pemberi persetujuan tidak terpenuhi." : "Hasil tindakan belum dikonfirmasi. Coba ulang data yang sama untuk memakai identitas yang sama; jangan membuat tindakan baru.");
   }
+  localStorage.setItem(slot+":confirmed","true");
   return result.data as Row;
 }
 function Fields({ names }: { names: Array<[string,string,string?]> }) {
@@ -32,11 +33,16 @@ function Fields({ names }: { names: Array<[string,string,string?]> }) {
 function values(event: FormEvent<HTMLFormElement>) { event.preventDefault(); return Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string,string>; }
 function Evidence({ data }: { data: unknown }) { return <details><summary>Lihat bukti dan rincian tersimpan</summary><pre>{JSON.stringify(data,null,2)}</pre></details>; }
 
+export function CheckoutFreeze() {
+  const [reason,setReason]=useState(""),[status,setStatus]=useState(""),[busy,setBusy]=useState(false);
+  return <section className="panel"><h2>Bekukan checkout sebelum hitung fisik</h2><p>Freeze bersama database menolak checkout baru selama 30 menit. Callback, pembayaran berjalan, dan recovery tetap diproses. Mulai hitung setelah freeze dikonfirmasi; bukti hitung berlaku 15 menit.</p><form onSubmit={e=>{e.preventDefault();setBusy(true);void command("/v1/checkout-freeze",{reason},true).then(result=>setStatus("Freeze tercatat sampai "+String(result.expires_at)+". Mulai hitung fisik sekarang.")).catch(error=>setStatus(message(error))).finally(()=>setBusy(false));}}><label>Alasan freeze<input required minLength={3} maxLength={300} value={reason} onChange={e=>setReason(e.target.value)}/></label><button disabled={busy}>Mulai freeze operasional baru</button></form>{status&&<p role="status">{status}</p>}</section>;
+}
+
 export function DailyReport() {
   const [date,setDate]=useState(()=>new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date()));
   const [data,setData]=useState<Row|null>(null),[error,setError]=useState("");
   useEffect(()=>{let active=true;setData(null);void read("/v1/reports/daily?date="+encode(date)).then(value=>{if(active){setData(value);setError("");}}).catch(e=>{if(active)setError(message(e));});return()=>{active=false;};},[date]);
-  return <><header className="page-heading"><div><h1>Ringkasan operasional</h1><p>Hari bisnis WIB. PostgreSQL adalah sumber catatan.</p></div><label>Tanggal<input type="date" value={date} onChange={e=>setDate(e.target.value)} /></label></header>{error&&<p role="alert" className="error">{error}</p>}{data ? <><div className="metric-grid">{[["Pesanan dibuat",(data.orders as Row)?.orders],["Stok tersedia saat ini",(data.inventory as Row)?.available_units],["Unit direservasi",(data.inventory as Row)?.reserved_units],["Lot kedaluwarsa / ≤30 hari",(data.inventory as Row)?.expiring_or_expired_lots],["Admission checkout",data.checkoutAdmission]].map(([label,value])=><article key={String(label)}><p>{String(label)}</p><strong>{String(value ?? "—")}</strong></article>)}</div><h2>Fulfillment saat ini</h2><Evidence data={data.fulfillment}/>{data.finance&&<><h2>Pembayaran kohort tanggal dipilih</h2><p>Status terkini pembayaran yang dibuat pada tanggal ini. Ini bukan laporan settlement atau mutasi rekening harian.</p><Evidence data={data.finance}/></>}</> : !error&&<p role="status">Memuat ringkasan…</p>}</>;
+  return <><header className="page-heading"><div><h1>Ringkasan operasional</h1><p>Hari bisnis WIB. PostgreSQL adalah sumber catatan.</p></div><label>Tanggal<input type="date" value={date} onChange={e=>setDate(e.target.value)} /></label></header>{error&&<p role="alert" className="error">{error}</p>}{data ? <><div className="metric-grid">{[["Pesanan dibuat",(data.orders as Row)?.orders],["Stok tersedia saat ini",(data.inventory as Row)?.available_units],["Unit direservasi",(data.inventory as Row)?.reserved_units],["Lot kedaluwarsa / ≤30 hari",(data.inventory as Row)?.expiring_or_expired_lots],["Admission checkout",data.checkoutAdmission]].map(([label,value])=><article key={String(label)}><p>{String(label)}</p><strong>{String(value ?? "—")}</strong></article>)}</div><h2>Checklist operasional saat ini</h2><p>Status otomatis dari catatan database; bukan persetujuan pembukaan pembayaran.</p><ul>{(Array.isArray(data.checklist)?data.checklist:[]).map((item:Row)=><li key={String(item.label)}>{String(item.label)}: <strong>{String(item.state)}</strong></li>)}</ul><h2>Fulfillment saat ini</h2><Evidence data={data.fulfillment}/>{data.finance&&<><h2>Pembayaran kohort tanggal dipilih</h2><p>Status terkini pembayaran yang dibuat pada tanggal ini. Ini bukan laporan settlement atau mutasi rekening harian.</p><Evidence data={data.finance}/></>}</> : !error&&<p role="status">Memuat ringkasan…</p>}</>;
 }
 
 export function RequestActions({ row, roles, refresh }: { row: Row; roles: StaffRole[]; refresh: () => void }) {
@@ -55,8 +61,8 @@ export function IntakeForm({ refresh }: { refresh: () => void }) {
 
 export function ShippingForm({ refresh }: { refresh: () => void }) {
   const [status,setStatus]=useState(""),[busy,setBusy]=useState(false);
-  async function submit(event:FormEvent<HTMLFormElement>){const v=values(event);setBusy(true);try{await command("/v1/requests",{kind:"shipping_policy",payload:{policy:"free_promotional",amount:0,cities:v.cities!.split(",").map(s=>s.trim()),serviceCoverage:v.serviceCoverage,costOwner:v.costOwner,startsAt:new Date(v.startsAt!).toISOString(),endsAt:new Date(v.endsAt!).toISOString(),approvalRef:v.approvalRef,verification:{status:"VERIFIED",evidenceRef:v.evidenceRef,verifiedBy:v.verifiedBy,verifiedAt:new Date(v.verifiedAt!).toISOString()}}});setStatus("Draft pengiriman tercatat; persetujuan Finance berbeda diperlukan.");refresh();}catch(e){setStatus(message(e));}finally{setBusy(false);}}
-  return <section className="panel"><h2>Ajukan cakupan pengiriman</h2><p>Hanya free_promotional IDR 0 yang didukung. Pengisian tidak memberikan persetujuan otomatis.</p><form onSubmit={e=>void submit(e)}><Fields names={[["cities","Kota/kabupaten disetujui (pisahkan koma)"],["serviceCoverage","Layanan dan batas cakupan"],["costOwner","Penanggung biaya"],["startsAt","Mulai (waktu perangkat)","datetime-local"],["endsAt","Berakhir (waktu perangkat)","datetime-local"],["approvalRef","Referensi persetujuan"],["evidenceRef","Referensi bukti asli"],["verifiedBy","Penanggung jawab verifikasi"],["verifiedAt","Waktu verifikasi asli (waktu perangkat)","datetime-local"]]}/><button disabled={busy}>Ajukan draft pengiriman</button></form>{status&&<p role="status">{status}</p>}</section>;
+  async function submit(event:FormEvent<HTMLFormElement>){const v=values(event);setBusy(true);try{await command("/v1/requests",{kind:"shipping_policy",payload:{scope:v.wholeCity==="on"?"whole_city":"unconfirmed",policy:"free_promotional",amount:0,cities:v.cities!.split(",").map(s=>s.trim()),serviceCoverage:v.serviceCoverage,costOwner:v.costOwner,startsAt:new Date(v.startsAt!).toISOString(),endsAt:new Date(v.endsAt!).toISOString(),approvalRef:v.approvalRef,verification:{status:"VERIFIED",evidenceRef:v.evidenceRef,verifiedBy:v.verifiedBy,verifiedAt:new Date(v.verifiedAt!).toISOString()}}});setStatus("Draft pengiriman tercatat; persetujuan Finance berbeda diperlukan.");refresh();}catch(e){setStatus(message(e));}finally{setBusy(false);}}
+  return <section className="panel"><h2>Ajukan cakupan pengiriman</h2><p>Hanya free_promotional IDR 0 yang didukung. Pengisian tidak memberikan persetujuan otomatis.</p><form onSubmit={e=>void submit(e)}><Fields names={[["cities","Kota/kabupaten disetujui (pisahkan koma)"],["serviceCoverage","Layanan dan batas cakupan"],["costOwner","Penanggung biaya"],["startsAt","Mulai (waktu perangkat)","datetime-local"],["endsAt","Berakhir (waktu perangkat)","datetime-local"],["approvalRef","Referensi persetujuan"],["evidenceRef","Referensi bukti asli"],["verifiedBy","Penanggung jawab verifikasi"],["verifiedAt","Waktu verifikasi asli (waktu perangkat)","datetime-local"]]}/><label><input type="checkbox" name="wholeCity" required/> Bukti menyetujui seluruh wilayah setiap kota di atas untuk layanan ini. Batas kecamatan belum didukung.</label><button disabled={busy}>Ajukan draft pengiriman</button></form>{status&&<p role="status">{status}</p>}</section>;
 }
 
 export function OrderWork({ roles }: { roles:StaffRole[] }) {

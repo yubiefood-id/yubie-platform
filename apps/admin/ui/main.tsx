@@ -3,12 +3,12 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Refine, useList, type BaseRecord, type DataProvider, type HttpError, type GetListParams } from "@refinedev/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { canOperate, STAFF_ROLES, type StaffRole, type OperationsPermission } from "@yubie/domain";
-import { DailyReport, IntakeForm, ShippingForm, OrderWork, FinanceWork, StaffForm, RequestActions, type Row } from "./operations.js";
+import { DailyReport, CheckoutFreeze, IntakeForm, ShippingForm, OrderWork, FinanceWork, StaffForm, RequestActions, type Row } from "./operations.js";
 import "./style.css";
 
-type Resource = "orders" | "payments" | "exceptions" | "inventory" | "requests" | "shipping" | "fulfillment" | "refunds" | "notes" | "staff" | "audit";
-const labels: Record<Resource, string> = { orders: "Pesanan", payments: "Pembayaran", exceptions: "Pengecualian pembayaran", inventory: "Lot dan stok", requests: "Persetujuan", shipping: "Pengiriman", fulfillment: "Packing dan resi", refunds: "Refund manual", notes: "Catatan internal", staff: "Hak staf", audit: "Jejak audit" };
-const resourcePermissions: Record<Resource, OperationsPermission> = { orders: "orders:read", payments: "payments:read", exceptions: "exceptions:read", inventory: "inventory:read", requests: "inventory:read", shipping: "shipping:read", fulfillment: "fulfillment:read", refunds: "payments:read", notes: "notes:write", staff: "staff:manage", audit: "audit:read" };
+type Resource = "orders" | "payments" | "exceptions" | "inventory" | "requests" | "shipping" | "fulfillment" | "refunds" | "notes" | "staff" | "audit" | "stock" | "movements" | "cases";
+const labels: Record<Resource, string> = { stock: "Ketersediaan SKU", movements: "Ledger stok", cases: "Kasus Finance", orders: "Pesanan", payments: "Pembayaran", exceptions: "Pengecualian pembayaran", inventory: "Lot dan stok", requests: "Persetujuan", shipping: "Pengiriman", fulfillment: "Packing dan resi", refunds: "Refund manual", notes: "Catatan internal", staff: "Hak staf", audit: "Jejak audit" };
+const resourcePermissions: Record<Resource, OperationsPermission> = { stock: "inventory:read", movements: "inventory:read", cases: "exceptions:read", orders: "orders:read", payments: "payments:read", exceptions: "exceptions:read", inventory: "inventory:read", requests: "inventory:read", shipping: "shipping:read", fulfillment: "fulfillment:read", refunds: "payments:read", notes: "notes:write", staff: "staff:manage", audit: "audit:read" };
 const denyWrite = async (): Promise<never> => { throw { message: "This action requires separate approval.", statusCode: 403 } satisfies HttpError; };
 
 const dataProvider: DataProvider = {
@@ -18,6 +18,7 @@ const dataProvider: DataProvider = {
     const query = new URLSearchParams({ limit: "20" });
     if (typeof meta?.cursor === "string") query.set("cursor", meta.cursor);
     if (typeof meta?.search === "string") query.set("search", meta.search);
+    if (typeof meta?.status === "string" && meta.status) query.set("status",meta.status);
     const response = await fetch(`/v1/${resource}?${query}`, { cache: "no-store", credentials: "same-origin" });
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload?.ok || payload.data?.source !== "reader") throw { message: response.status === 403 ? "Your role cannot read this resource." : "The data source is unavailable. No empty result has been assumed.", statusCode: response.status || 503 };
@@ -74,6 +75,9 @@ function StaffLogin({ onLogin }: { onLogin: () => void }) {
 }
 
 const columns: Record<Resource, Array<[string, string]>> = {
+  stock: [["sku","SKU"],["productId","Keluarga"],["sizeId","Varian"],["maxQuantity","Batas jual saat ini"],["status","Kelayakan"]],
+  movements: [["occurred_at","Waktu"],["lot_id","Lot"],["product_id","Keluarga"],["size_id","Varian"],["movement_type","Pergerakan"],["quantity_delta","Perubahan"],["order_id","Pesanan"],["reason","Alasan"]],
+  cases: [["id","Pembayaran"],["order_id","Pesanan"],["reconciliation_state","Pengecualian ledger"],["case_state","Penanganan"],["version","Versi kasus"],["updated_by","Staf"]],
   requests: [["id","Permintaan"],["kind","Jenis"],["status","Status"],["version","Versi"],["created_by","Pembuat"]],
   shipping: [["id","Persetujuan"],["cities","Kota/kabupaten"],["policy","Kebijakan"],["service_coverage","Layanan"],["starts_at","Mulai"],["ends_at","Berakhir"]],
   fulfillment: [["id","Pesanan"],["stage","Tahap"],["version","Versi"],["carrier","Kurir"],["tracking_number","Resi"],["fulfillment_hold","Hold"]],
@@ -89,25 +93,30 @@ const columns: Record<Resource, Array<[string, string]>> = {
 
 function ResourceTable({ resource, roles }: { resource: Resource; roles: StaffRole[] }) {
   const [cursor, setCursor] = useState<string | null>(null);
-  const [previous, setSebelumnya] = useState<Array<string | null>>([]);
+  const [previous, setPrevious] = useState<Array<string | null>>([]);
   const [draft, setDraft] = useState("");
   const [search, setSearch] = useState("");
-  const { query, result } = useList({ resource, pagination: { mode: "off" }, meta: { cursor, search }, queryOptions: { retry: false, refetchOnWindowFocus: false, gcTime: 0 } });
+  const [status,setStatus] = useState("");
+  const statuses: Partial<Record<Resource,string[]>> = { orders: ["draft","pending_payment","paid","processing","shipped","completed","cancelled"], payments: ["pending","succeeded","failed","expired","cancelled","refunded"], exceptions: ["pending","succeeded","failed","expired","cancelled","refunded"], inventory: ["received","quarantined","released","recalled","depleted"] };
+  const { query, result } = useList({ resource, pagination: { mode: "off" }, meta: { cursor, search, status }, queryOptions: { retry: false, refetchOnWindowFocus: false, gcTime: 0 } });
   const next = typeof result.nextCursor === "string" ? result.nextCursor : null;
-  const filter = (event: FormEvent) => { event.preventDefault(); setCursor(null); setSebelumnya([]); setSearch(draft.trim()); };
+  const filter = (event: FormEvent) => { event.preventDefault(); setCursor(null); setPrevious([]); setSearch(draft.trim()); };
   return <>
     <header className="page-heading"><div><h1>{labels[resource]}</h1><p>{resource === "exceptions" ? "Periksa bukti provider sebelum tindakan keuangan." : "Catatan operasional aktual. Akses data diaudit."}</p></div><button onClick={() => void query.refetch()} disabled={query.isFetching}>Muat ulang</button></header>
+    {statuses[resource] && <label className="status-filter">Filter status<select value={status} onChange={e=>{setStatus(e.target.value);setCursor(null);setPrevious([]);}}><option value="">Semua status</option>{statuses[resource]!.map(value=><option key={value}>{value}</option>)}</select></label>}
+    {resource === "stock" && <p>Multipack memakai stok komponennya. Jangan menjumlahkan kapasitas varian sebagai stok fisik tambahan.</p>}
     <form className="search" onSubmit={filter}><label htmlFor="resource-search">Cari ID atau referensi</label><div><input id="resource-search" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={80} /><button type="submit">Search</button></div></form>
     {query.isLoading ? <p role="status">Memuat catatan…</p> : query.isError ? <p role="alert" className="error">{query.error.message}</p> : <>
       <div className="table-scroll" role="region" tabIndex={0} aria-label={`${labels[resource]} records`}><table><caption>{result.data.length} records on this page</caption><thead><tr>{columns[resource].map(([key, label]) => <th key={key} scope="col">{label}</th>)}</tr></thead><tbody>{result.data.map((row) => <tr key={String(row.id)}>{columns[resource].map(([key]) => <td key={key}>{key === "amount" ? new Intl.NumberFormat("id-ID").format(Number(row[key])) : String(row[key] ?? "—")}</td>)}</tr>)}</tbody></table></div>
       {!result.data.length && <p role="status">Tidak ada catatan yang cocok.</p>}
-      <nav className="pagination" aria-label="Record pages"><button disabled={!previous.length} onClick={() => { setCursor(previous.at(-1) ?? null); setSebelumnya(previous.slice(0, -1)); }}>Sebelumnya</button><span>Page {previous.length + 1}</span><button disabled={!next} onClick={() => { setSebelumnya([...previous, cursor]); setCursor(next); }}>Berikutnya</button></nav>
+      <nav className="pagination" aria-label="Record pages"><button disabled={!previous.length} onClick={() => { setCursor(previous.at(-1) ?? null); setPrevious(previous.slice(0, -1)); }}>Sebelumnya</button><span>Page {previous.length + 1}</span><button disabled={!next} onClick={() => { setPrevious([...previous, cursor]); setCursor(next); }}>Berikutnya</button></nav>
     </>}
     {resource === "requests" && result.data.map(row => <RequestActions key={String(row.id)} row={row as Row} roles={roles} refresh={() => void query.refetch()} />)}
+    {["inventory","shipping"].includes(resource) && canOperate(roles,"inventory:apply") && <CheckoutFreeze />}
     {resource === "inventory" && canOperate(roles,"inventory:propose") && <IntakeForm refresh={() => void query.refetch()} />}
     {resource === "shipping" && canOperate(roles,"shipping:propose") && <ShippingForm refresh={() => void query.refetch()} />}
     {(resource === "orders" || resource === "fulfillment") && <OrderWork roles={roles} />}
-    {["payments","exceptions","refunds"].includes(resource) && canOperate(roles,"reconciliation:request") && <FinanceWork refresh={() => void query.refetch()} />}
+    {["payments","exceptions","refunds","cases"].includes(resource) && canOperate(roles,"reconciliation:request") && <FinanceWork refresh={() => void query.refetch()} />}
     {resource === "staff" && <StaffForm refresh={() => void query.refetch()} />}
     <aside className="policy-note" aria-label="Kebijakan tindakan"><strong>Tindakan terkendali</strong><p>Stok dan pengiriman memerlukan persetujuan berbeda. Refund dicatat manual setelah bukti provider; status uang tidak dapat dipaksa dari dashboard.</p></aside>
   </>;

@@ -55,3 +55,7 @@ h3, .request-card p { overflow-wrap: anywhere; }
 .metric-grid strong { font-size: 1.8rem; color: var(--yubie-purple); }
 .metric-grid p { margin-top: 0; color: #5d5268; }
 @media(max-width:700px) { .workspace { grid-template-columns: minmax(0,1fr); } .sidebar { padding: 1rem; } .sidebar .wordmark { font-size: 2rem; } .sidebar > p { margin: .3rem 0 1rem; } .sidebar nav { display: flex; flex-wrap: wrap; gap: .3rem; } .identity { padding-top: 1rem; margin-top: 0; display: flex; align-items: center; justify-content: space-between; } .page-heading { flex-wrap: wrap; } }
+
+.status-filter { display: grid; max-width: 24rem; gap: .5rem; margin-block: 1rem; }
+.status-filter select { font: inherit; padding: .65rem; border: 1px solid #b8acbf; background: white; border-radius: 4px; }
+.panel input[type="checkbox"] { width: 1.2rem; height: 1.2rem; }

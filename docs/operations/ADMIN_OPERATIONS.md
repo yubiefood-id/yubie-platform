@@ -22,7 +22,7 @@ python3 -m venv /tmp/yubie-intake
   /path/workbook-asli.xlsx --output /path/intake-PENDING.xlsx
 ```
 
-Isi hanya fakta asli pada empat lembar tambahan. Kolom **Usulan (bukan stok)**
+Isi hanya fakta asli pada lima lembar tambahan (empat lembar intake dan satu handoff staf/Finance). Kolom **Usulan (bukan stok)**
 tidak dipakai untuk menghitung stok. Konfirmasi setiap mode SKU dan referensi
 pengemasan; isi kuantitas fisik terkonfirmasi, lot, UOM, expiry, bukti/nama QC,
 saldo tersedia database, dan waktu hitung. Hitung tidak mencakup stok yang sudah
@@ -46,6 +46,8 @@ tidak cocok. JSON diuji dengan Zod serta domain yang sama dengan server. Tidak
 ada koneksi database atau payment dari konverter. SHA-256 workbook disimpan
 sebagai provenance; bukti asli tetap harus direview manusia.
 
+Sebelum hitung, operator menekan **Mulai freeze operasional baru**. Freeze database berlaku 30 menit dan dibaca API checkout di transaksi yang sama dengan reservasi; perubahan env admin saja bukan bukti bahwa checkout beku. Existing attempts, callback dan rekonsiliasi tetap berjalan. Hitung wajib dimulai setelah freeze dikonfirmasi.
+
 Di **Lot dan stok**, unggah JSON → dry-run → ajukan draft. QC berbeda membaca
 bukti lengkap di **Persetujuan**, lalu menyetujui. Operator menerapkan versi
 yang disetujui saat admission checkout dinonaktifkan. Perubahan stok, ledger,
@@ -55,6 +57,7 @@ identitas operasi yang sama; mencoba ulang tidak menambah stok lagi.
 ## Pengiriman
 
 Kabupaten Bogor / free_promotional IDR 0 masih **usulan**, bukan cakupan aktif.
+Kontrak saat ini hanya menerima `scope=whole_city`: layanan yang disetujui untuk seluruh wilayah kota/kabupaten. Cakupan hanya kecamatan/kelurahan tidak dapat dimasukkan sebagai persetujuan satu kota. Checkbox seluruh wilayah harus dipilih berdasarkan bukti asli; data lama tanpa scope eksplisit tidak memberi eligibility.
 Isi kota/kabupaten yang disetujui, layanan/batas wilayah, penanggung biaya,
 waktu mulai/akhir, pemberi persetujuan dan referensi asli. Hanya kebijakan
 free_promotional dengan ongkir 0 didukung schema ini. Ongkir berbayar memerlukan
@@ -88,9 +91,11 @@ ulang receipt. Admin tidak boleh mengubah hak dirinya sendiri atau menghapus
 admin terakhir. Bootstrap staf awal menggunakan dokumen pemilik yang asli dan
 CLI operator privat; tidak ada akun staf bawaan.
 
+Tabel **Ketersediaan SKU** memakai proyeksi reservasi yang sama dengan checkout. **Ledger stok** bersifat baca-saja. Filter status tersedia pada pesanan, pembayaran dan lot. **Kasus Finance** menampilkan status dan versi triage aktual; checklist harian dibentuk dari catatan database dan menandai bukti eksternal yang belum ada.
+
 Fulfillment: buka ID pesanan → packing → packed → shipped dengan kurir/resi →
 delivered. Status pembayaran, jumlah, mata uang, hold, recall, dan expiry
-diperiksa server. Tidak ada tombol paksa lunas. Catatan internal tidak masuk
+diperiksa server. Recall dan fulfillment diserialisasi; refund yang sudah disetujui memberi hold fulfillment tanpa memalsukan status uang. Tidak ada tombol paksa lunas. Catatan internal tidak masuk
 payload notifikasi pelanggan.
 
 Finance: antrekan rekonsiliasi hanya menjalankan pencarian status yang sudah

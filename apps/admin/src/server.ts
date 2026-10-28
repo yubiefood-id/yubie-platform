@@ -35,7 +35,7 @@ export interface AdminReaders {
   listInventory?(query: AdminQuery): Promise<AdminPage<AdminInventoryRow>>;
 }
 
-export interface AdminQuery { limit: number; cursor: string | null; search?: string }
+export interface AdminQuery { limit: number; cursor: string | null; search?: string; status?: string }
 export interface AdminInventoryRow { id: string; productId: string; sizeId: string; quantity: number; status: string; expiryDate: string }
 
 export interface AdminServerOptions {
@@ -78,7 +78,8 @@ export async function handleAdminRequest(request: Request, options: AdminServerO
     try { if (!options.ready) throw new Error("unconfigured"); await options.ready(); return json({ ok: true }); } catch { return json({ ok: false, code: "UNAVAILABLE" }, { status: 503 }); }
   }
   if (request.method === "GET" && url.pathname === "/auth/config") {
-    const csrfToken = randomBytes(32).toString("hex");
+    const existingCsrf = readCookie(request, "yubie_ops_csrf");
+    const csrfToken = existingCsrf && /^[a-f0-9]{64}$/.test(existingCsrf) ? existingCsrf : randomBytes(32).toString("hex");
     return json({ ok: true, data: { googleClientId: options.googleClientId ?? null, csrfToken } }, {
       headers: { "set-cookie": `yubie_ops_csrf=${csrfToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=600${url.protocol === "https:" ? "; Secure" : ""}` },
     });
@@ -172,7 +173,7 @@ export async function handleAdminRequest(request: Request, options: AdminServerO
   return json({ ok: false, code: "FORBIDDEN" }, { status: 403 });
 }
 
-function pageQuery(url: URL): AdminQuery | { error: "limit" | "cursor" | "search" } {
+function pageQuery(url: URL): AdminQuery | { error: "limit" | "cursor" | "search" | "status" } {
   const rawLimit = url.searchParams.get("limit");
   const limit = rawLimit === null ? 20 : Number(rawLimit);
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) return { error: "limit" };
@@ -180,7 +181,10 @@ function pageQuery(url: URL): AdminQuery | { error: "limit" | "cursor" | "search
   if (cursor !== null && !/^[A-Za-z0-9_-]{1,80}$/.test(cursor)) return { error: "cursor" };
   const search = url.searchParams.get("search")?.trim();
   if (search && (search.length > 80 || /[\x00-\x1f]/.test(search))) return { error: "search" };
-  return { limit, cursor, ...(search ? { search } : {}) };
+  const status = url.searchParams.get("status");
+  const statuses: Record<string,string[]> = { "/v1/orders": ["draft","pending_payment","paid","processing","shipped","completed","cancelled"], "/v1/payments": ["pending","succeeded","failed","expired","cancelled","refunded"], "/v1/exceptions": ["pending","succeeded","failed","expired","cancelled","refunded"], "/v1/inventory": ["received","quarantined","released","recalled","depleted"] };
+  if (status && !statuses[url.pathname]?.includes(status)) return { error: "status" };
+  return { limit, cursor, ...(search ? { search } : {}), ...(status ? { status } : {}) };
 }
 
 function csrfMatches(request: Request): boolean {
@@ -205,7 +209,7 @@ function readCookie(request: Request, name: string): string | null {
 async function auditRead(options: AdminServerOptions, actor: string, action: string, path: string) {
   if (!options.audit) return;
   const knownPaths = new Set(["/auth/login", "/auth/google", "/auth/logout", "/v1/orders", "/v1/payments", "/v1/exceptions", "/v1/inventory"]);
-  const operationPath = /^\/v1\/(orders|payments|requests)\/[A-Za-z0-9_-]{1,100}(?:\/(fulfillment|notes|reconcile|triage|approve|apply|refund-execution|refund-confirmation))?$/.test(path) || /^\/v1\/(requests|shipping|audit|staff|refunds|fulfillment|notes|inventory\/preview|reports\/daily)$/.test(path);
+  const operationPath = /^\/v1\/(orders|payments|requests)\/[A-Za-z0-9_-]{1,100}(?:\/(fulfillment|notes|reconcile|triage|approve|apply|refund-execution|refund-confirmation))?$/.test(path) || /^\/v1\/(stock|movements|cases|requests|shipping|audit|staff|refunds|fulfillment|notes|checkout-freeze|inventory\/preview|reports\/daily)$/.test(path);
   const result = await options.audit.append({ action, actor, resourceType: "admin", resourceId: knownPaths.has(path) || operationPath ? path : "unrecognized-route", occurredAt: new Date(options.nowMs).toISOString() });
   if (!result.ok) throw new Error("Audit unavailable");
 }

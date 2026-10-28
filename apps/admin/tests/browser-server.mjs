@@ -12,7 +12,7 @@ if(!['127.0.0.1','localhost'].includes(url.hostname))throw new Error('Browser ha
 const admin=postgres(url.toString(),{max:1});const name='yubie_ops_browser_'+Date.now();await admin`CREATE DATABASE ${admin(name)}`;url.pathname='/'+name;
 const database=createDatabase(url.toString());
 for(const file of readdirSync('packages/persistence/migrations').filter(n=>n.endsWith('.sql')).sort())await database.client.unsafe(readFileSync('packages/persistence/migrations/'+file,'utf8'));
-for(const [subject,roles] of [['TEST_ONLY_OPERATOR',['operator','qc','fulfillment','finance','admin']],['TEST_ONLY_VIEWER',['viewer']]])for(const role of roles)await database.client`INSERT INTO ops_staff_grants(subject,role,granted_by,approval_ref,granted_at) VALUES(${subject},${role},'TEST_ONLY_BOOTSTRAP','TEST_ONLY_APPROVAL',now())`;
+for(const [subject,roles] of [['TEST_ONLY_OPERATOR',['operator','qc','fulfillment','finance','admin']],['TEST_ONLY_REVIEWER',['qc','finance']],['TEST_ONLY_VIEWER',['viewer']]])for(const role of roles)await database.client`INSERT INTO ops_staff_grants(subject,role,granted_by,approval_ref,granted_at) VALUES(${subject},${role},'TEST_ONLY_BOOTSTRAP','TEST_ONLY_APPROVAL',now())`;
 const options=()=>({sessionSecret:'TEST_ONLY_BROWSER_SECRET_NOT_PRODUCTION',nowMs:Date.now(),operations:new PostgresOperations(database,{writesEnabled:true,checkoutAdmission:'disabled'}),readers:new PostgresAdminReaders(database),audit:new PostgresAuditRepository(database)});
 const directory=mkdtempSync(join(tmpdir(),'yubie-ops-browser-'));
 execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout',join(directory,'key.pem'),'-out',join(directory,'cert.pem'),'-days','1','-subj','/CN=localhost'],{stdio:'ignore'});

@@ -20,4 +20,8 @@ class RunnerBehavior(unittest.TestCase):
   runner.validate_worker_evidence({"reconcileSchedule":True,"notificationSchedule":True,"recentNotificationCompletion":True,"notificationPending":0,"notificationOldestSeconds":0,"notificationExceptions":0},"preview")
   with self.assertRaises(runner.Blocked):runner.validate_worker_evidence({"reconcileSchedule":True,"notificationSchedule":True,"recentNotificationCompletion":True,"notificationPending":1,"notificationOldestSeconds":900,"notificationExceptions":0},"preview")
   with self.assertRaises(runner.Blocked):runner.validate_worker_evidence({"reconcileSchedule":True,"notificationSchedule":True,"recentNotificationCompletion":True,"recentReconciliation":False},"ipaymu")
+ def test_operations_release_requires_fresh_outbox_completion(self):
+  evidence={"reconcileSchedule":True,"notificationSchedule":True,"recentNotificationCompletion":True,"recentReconciliation":True,"notificationPending":0,"notificationOldestSeconds":0,"notificationExceptions":0}
+  with self.assertRaises(runner.Blocked):runner.validate_worker_evidence(evidence,"ipaymu",operations=True)
+  runner.validate_worker_evidence({**evidence,"operationsSchedule":True,"recentOperationsCompletion":True,"failedOperations":0},"ipaymu",operations=True)
 if __name__=="__main__":unittest.main()

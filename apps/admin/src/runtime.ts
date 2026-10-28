@@ -24,9 +24,12 @@ export function adminHttpHandler(options: () => AdminServerOptions, origin: stri
       const url = new URL(incoming.url || "/", origin);
       if (url.origin !== origin) { outgoing.writeHead(400); outgoing.end(); return; }
       const now = Date.now(), address = incoming.socket.remoteAddress || "unknown";
+      const category = url.pathname === "/auth/google" ? "login" : incoming.method !== "GET" && incoming.method !== "HEAD" ? "write" : url.pathname.startsWith("/v1/") || url.pathname.startsWith("/auth/") ? "read" : "asset";
+      const budget = category === "login" ? 20 : category === "write" ? 60 : 120;
+      const bucket = address+":"+category;
       for (const [key, value] of rate) if (now - value.start > 60_000) rate.delete(key);
-      const counter = rate.get(address) ?? { start: now, count: 0 }; counter.count++; rate.set(address, counter);
-      if (counter.count > 120 || rate.size > 1000) { outgoing.writeHead(429, { ...securityHeaders, "retry-after": "60" }); outgoing.end(); return; }
+      const counter = rate.get(bucket) ?? { start: now, count: 0 }; counter.count++; rate.set(bucket, counter);
+      if (counter.count > budget || rate.size > 1000) { outgoing.writeHead(429, { ...securityHeaders, "retry-after": "60" }); outgoing.end(); return; }
       let response: Response;
       if (incoming.method === "GET" && (url.pathname === "/" || url.pathname.startsWith("/assets/"))) {
         const path = url.pathname === "/" ? resolve(assets, "index.html") : resolve(assets, `.${decodeURIComponent(url.pathname)}`);

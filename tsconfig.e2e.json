@@ -7,5 +7,5 @@
     "target": "ES2022",
     "types": ["node", "@playwright/test"]
   },
-  "include": ["playwright.config.ts", "e2e/**/*.ts"]
+  "include": ["playwright.config.ts", "playwright.admin.config.ts", "e2e/**/*.ts", "apps/admin/tests/browser/**/*.ts"]
 }

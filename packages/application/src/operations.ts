@@ -1,6 +1,7 @@
 import type { StaffRole, VerifiedInventoryIntake, FulfillmentStage, OperationsKind } from "@yubie/domain";
 
 export interface ShippingPolicyDraft {
+  scope: "whole_city";
   policy: "free_promotional"; cities: string[]; amount: 0; serviceCoverage: string; costOwner: string;
   startsAt: string; endsAt: string; approvalRef: string; verification: VerifiedInventoryIntake["verification"];
 }
@@ -15,6 +16,8 @@ export interface OperationRecord {
 export interface VersionedOperation { expectedVersion: number; reason: string }
 export interface FulfillmentOperation { expectedVersion: number; stage: FulfillmentStage; reason: string; carrier?: string | undefined; trackingNumber?: string | undefined }
 export interface OperationsPort {
+  stock(subject: string): Promise<unknown[]>;
+  freezeCheckout(subject: string, key: string, input: { reason: string }): Promise<unknown>;
   staffGrant(subject: string, key: string, input: { subject: string; role: StaffRole; action: "grant" | "revoke"; approvalRef: string; reason: string }): Promise<unknown>;
   rolesFor(subject: string): Promise<StaffRole[]>;
   preview(subject: string, intake: VerifiedInventoryIntake): Promise<unknown>;

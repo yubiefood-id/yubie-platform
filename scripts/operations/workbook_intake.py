@@ -23,7 +23,8 @@ SHEETS = {
  'Pengesahan Intake':['Kolom','Nilai','Petunjuk'],
  'Intake SKU':['SKU','Status verifikasi','Mode fisik: independent/derived','SKU komponen','Jumlah komponen','Usulan (bukan stok)','Jumlah fisik terkonfirmasi','Versi kebijakan','Referensi persetujuan kemasan'],
  'Intake Lot QC':['SKU','Kode lot asli','Jumlah tersedia fisik','Saldo tersedia DB sebelum hitung','UOM','Tanggal kedaluwarsa YYYY-MM-DD','Waktu hitung UTC ISO','Status lot','Referensi rilis QC','Nama penanggung jawab QC','Status verifikasi'],
- 'Intake Pengiriman':['Status verifikasi','Kota/kabupaten (satu per baris)','Kebijakan','Ongkir IDR','Layanan dan cakupan','Penanggung biaya','Mulai UTC ISO','Berakhir UTC ISO','Referensi persetujuan','Pemberi persetujuan','Referensi bukti','Waktu verifikasi UTC ISO'],
+ 'Intake Pengiriman':['Status verifikasi','Kota/kabupaten (satu per baris)','Kebijakan','Ongkir IDR','Layanan dan cakupan','Penanggung biaya','Mulai UTC ISO','Berakhir UTC ISO','Referensi persetujuan','Pemberi persetujuan','Referensi bukti','Waktu verifikasi UTC ISO','Cakupan disetujui: whole_city'],
+ 'Staf dan Finance':['Keputusan yang belum tersedia','Nilai asli','Petunjuk'],
 }
 
 def check_archive(path):
@@ -53,6 +54,14 @@ def prepare(source, destination):
     ]:meta.append(row)
     for family,size,sku,proposed,component,quantity in CATALOG:
         workbook['Intake SKU'].append([sku,'PENDING','derived' if component else 'independent',component or sku,quantity,proposed,None,1,'PENDING'])
+    for field,hint in [
+        ('Google client ID khusus staf','Client terpisah dari login pelanggan; bukan API key'),
+        ('Daftar subject Google dan peran staf','Named accounts; pemeriksa QC/Finance harus berbeda dari pembuat'),
+        ('Referensi persetujuan akses staf','Bukti persetujuan pemilik yang asli'),
+        ('Penanggung jawab refund dan eskalasi Finance','Nama penanggung jawab dan referensi prosedur'),
+        ('Bukti acceptance pembayaran positif','Referensi sesi/callback/rekonsiliasi tersanitasi; jangan tempel token atau signature'),
+        ('Persetujuan pilot uang nyata','Maksimum nominal/jumlah transaksi, periode UTC, pembeli milik merchant, pelaksana dan referensi approval'),
+    ]:workbook['Staf dan Finance'].append([field,'PENDING',hint])
     # Deliberately no physical lots or shipping approval rows are invented.
     for name in SHEETS:
         sheet=workbook[name];sheet.freeze_panes='A2';sheet.auto_filter.ref=sheet.dimensions
@@ -103,7 +112,8 @@ def convert(path,scope):
             status,city,policy,fee,coverage,cost,start,end,reference,approver,evidence,verified=row[:12]
             if text(status,'Pengiriman status')!='VERIFIED':raise ValueError('Pengiriman harus VERIFIED')
             if policy!='free_promotional' or number(fee,'Ongkir')!=0:raise ValueError('Schema saat ini hanya free_promotional IDR 0 dengan persetujuan sah')
-            policies.append({'kind':'shipping_policy','payload':{'policy':policy,'cities':[text(city,'Kota')],'amount':0,'serviceCoverage':text(coverage,'Layanan'),'costOwner':text(cost,'Penanggung biaya'),'startsAt':timestamp(start,'Mulai'),'endsAt':timestamp(end,'Berakhir'),'approvalRef':text(reference,'Persetujuan'),'verification':{'status':'VERIFIED','evidenceRef':text(evidence,'Bukti'),'verifiedBy':text(approver,'Pemberi persetujuan'),'verifiedAt':timestamp(verified,'Waktu verifikasi')}}})
+            if len(row)<13 or text(row[12],'Cakupan seluruh kota')!='whole_city':raise ValueError('Hanya whole_city yang didukung; batas kecamatan belum dapat ditegakkan')
+            policies.append({'kind':'shipping_policy','payload':{'scope':'whole_city','policy':policy,'cities':[text(city,'Kota')],'amount':0,'serviceCoverage':text(coverage,'Layanan'),'costOwner':text(cost,'Penanggung biaya'),'startsAt':timestamp(start,'Mulai'),'endsAt':timestamp(end,'Berakhir'),'approvalRef':text(reference,'Persetujuan'),'verification':{'status':'VERIFIED','evidenceRef':text(evidence,'Bukti'),'verifiedBy':text(approver,'Pemberi persetujuan'),'verifiedAt':timestamp(verified,'Waktu verifikasi')}}})
         return {'sourceSha256':digest,'requests':policies}
     meta={row[0]:row[1] for row in rows(workbook,'Pengesahan Intake')}
     if text(meta.get('status'),'Pengesahan')!='VERIFIED':raise ValueError('Pengesahan harus VERIFIED')
