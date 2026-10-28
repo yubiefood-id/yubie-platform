@@ -6,6 +6,7 @@ COPY apps/bot ./apps/bot
 RUN npm ci
 RUN npm run build --workspace @yubie/config \
   && npm run build --workspace @yubie/domain \
+  && npm run build --workspace @yubie/validation \
   && npm run build --workspace @yubie/application \
   && npm run build --workspace @yubie/integrations \
   && npm run build --workspace @yubie/persistence \

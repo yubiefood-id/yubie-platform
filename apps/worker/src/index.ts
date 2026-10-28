@@ -4,6 +4,7 @@ import { checkListingHealth, SystemClock, purgePhoneChallenges, purgeAddressPins
 import { createSupportProvider, HttpLinkHealthChecker } from "@yubie/integrations";
 import { closeDatabase, createWorkerRepositories, PostgresAssistantWorkRepository, PostgresTransactionManager, PostgresOperationsOutbox } from "@yubie/persistence";
 import { processOperationsOutbox } from "./operations-outbox-handler.js";
+import { runOperationsPaymentReconcile } from "./operations-reconcile-handler.js";
 import { processAssistantJob } from "./assistant-handler.js";
 import { startMetricsServer } from "./metrics-server.js";
 import { reconcileSupport } from "./reconcile-handler.js";
@@ -121,9 +122,8 @@ async function start() {
   await boss.send("payment.notifications",{});
   await boss.createQueue("operations.outbox");
   await boss.work("operations.outbox", { batchSize: 1 }, async () => {
-    const result = await processOperationsOutbox(new PostgresOperationsOutbox(repos.database), async () => {
-      // Existing reconciliation looks up provider state; it never creates a payable session.
-      await runPaymentReconcile(repos.database, "worker_operations_request");
+    const result = await processOperationsOutbox(new PostgresOperationsOutbox(repos.database), async paymentId => {
+      await runOperationsPaymentReconcile(repos.database, paymentId);
     });
     if (result.failed) throw new Error("OPERATIONS_OUTBOX_RETRY_PENDING");
   });

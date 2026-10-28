@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { issueAdminSession } from "../../dist/session.js";
+import { issueAdminSession } from "../../src/session.js";
 async function login(context: import('@playwright/test').BrowserContext,subject="TEST_ONLY_OPERATOR") {
  const token=issueAdminSession({sub:subject,role:subject==="TEST_ONLY_VIEWER"?"viewer":"operator",exp:Date.now()+60000},"TEST_ONLY_BROWSER_SECRET_NOT_PRODUCTION");
  await context.addCookies([{name:"yubie_ops",value:token,domain:"localhost",path:"/",secure:true,httpOnly:true,sameSite:"Strict"}]);

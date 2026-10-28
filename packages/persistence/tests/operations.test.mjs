@@ -5,6 +5,7 @@ import postgres from "postgres";
 import * as persistence from "../dist/index.js";
 import { PostgresShippingPolicyRepository } from '../dist/repositories/shipping-policy-repository.js';
 import { createFirstPartyCheckout, FixedClock, CryptoIdGenerator } from '@yubie/application';
+import * as application from '@yubie/application';
 
 test("operations repository exposes the shared transactional workflow",()=>assert.equal(typeof persistence.PostgresOperations,"function"));
 test("PG: release independently verifies operations tables and triggers",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db)=>{
@@ -103,6 +104,27 @@ async function paid(db){
  await db.client`INSERT INTO orders(id,checkout_ref,checkout_public_token,status,customer_name,customer_phone,delivery_jsonb,currency,subtotal_amount,discount_amount,grand_total_amount,total_amount,created_at,updated_at) VALUES('TEST_ONLY_ORDER','TEST_ONLY_REF','TEST_ONLY_PUBLIC_TOKEN','paid','TEST_ONLY_CUSTOMER','+6200000000000','{"city":"TEST_ONLY_CITY"}'::jsonb,'IDR',35000,0,35000,35000,now(),now())`;
  await db.client`INSERT INTO order_payments(id,order_id,provider,provider_session_id,provider_payment_id,currency,status,amount,created_at,updated_at) VALUES('TEST_ONLY_PAYMENT','TEST_ONLY_ORDER','ipaymu','TEST_ONLY_SESSION','1001','IDR','succeeded',35000,now(),now())`;
 }
+test("PG: Finance reconciliation actually queries the requested non-expired payment",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db)=>{
+ await paid(db);await db.client`UPDATE orders SET status='pending_payment' WHERE id='TEST_ONLY_ORDER'`;await db.client`UPDATE order_payments SET status='pending',expires_at=now()+interval '1 day' WHERE id='TEST_ONLY_PAYMENT'`;
+ const payments=new persistence.PostgresPaymentRepository(db);assert.equal((await payments.listPendingExpired(new Date().toISOString(),50)).value.length,0);
+ const lookups=[];const provider={getPaymentSession:async(id,lookup)=>{lookups.push({id,lookup});return{ok:true,value:{provider:'ipaymu',providerSessionId:'TEST_ONLY_SESSION',providerPaymentId:'1001',referenceId:'TEST_ONLY_REF',providerBusinessId:'TEST_ONLY_MERCHANT',currency:'IDR',amount:35000,rawStatus:'SUCCEEDED',redirectUrl:'',expiresAt:null}};},createPaymentSession:async()=>{throw new Error('No payable create allowed');}};
+ const deps={tx:new persistence.PostgresTransactionManager(db),provider,merchant:'TEST_ONLY_MERCHANT',clock:new FixedClock(new Date().toISOString()),ids:new CryptoIdGenerator()};
+ await application.reconcileIpaymuPayment('TEST_ONLY_PAYMENT',deps);
+ assert.equal(lookups.length,1);assert.equal(lookups[0].lookup.providerPaymentId,'1001');assert.equal((await db.client`SELECT status FROM order_payments`)[0].status,'succeeded');
+ assert.equal((await db.client`SELECT event FROM payment_events`)[0].event,'ipaymu.poll');
+ provider.getPaymentSession=async()=>({ok:true,value:{provider:'ipaymu',providerSessionId:'TEST_ONLY_SESSION',providerPaymentId:'1001',referenceId:'TEST_ONLY_REF',providerBusinessId:'TEST_ONLY_MERCHANT',currency:'IDR',amount:35000,rawStatus:'REFUNDED',redirectUrl:'',expiresAt:null}});
+ await application.reconcileIpaymuPayment('TEST_ONLY_PAYMENT',deps);
+ assert.equal((await db.client`SELECT status FROM order_payments`)[0].status,'refunded');assert.equal((await db.client`SELECT status FROM orders`)[0].status,'paid');assert.equal((await db.client`SELECT count(*)::int n FROM inventory_movements`)[0].n,0);
+ provider.getPaymentSession=async()=>({ok:false,error:{code:'unavailable',message:'TEST_ONLY lookup outage',retryable:true}});
+ await assert.rejects(()=>application.reconcileIpaymuPayment('TEST_ONLY_PAYMENT',deps),/lookup/i);
+}));
+test("PG: targeted Finance poll cannot accept another amount or merchant",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db)=>{
+ await paid(db);const deps={tx:new persistence.PostgresTransactionManager(db),merchant:'TEST_ONLY_MERCHANT',clock:new FixedClock(new Date().toISOString()),ids:new CryptoIdGenerator(),provider:{getPaymentSession:async()=>({ok:true,value:{provider:'ipaymu',providerSessionId:'TEST_ONLY_SESSION',providerPaymentId:'1001',referenceId:'TEST_ONLY_REF',amount:1,rawStatus:'REFUNDED',redirectUrl:'',expiresAt:null}})}};
+ assert.equal((await application.reconcileIpaymuPayment('TEST_ONLY_PAYMENT',deps)).outcome,'exception');
+ assert.equal((await db.client`SELECT status FROM order_payments`)[0].status,'succeeded');assert.equal((await db.client`SELECT reconciliation_state FROM order_payments`)[0].reconciliation_state,'provider_mismatch');
+ deps.provider.getPaymentSession=async()=>({ok:true,value:{provider:'ipaymu',providerSessionId:'TEST_ONLY_SESSION',providerPaymentId:'1001',referenceId:'TEST_ONLY_REF',providerBusinessId:'TEST_ONLY_FOREIGN_MERCHANT',amount:35000,rawStatus:'REFUNDED',redirectUrl:'',expiresAt:null}});
+ assert.equal((await application.reconcileIpaymuPayment('TEST_ONLY_PAYMENT',deps)).outcome,'exception');assert.equal((await db.client`SELECT status FROM order_payments`)[0].status,'succeeded');
+}));
 test("PG: fulfillment and refund reject mismatched payment amounts",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db,ops)=>{
  await paid(db);await db.client`UPDATE order_payments SET amount=1000 WHERE id='TEST_ONLY_PAYMENT'`;
  await assert.rejects(()=>ops.fulfill('packer','mismatch','TEST_ONLY_ORDER',{expectedVersion:0,stage:'packing',reason:'TEST_ONLY packing'}),/verified|amount|match/i);
