@@ -118,6 +118,17 @@ test("PG: Finance reconciliation actually queries the requested non-expired paym
  provider.getPaymentSession=async()=>({ok:false,error:{code:'unavailable',message:'TEST_ONLY lookup outage',retryable:true}});
  await assert.rejects(()=>application.reconcileIpaymuPayment('TEST_ONLY_PAYMENT',deps),/lookup/i);
 }));
+test("PG: pending Finance poll preserves a known safe payment redirect",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db)=>{
+ await paid(db);await db.client`UPDATE orders SET status='pending_payment' WHERE id='TEST_ONLY_ORDER'`;await db.client`UPDATE order_payments SET status='pending',redirect_url='https://my.ipaymu.com/payment/TEST_ONLY_SESSION' WHERE id='TEST_ONLY_PAYMENT'`;
+ const deps={tx:new persistence.PostgresTransactionManager(db),merchant:'TEST_ONLY_MERCHANT',clock:new FixedClock(new Date().toISOString()),ids:new CryptoIdGenerator(),provider:{getPaymentSession:async()=>({ok:true,value:{provider:'ipaymu',providerSessionId:'TEST_ONLY_SESSION',providerPaymentId:'1001',referenceId:'TEST_ONLY_REF',amount:35000,rawStatus:'PENDING',redirectUrl:'',expiresAt:null}})}};
+ await application.reconcileIpaymuPayment('TEST_ONLY_PAYMENT',deps);
+ assert.equal((await db.client`SELECT reconciliation_state FROM order_payments`)[0].reconciliation_state,null);
+ const view=await application.getCheckoutStatus('TEST_ONLY_PUBLIC_TOKEN',{orders:new persistence.PostgresOrderRepository(db),payments:new persistence.PostgresPaymentRepository(db),clock:deps.clock});
+ assert.equal(view.value.resumeUrl,'https://my.ipaymu.com/payment/TEST_ONLY_SESSION');
+ await db.client`UPDATE order_payments SET reconciliation_state='ambiguous_create'`;
+ await application.reconcileIpaymuPayment('TEST_ONLY_PAYMENT',deps);
+ assert.equal((await db.client`SELECT reconciliation_state FROM order_payments`)[0].reconciliation_state,'ambiguous_create');
+}));
 test("PG: targeted Finance poll cannot accept another amount or merchant",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db)=>{
  await paid(db);const deps={tx:new persistence.PostgresTransactionManager(db),merchant:'TEST_ONLY_MERCHANT',clock:new FixedClock(new Date().toISOString()),ids:new CryptoIdGenerator(),provider:{getPaymentSession:async()=>({ok:true,value:{provider:'ipaymu',providerSessionId:'TEST_ONLY_SESSION',providerPaymentId:'1001',referenceId:'TEST_ONLY_REF',amount:1,rawStatus:'REFUNDED',redirectUrl:'',expiresAt:null}})}};
  assert.equal((await application.reconcileIpaymuPayment('TEST_ONLY_PAYMENT',deps)).outcome,'exception');

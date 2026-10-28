@@ -26,7 +26,8 @@ export async function reconcileIpaymuPayment(paymentId: string, deps: {
   if (!paymentSessionMatches(payment,order,observed) || payment.amount !== order.totals.grandTotalAmount || observed.providerBusinessId && observed.providerBusinessId !== deps.merchant) {
     await flagPaymentMismatch(paymentId,deps); return { observed: true, outcome: "exception", reason: "provider_mismatch" };
   }
-  const status = paymentStatusFromProviderSession(observed.rawStatus);
+  const status = paymentStatusFromProviderSession(observed.rawStatus)
+    ?? (["PENDING", "ACTIVE"].includes(observed.rawStatus.toUpperCase()) ? "pending" : null);
   if (!status) throw new Error("Authoritative payment lookup status is unknown");
   const outcome = await applyIpaymuCallback({ observationSource: "poll", expectedPaymentId: paymentId, referenceId: order.checkoutRef, merchant: deps.merchant, expectedMerchant: deps.merchant, amount: payment.amount, currency: payment.currency, trxId: observed.providerPaymentId ?? payment.providerPaymentId ?? null, sessionId: payment.providerSessionId, authoritativeSessionId: observed.providerSessionId, authoritativeStatus: status, authoritativeReferenceId: observed.referenceId ?? null, authoritativeAmount: observed.amount ?? null, dedupeKey: `ipaymu-poll:${paymentId}:${observed.providerPaymentId ?? payment.providerPaymentId ?? "unknown"}:${status}` },deps);
   if (!outcome.persisted) throw new Error("Payment lookup persistence unavailable");

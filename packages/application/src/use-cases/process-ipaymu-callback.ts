@@ -145,7 +145,10 @@ export async function applyIpaymuCallback(
       }
       if (!input.authoritativeStatus || input.authoritativeStatus === "pending") {
         if (payment.status !== "pending") return { persisted: true, result: "stale" as const };
-        requireResult(await repos.payments.save({ ...nextPayment, reconciliationState: "pending_reconciliation" }));
+        const reconciliationState = input.observationSource === "poll"
+          ? payment.reconciliationState ?? (payment.providerSessionId && payment.redirectUrl ? null : "pending_reconciliation")
+          : "pending_reconciliation";
+        requireResult(await repos.payments.save({ ...nextPayment, reconciliationState }));
         return { persisted: true, result: "pending" as const };
       }
       const effect = await applyPaymentStatus(
