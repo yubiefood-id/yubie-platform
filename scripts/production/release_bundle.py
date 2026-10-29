@@ -12,7 +12,14 @@ import tarfile
 import types
 
 MATERIALS = ["scripts/production/release_runner.py", "scripts/production/release_policy.py", "scripts/production/install_release.py", "scripts/production/schema_checks.sql", "infrastructure/docker-compose.prod.yml"]
-PRIOR_COMPOSE = "180f6ad41cbcbf2864ba23b240b9ed6b5174ca14f5e0e3c91e139368309c240c"
+# Compose bytes the installer may find already deployed at /opt/yubie/production.
+# The release runner swaps in its own rendered compose at the end of every
+# successful deploy, so after each deploy append the new live hash (the last
+# entry of the deployed release manifest's acceptedPriorComposeSha256) here.
+PRIOR_COMPOSE_SHA256 = [
+    "180f6ad41cbcbf2864ba23b240b9ed6b5174ca14f5e0e3c91e139368309c240c",  # pre-088312e era compose
+    "19e96bfab5399eada4b4ef2db738dcc4120ca25541afe89a59ce34bbaf2101fc",  # rendered by release 088312e53e7d6c968d8227e71a589d5a17633439
+]
 
 
 def require(condition, code):
@@ -57,7 +64,7 @@ def build(root, sha, api, worker, output):
     manifest = {"schemaVersion": 1, "sourceSha": sha, "apiImage": api, "workerImage": worker,
                 "files": {name: hashlib.sha256(value).hexdigest() for name, value in contents.items()},
                 "migrations": [path.name for path in migrations], "webArtifact": {**web_manifest, "archiveSha256": web_sha},
-                "acceptedPriorComposeSha256": [PRIOR_COMPOSE, "7befdcf8332861ea8620ca731721a921aa07100032ae7d1d3fc53f0b997b7c4c"]}
+                "acceptedPriorComposeSha256": [*PRIOR_COMPOSE_SHA256, "7befdcf8332861ea8620ca731721a921aa07100032ae7d1d3fc53f0b997b7c4c"]}
     # Also allow idempotent bootstrap after this exact release has been deployed.
     policy = types.ModuleType("frozen_release_policy")
     exec(compile(contents["scripts/production/release_policy.py"], "release_policy.py", "exec"), policy.__dict__)
