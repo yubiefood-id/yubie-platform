@@ -9,17 +9,25 @@ name: Release candidate
 #
 # Two dispatch paths, same gates:
 #   - workflow_dispatch: manual (actor = the dispatching user).
-#   - schedule: the triggering actor is github-actions[bot]. This matters:
+#   - green-main CI dispatch: ci.yml's dispatch-release-candidate job calls
+#     `gh workflow run` with its GITHUB_TOKEN right after the five required
+#     checks pass on main, so the actor is github-actions[bot]. This matters:
 #     the `staging` environment's required reviewer (the repository owner)
 #     cannot approve a run their own identity dispatched — GitHub blocks
 #     self-approval, including workflow_run runs (they inherit the original
 #     push actor; verified on run 40082509470). Bot dispatch + human
 #     approval is the authorized two-person separation; no protection rule
-#     is weakened. The CI workflow also dispatches this workflow with its
-#     GITHUB_TOKEN on green main runs (a documented recursion exception),
-#     giving the same bot actor immediately after a merge. A concurrency
-#     group cancels superseded waiting runs so exactly one current-main RC
-#     is pending at a time.
+#     is weakened. A concurrency group cancels superseded waiting runs so
+#     exactly one current-main RC is pending at a time.
+#
+#   There is deliberately NO `schedule` trigger. Observed on run 40849745156
+#   (2026-10-29): GitHub attributes a scheduled run's actor to the user who
+#   last modified the workflow file on the default branch, NOT to
+#   github-actions[bot]. Every cron-created run was therefore un-approvable
+#   by the required reviewer, while the concurrency group's
+#   cancel-in-progress kept destroying the approvable bot-dispatched runs
+#   (run 40846653510). The green-main dispatch already covers every merge to
+#   main; a cron adds nothing except that deadlock.
 #
 # Publish ONLY trusted SHAs (main or reviewed branches). The gates (current
 # origin/main + 5/5 green checks) reject everything else.
@@ -31,10 +39,6 @@ on:
         description: "Full commit SHA to publish (defaults to the SHA this run was dispatched on)"
         required: false
         default: ""
-  schedule:
-    # Bot-actor dispatch window; the gates make off-main runs inert and the
-    # concurrency group supersedes stale waiters.
-    - cron: "*/30 * * * *"
 
 concurrency:
   group: release-candidate
