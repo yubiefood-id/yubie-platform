@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { TransactionSql } from "postgres";
-import { canOperate, assertOperationsApproval, validateVerifiedInventoryIntake, assertFulfillmentTransition, assertFullRefund, productFamilies, type StaffRole, type OperationsPermission, type OperationsKind, type FulfillmentStage, type VerifiedInventoryIntake } from "@yubie/domain";
+import { canOperate, assertOperationsApproval, validateVerifiedInventoryIntake, assertFulfillmentTransition, assertFullRefund, productFamilies, initialStaffApprovalMatches, type InitialStaffApproval, type StaffRole, type OperationsPermission, type OperationsKind, type FulfillmentStage, type VerifiedInventoryIntake } from "@yubie/domain";
 import type { OperationsPort, OperationDraft, OperationRecord, VersionedOperation, FulfillmentOperation, ShippingPolicyDraft } from "@yubie/application";
 import { operationsCreateSchema, operationsApprovalSchema, fulfillmentCommandSchema, operationNoteSchema, refundExecutionSchema, staffGrantSchema } from "@yubie/validation";
 import type { Database } from "../client.js";
@@ -22,7 +22,26 @@ const approvePermission: Record<OperationsKind, OperationsPermission> = { invent
 
 /** All writes re-read staff grants inside the same transaction as state+audit+outbox. */
 export class PostgresOperations implements OperationsPort {
-  constructor(private readonly database: Database, private readonly options: { writesEnabled: boolean; checkoutAdmission: string; environment?: string }) {}
+  constructor(private readonly database: Database, private readonly options: { writesEnabled: boolean; checkoutAdmission: string; environment?: string; staffBootstrapContext?: { sourceSha: string; audienceSha256: string } }) {}
+  async bootstrapFirstAdmin(identity: { subject: string; emailSha256: string }, approval: InitialStaffApproval): Promise<boolean> {
+    const context = this.options.staffBootstrapContext;
+    const eligible = () => Boolean(context && identity.subject && identity.subject.length <= 200
+      && initialStaffApprovalMatches(approval, { ...context, emailSha256: identity.emailSha256, nowMs: Date.now() })
+      && !(this.options.environment === "production" && /TEST_ONLY/.test(JSON.stringify(approval))));
+    if (!eligible()) return false;
+    // This one-time root-approved identity claim is independent of ordinary ops writes.
+    // No grants are ever derived from an email domain, request role, or first arrival.
+    return Boolean(await this.database.client.begin(async tx => {
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended('ops-staff-grants',0))`;
+      if (!eligible()) return false;
+      if ((await tx`SELECT subject FROM ops_staff_grants LIMIT 1`).length
+        || (await tx`SELECT actor FROM ops_command_receipts WHERE idempotency_key='FIRST_ADMIN_BOOTSTRAP' LIMIT 1`).length) return false;
+      await tx`INSERT INTO ops_staff_grants(subject,role,granted_by,approval_ref,granted_at) VALUES(${identity.subject},'admin',${approval.approvedBy},${approval.approvalRef},now())`;
+      await this.audit(tx, identity.subject, "ops.first_admin_bootstrap", approval.approvalId, { approvedBy: approval.approvedBy, approvalRef: approval.approvalRef, sourceSha: approval.sourceSha, approvalSha256: hash(approval) });
+      await tx`INSERT INTO ops_command_receipts(actor,idempotency_key,request_hash,result_json,created_at) VALUES(${identity.subject},'FIRST_ADMIN_BOOTSTRAP',${hash(approval)},${JSON.stringify({ approvalId: approval.approvalId, role: "admin" })}::jsonb,now())`;
+      return true;
+    }));
+  }
   async rolesFor(subject: string): Promise<StaffRole[]> {
     const rows = await this.database.client<{ role: StaffRole }[]>`SELECT role FROM ops_staff_grants WHERE subject=${subject} AND revoked_at IS NULL ORDER BY role`;
     return rows.map(row => row.role);

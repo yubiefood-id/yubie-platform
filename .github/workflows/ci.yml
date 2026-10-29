@@ -90,6 +90,8 @@ jobs:
       - run: npm run test --workspace @yubie/worker
       - run: npm run test --workspace @yubie/bot
       - run: npm run test --workspace @yubie/integrations
+      - name: Verify staff identity and audited operations over HTTPS and PostgreSQL
+        run: npm run test --workspace @yubie/admin
       - name: Verify private admin against isolated PostgreSQL in Chromium
         run: |
           npx playwright install --with-deps chromium
