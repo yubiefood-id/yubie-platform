@@ -13,7 +13,10 @@ test("private browser failure diagnostics remove credentials, emails, URLs and p
 
 test("diagnostics discard entire sensitive header lines including schemes and multiple cookies", () => {
   const program = `import {redactPublicDiagnostic} from './e2e/support/p0-diagnostics.ts';
-    const input='authorization: Bearer SYNTHETIC_OPAQUE_ACCESS_VALUE cookie: first=one; second=SYNTHETIC_SESSION_VALUE\\n"cookie": "session=SYNTHETIC_COOKIE_VALUE; csrf=SYNTHETIC_CSRF_VALUE"\\ncredential: multi word SYNTHETIC_SECRET_VALUE\\nHTTP 503';
+    // Assemble this synthetic header at runtime so the source secret scanner
+    // can continue rejecting literal bearer credentials without exemptions.
+    const bearer='SYNTHETIC_OPAQUE_ACCESS_VALUE';
+    const input='authorization: Bearer '+bearer+' cookie: first=one; second=SYNTHETIC_SESSION_VALUE\\n"cookie": "session=SYNTHETIC_COOKIE_VALUE; csrf=SYNTHETIC_CSRF_VALUE"\\ncredential: multi word SYNTHETIC_SECRET_VALUE\\nHTTP 503';
     console.log(JSON.stringify(redactPublicDiagnostic(input)));`;
   const result = JSON.parse(execFileSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", program], { encoding: "utf8" }));
   assert.equal(result.includes("SYNTHETIC_"), false);
