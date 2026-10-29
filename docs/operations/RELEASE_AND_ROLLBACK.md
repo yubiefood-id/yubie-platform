@@ -62,6 +62,54 @@ dengan approval file mount read-only ke parent root-private. Runtime web tetap
 UID 10001. Kredensial Google staf dan daftar subject asli belum dapat diturunkan
 dari software; pengujian identitas sintetis tidak menggantikan acceptance nyata.
 
+## Admin pertama melalui identitas Google terverifikasi
+
+Jika owner menyetujui satu akun Google melalui email sebelum `sub` diketahui,
+gunakan approval awal yang dibatasi ke email tepat, audience staf, dan SHA image.
+Tidak ada endpoint bootstrap anonim. Callback `/auth/google` tetap memverifikasi
+signature RS256, issuer Google, audience, expiry dan `email_verified` terlebih
+dahulu. Backend mengambil `sub` dari hasil verifikasi tersebut; email atau role
+dari body request tidak dapat menggantikannya.
+
+Root menyiapkan JSON berikut pada direktori TLS yang sudah di-mount read-only.
+File harus root:10001 mode 0640 (atau root mode 0600 pada pemeriksaan operator),
+single-link, tanpa symlink, dengan seluruh parent root-controlled dan tidak
+group/other writable. Jangan memasukkan email, client secret atau token ke Git.
+
+```json
+{
+  "action": "bootstrap_first_named_admin",
+  "role": "admin",
+  "approvalId": "REQUIRED_UNIQUE_APPROVAL_ID",
+  "sourceSha": "REQUIRED_REVIEWED_40_HEX_SOURCE_SHA",
+  "audienceSha256": "REQUIRED_SHA256_OF_EXACT_STAFF_CLIENT_ID",
+  "emailSha256": "REQUIRED_SHA256_OF_TRIMMED_LOWERCASE_APPROVED_EMAIL",
+  "approvedBy": "REQUIRED_GENUINE_OWNER",
+  "approvalRef": "REQUIRED_GENUINE_OWNER_INSTRUCTION",
+  "notBefore": "REQUIRED_CURRENT_UTC",
+  "expiresAt": "REQUIRED_UTC_AT_MOST_ONE_HOUR_LATER"
+}
+```
+
+Set `ADMIN_INITIAL_STAFF_APPROVAL_FILE=/run/secrets/first-admin-approval.json` pada
+minimal env admin. Loader menolak source/audience yang berbeda. Window temporal
+diverifikasi lagi pada transaksi klaim. Pertahankan `ADMIN_WRITES_ENABLED=false`
+dan checkout disabled saat acceptance awal; bootstrap tidak membuka operasi lain.
+
+Pada login sah pertama yang cocok, transaksi memakai lock `ops-staff-grants`,
+memastikan belum ada grant staf maupun receipt bootstrap, lalu menyimpan hanya
+role admin, audit, outbox dan receipt append-only secara atomik di schema 0026.
+Dua tab tidak menggandakan grant. Role admin tidak mencakup QC/Finance; role
+tambahan hanya melalui persetujuan staf yang eksplisit. Receipt mencegah bootstrap
+dibuka kembali walaupun data grant dihapus saat recovery. Expiry approval tidak
+menghapus grant sah yang sudah dibuat. Jangan memperpanjang window atau mengganti
+akun tanpa persetujuan owner yang nyata. Setelah klaim, nonaktifkan konfigurasi
+approval pada rollout admin berikutnya; autentikasi normal memakai grant DB.
+
+Rollback perubahan admin: bekukan operations writes, pertahankan grant/audit/
+receipt yang sah, dan gunakan image admin kompatibel schema 0026. API/worker dan
+provider pembayaran tetap berjalan. Tidak ada migrasi atau reseed untuk flow ini.
+
 ## Rollback
 
 Bekukan admission terlebih dahulu jika ada insiden pembayaran. Pertahankan PSP

@@ -3,6 +3,7 @@ import { issueAdminSession, readAdminSession } from "./session.js";
 import { createHash, randomBytes } from "node:crypto";
 import type { AuditRepository, GoogleCredentialVerifier, OperationsPort } from "@yubie/application";
 import { handleOperationsRequest } from "./operations-http.js";
+import type { InitialStaffApproval } from "@yubie/domain";
 
 export { issueAdminSession };
 
@@ -43,6 +44,7 @@ export interface AdminServerOptions {
   nowMs: number;
   readers?: AdminReaders;
   googleClientId?: string;
+  initialStaffApproval?: () => InitialStaffApproval | null;
   verifier?: GoogleCredentialVerifier;
   staffRoles?: Readonly<Record<string, AdminRole>>;
   audit?: AuditRepository;
@@ -95,7 +97,15 @@ export async function handleAdminRequest(request: Request, options: AdminServerO
       if (!input || typeof input !== "object" || !("credential" in input) || typeof input.credential !== "string") return json({ ok: false, code: "VALIDATION" }, { status: 400 });
       const identity = await options.verifier.verify(input.credential);
       if (!identity.ok) return json({ ok: false, code: "UNAUTHORIZED" }, { status: 401 });
-      const role = options.operations ? (await options.operations.rolesFor(identity.value.sub))[0] : options.staffRoles && Object.hasOwn(options.staffRoles, identity.value.sub) ? options.staffRoles[identity.value.sub] : undefined;
+      let role = options.operations ? (await options.operations.rolesFor(identity.value.sub))[0] : options.staffRoles && Object.hasOwn(options.staffRoles, identity.value.sub) ? options.staffRoles[identity.value.sub] : undefined;
+      if (!role && identity.value.emailVerified === true && identity.value.email && options.operations?.bootstrapFirstAdmin && options.initialStaffApproval) {
+        const approval = options.initialStaffApproval();
+        if (approval) {
+          const emailSha256 = createHash("sha256").update(identity.value.email.trim().toLowerCase()).digest("hex");
+          await options.operations.bootstrapFirstAdmin({ subject: identity.value.sub, emailSha256 }, approval);
+          role = (await options.operations.rolesFor(identity.value.sub))[0];
+        }
+      }
       if (!role || identity.value.emailVerified !== true) return json({ ok: false, code: "FORBIDDEN" }, { status: 403 });
       await auditRead(options, identity.value.sub, "admin.login", "/auth/google");
       const token = issueAdminSession({ sub: identity.value.sub, role, exp: options.nowMs + 15 * 60_000 }, options.sessionSecret);

@@ -3,9 +3,11 @@ import { createServer as createSecureServer } from "node:https";
 import { readFile } from "node:fs/promises";
 import { resolve, sep, extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import { createDatabase, closeDatabase, PostgresAdminReaders, PostgresAdminSessionRepository, PostgresAuditRepository, PostgresOperations } from "@yubie/persistence";
 import { GoogleIdTokenVerifier } from "@yubie/integrations";
 import { handleAdminRequest, type AdminServerOptions } from "./server.js";
+import { loadInitialStaffApproval } from "./initial-staff-approval.js";
 
 const securityHeaders = {
   "cache-control": "no-store",
@@ -78,13 +80,16 @@ export function adminRuntimeConfig(env: NodeJS.ProcessEnv) {
 
 export async function startAdmin(env: NodeJS.ProcessEnv = process.env) {
   const { origin, port, host, writesEnabled, checkoutAdmission } = adminRuntimeConfig(env);
+  const staffBootstrapContext = { sourceSha: env.RELEASE_SHA || "dev", audienceSha256: createHash("sha256").update(env.ADMIN_GOOGLE_CLIENT_ID!).digest("hex") };
+  const approvalPath = env.ADMIN_INITIAL_STAFF_APPROVAL_FILE;
+  if (approvalPath) loadInitialStaffApproval(approvalPath, staffBootstrapContext);
   const database = createDatabase(env.DATABASE_URL!);
   const verifier = new GoogleIdTokenVerifier({ clientId: env.ADMIN_GOOGLE_CLIENT_ID! });
   const readers = new PostgresAdminReaders(database);
   const audit = new PostgresAuditRepository(database);
   const sessions = new PostgresAdminSessionRepository(database);
-  const operations = new PostgresOperations(database, { writesEnabled, checkoutAdmission, ...(env.YUBIE_ENV ? { environment: env.YUBIE_ENV } : {}) });
-  const options = () => ({ operations, releaseSha: env.RELEASE_SHA || "dev", ready: async () => { await database.client`SELECT 1 FROM ops_staff_grants LIMIT 1`; }, sessionSecret: env.ADMIN_SESSION_SECRET!, googleClientId: env.ADMIN_GOOGLE_CLIENT_ID!, verifier, readers, audit, sessions, nowMs: Date.now() });
+  const operations = new PostgresOperations(database, { writesEnabled, checkoutAdmission, staffBootstrapContext, ...(env.YUBIE_ENV ? { environment: env.YUBIE_ENV } : {}) });
+  const options = () => ({ operations, releaseSha: env.RELEASE_SHA || "dev", ready: async () => { await database.client`SELECT 1 FROM ops_staff_grants LIMIT 1`; }, sessionSecret: env.ADMIN_SESSION_SECRET!, googleClientId: env.ADMIN_GOOGLE_CLIENT_ID!, ...(approvalPath ? { initialStaffApproval: () => loadInitialStaffApproval(approvalPath, staffBootstrapContext) } : {}), verifier, readers, audit, sessions, nowMs: Date.now() });
   const handler = adminHttpHandler(options, origin.origin, fileURLToPath(new URL("./public/", import.meta.url)));
   const server = env.ADMIN_TLS_CERT_FILE && env.ADMIN_TLS_KEY_FILE
     ? createSecureServer({ cert: await readFile(env.ADMIN_TLS_CERT_FILE), key: await readFile(env.ADMIN_TLS_KEY_FILE), minVersion: "TLSv1.2" }, handler)

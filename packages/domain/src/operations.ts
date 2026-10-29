@@ -2,6 +2,29 @@ import { validateInventoryOnboarding, type InventoryOnboardingInput } from "./in
 
 export const STAFF_ROLES = ["viewer", "operator", "qc", "fulfillment", "finance", "admin"] as const;
 export type StaffRole = typeof STAFF_ROLES[number];
+export interface InitialStaffApproval {
+  action: "bootstrap_first_named_admin"; role: "admin"; approvalId: string;
+  sourceSha: string; audienceSha256: string; emailSha256: string;
+  approvedBy: string; approvalRef: string; notBefore: string; expiresAt: string;
+}
+export function validateInitialStaffApproval(value: unknown): asserts value is InitialStaffApproval {
+  const input = value as Partial<InitialStaffApproval> | null;
+  if (!input || input.action !== "bootstrap_first_named_admin" || input.role !== "admin"
+    || !/^[A-Za-z0-9_-]{1,80}$/.test(input.approvalId ?? "") || !/^[a-f0-9]{40}$/.test(input.sourceSha ?? "")
+    || !/^[a-f0-9]{64}$/.test(input.audienceSha256 ?? "") || !/^[a-f0-9]{64}$/.test(input.emailSha256 ?? "")
+    || typeof input.approvedBy !== "string" || !input.approvedBy.trim() || input.approvedBy.length > 100
+    || typeof input.approvalRef !== "string" || !input.approvalRef.trim() || input.approvalRef.length > 300
+    || containsPendingEvidence(input)) throw new Error("A source-bound named first-admin approval is required");
+  const utc = /^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|\+00:00)$/;
+  const start = Date.parse(input.notBefore ?? ""), end = Date.parse(input.expiresAt ?? "");
+  if (!utc.test(input.notBefore ?? "") || !utc.test(input.expiresAt ?? "") || !Number.isFinite(start) || !Number.isFinite(end)
+    || end <= start || end - start > 3_600_000) throw new Error("First-admin approval requires a UTC window of at most one hour");
+}
+export function initialStaffApprovalMatches(value: unknown, context: { sourceSha: string; audienceSha256: string; emailSha256: string; nowMs: number }): boolean {
+  try { validateInitialStaffApproval(value); } catch { return false; }
+  return value.sourceSha === context.sourceSha && value.audienceSha256 === context.audienceSha256 && value.emailSha256 === context.emailSha256
+    && Number.isFinite(context.nowMs) && Date.parse(value.notBefore) <= context.nowMs && context.nowMs < Date.parse(value.expiresAt);
+}
 export type OperationsPermission =
   | "orders:read" | "payments:read" | "inventory:read" | "inventory:propose" | "inventory:approve" | "inventory:apply"
   | "shipping:read" | "shipping:propose" | "shipping:approve" | "shipping:apply"

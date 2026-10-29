@@ -1,4 +1,4 @@
-import type { StaffRole, VerifiedInventoryIntake, FulfillmentStage, OperationsKind } from "@yubie/domain";
+import type { StaffRole, VerifiedInventoryIntake, FulfillmentStage, OperationsKind, InitialStaffApproval } from "@yubie/domain";
 
 export interface ShippingPolicyDraft {
   scope: "whole_city";
@@ -16,6 +16,8 @@ export interface OperationRecord {
 export interface VersionedOperation { expectedVersion: number; reason: string }
 export interface FulfillmentOperation { expectedVersion: number; stage: FulfillmentStage; reason: string; carrier?: string | undefined; trackingNumber?: string | undefined }
 export interface OperationsPort {
+  /** Internal verified-identity boundary only; never a public bootstrap route. */
+  bootstrapFirstAdmin?(identity: { subject: string; emailSha256: string }, approval: InitialStaffApproval): Promise<boolean>;
   stock(subject: string): Promise<unknown[]>;
   freezeCheckout(subject: string, key: string, input: { reason: string }): Promise<unknown>;
   staffGrant(subject: string, key: string, input: { subject: string; role: StaffRole; action: "grant" | "revoke"; approvalRef: string; reason: string }): Promise<unknown>;
