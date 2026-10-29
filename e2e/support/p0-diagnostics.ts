@@ -5,7 +5,9 @@ import type { BrowserContext, TestInfo } from '@playwright/test';
 
 export function redactPublicDiagnostic(value: string): string {
   return value.replace(/https?:\/\/[^\s"<>]+/g, '[URL]').replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[EMAIL]')
-    .replace(/\b(authorization|cookie|token|credential|secret|signature)\s*[:=]\s*[^\s,;]+/ig, '$1=[REDACTED]')
+    // Discard the remainder of a sensitive line: schemes, quoted values and
+    // multiple cookies can contain whitespace or separators inside the value.
+    .replace(/\b(authorization|cookie|token|credential|secret|signature)["']?\s*[:=][^\r\n]*/ig, '$1=[REDACTED]')
     .replace(/[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/g, '[JWT]')
     .replace(/\+?\d[\d ()-]{8,}\d/g, '[PHONE]').slice(0, 1400);
 }
