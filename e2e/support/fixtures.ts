@@ -3,6 +3,7 @@ import { continueWithScopedAccess } from "./access-routing.js";
 import { testEnvironment } from "./environment.js";
 import {syntheticCommerceReads} from "./synthetic-commerce.js";
 import { observePublicSmoke } from "./p0-diagnostics.js";
+import { dismissPromotionForOrigin } from "./public-storage.js";
 
 export const test = base.extend<{ safety: void }>({
   safety: [async ({ context }, use, info) => {
@@ -26,7 +27,7 @@ export const test = base.extend<{ safety: void }>({
     // mock/verified-promotion.spec; everywhere else it would only sit in the
     // way of clicks, so dismiss it for the session (inert in the catalog tier
     // where the widgets never mount).
-    await context.addInitScript(() => sessionStorage.setItem("yubie.promo.dismissed.v1", "1"));
+    await context.addInitScript(dismissPromotionForOrigin, environment.baseURL);
     await use();
     finishDiagnostics();
   }, { auto: true }],
