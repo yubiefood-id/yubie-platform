@@ -2,9 +2,11 @@ import { test as base, expect } from "@playwright/test";
 import { continueWithScopedAccess } from "./access-routing.js";
 import { testEnvironment } from "./environment.js";
 import {syntheticCommerceReads} from "./synthetic-commerce.js";
+import { observePublicSmoke } from "./p0-diagnostics.js";
 
 export const test = base.extend<{ safety: void }>({
-  safety: [async ({ context }, use) => {
+  safety: [async ({ context }, use, info) => {
+    const finishDiagnostics = observePublicSmoke(context, info);
     const environment = testEnvironment();
     if (environment.remote) {
       // Service credentials are added only to the approved storefront origin,
@@ -26,6 +28,7 @@ export const test = base.extend<{ safety: void }>({
     // where the widgets never mount).
     await context.addInitScript(() => sessionStorage.setItem("yubie.promo.dismissed.v1", "1"));
     await use();
+    finishDiagnostics();
   }, { auto: true }],
 });
 
