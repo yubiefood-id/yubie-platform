@@ -103,6 +103,74 @@ test("a non-sandbox redirect is not returned as a payable URL", async () => {
   assert.equal(result.error.code, "unavailable");
 });
 
+// iPaymu decoupled its hosted checkout page from the API host: production
+// POST /api/v2/payment on my.ipaymu.com returns Data.Url on
+// https://payment.ipaymu.com/#/<SessionID> (observed live 2026-10-30; the
+// previous single-host allowlist rejected real paying checkouts as
+// "unavailable" and parked them as ambiguous creates).
+function productionProvider(fetchFn) {
+  return new IpaymuPaymentProvider({
+    va: "prod-va",
+    apiKey: "prod-key",
+    env: "production",
+    apiBaseUrl: "https://my.ipaymu.com",
+    notifyUrl: "https://api.yubiefood.com/v1/webhooks/ipaymu",
+    fetchFn,
+    now: () => NOW,
+  });
+}
+
+test("production create accepts the payment.ipaymu.com checkout page", async () => {
+  const session = productionProvider(async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return { Status: 200, Data: { SessionID: "sess-prod-1", Url: "https://payment.ipaymu.com/#/sess-prod-1" } };
+    },
+  }));
+  const result = await session.createPaymentSession(input);
+  assert.equal(result.ok, true);
+  assert.equal(result.value.providerSessionId, "sess-prod-1");
+  assert.equal(result.value.redirectUrl, "https://payment.ipaymu.com/#/sess-prod-1");
+});
+
+test("production create still accepts a my.ipaymu.com redirect URL", async () => {
+  const session = productionProvider(async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return { Status: 200, Data: { SessionID: "sess-prod-2", Url: "https://my.ipaymu.com/payment/sess-prod-2" } };
+    },
+  }));
+  const result = await session.createPaymentSession(input);
+  assert.equal(result.ok, true);
+  assert.equal(result.value.redirectUrl, "https://my.ipaymu.com/payment/sess-prod-2");
+});
+
+test("the checkout host payment.ipaymu.com is never accepted as the API origin", () => {
+  assert.throws(() => new IpaymuPaymentProvider({
+    va: "prod-va",
+    apiKey: "prod-key",
+    env: "production",
+    apiBaseUrl: "https://payment.ipaymu.com",
+    notifyUrl: "https://api.yubiefood.com/v1/webhooks/ipaymu",
+    now: () => NOW,
+  }));
+});
+
+test("a sandbox session URL is not accepted in production", async () => {
+  const session = productionProvider(async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return { Status: 200, Data: { SessionID: "sess-x", Url: "https://sandbox.ipaymu.com/payment/sess-x" } };
+    },
+  }));
+  const result = await session.createPaymentSession(input);
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "unavailable");
+});
+
 test("cancel is unsupported and session lookup is not sent to the transaction API", async () => {
   let calls = 0;
   const session = provider(async () => {
