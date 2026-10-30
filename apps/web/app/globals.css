@@ -1111,3 +1111,10 @@ h1, h2, h3, p { margin-top: 0; }
 .welcome-offer .offer-feedback { margin: 1rem 0 0; font-size: .85rem; }
 .welcome-offer .offer-feedback a { font-weight: 750; }
 .welcome-offer .text-button { padding: .55rem .15rem; }
+
+/* Checkout free-shipping quick picks and location activation */
+.coverage-chips { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .6rem; }
+.coverage-chips .chip, .checkout-form .location-activate { cursor: pointer; }
+.chip { display: inline-flex; align-items: center; gap: .3rem; padding: .4rem .75rem; font-size: .74rem; font-weight: 700; border: 1px solid var(--green, currentColor); border-radius: 999px; background: color-mix(in srgb, var(--yubie-green, #2f8f4e) 10%, transparent); color: inherit; }
+.location-activate { min-height: 42px; margin-bottom: .4rem; }
+.free-shipping { opacity: .9; }
