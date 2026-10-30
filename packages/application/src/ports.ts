@@ -361,7 +361,7 @@ export interface GrowthRepository {
 
 /** Repositories sharing one transaction, handed to TransactionManager work. */
 export interface TransactionalRepositories {
-  shipping?: { authorize(city: string, now: string): Promise<{policy:"free_promotional";amount:number;reason:string}|null> };
+  shipping?: { authorize(city: string, now: string): Promise<{policy:"free_promotional";amount:number;reason:string}|null>; listCoverage?(now: string): Promise<{policy:"free_promotional";amount:number;cities:string[]}[]> };
   customerIdentity?: import("./ports/customer-identity.js").CustomerIdentityRepository;
   customerAddresses?: import("./ports/customer-address.js").CustomerAddressRepository;
   promotions?: import("./ports/promotions.js").PromotionRepository;

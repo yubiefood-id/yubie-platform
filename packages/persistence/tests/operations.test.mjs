@@ -250,3 +250,20 @@ test("PG: manual full refund never claims a provider refund or restocks without 
  assert.equal((await db.client`SELECT status FROM orders WHERE id='TEST_ONLY_ORDER'`)[0].status,'paid');
  assert.equal((await db.client`SELECT count(*)::int n FROM inventory_movements`)[0].n,0);
 }));
+test("PG: shipping coverage lists only active approved city strings without provenance",{skip:!process.env.DATABASE_URL},async()=>isolated(async(db,ops)=>{
+ const now=Date.now();
+ const payload={scope:'whole_city',policy:'free_promotional',cities:['Kabupaten Bogor',' test-only-city '],amount:0,serviceCoverage:'TEST_ONLY_SERVICE',costOwner:'TEST_ONLY_FINANCE',startsAt:new Date(now-60000).toISOString(),endsAt:new Date(now+3600000).toISOString(),approvalRef:'TEST_ONLY_SHIPPING_COVERAGE',verification:{status:'VERIFIED',evidenceRef:'TEST_ONLY_DOC',verifiedBy:'finance1',verifiedAt:new Date(now).toISOString()}};
+ const draft=await ops.create('counter','ship_cov',{kind:'shipping_policy',payload});
+ await ops.approve('finance1','ship_cov_ap',draft.id,{expectedVersion:1,reason:'TEST_ONLY'});
+ await ops.apply('counter','ship_cov_go',draft.id,{expectedVersion:2,reason:'TEST_ONLY'});
+ const repo=new PostgresShippingPolicyRepository(db);
+ let coverage=await repo.listCoverage(new Date(now).toISOString());
+ assert.equal(coverage.length,1);
+ assert.equal(coverage[0].policy,'free_promotional');
+ assert.equal(coverage[0].amount,0);
+ assert.deepEqual(coverage[0].cities,['Kabupaten Bogor','test-only-city']);
+ await db.client`UPDATE shipping_policy_approvals SET ends_at=now()-interval '1 second'`;
+ coverage=await repo.listCoverage(new Date(now).toISOString());
+ assert.equal(coverage.length,0);
+ assert.equal(JSON.stringify(coverage).includes('TEST_ONLY_SERVICE'),false);
+}));

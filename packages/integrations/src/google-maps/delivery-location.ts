@@ -1,10 +1,41 @@
-import type { DeliveryLocationProvider, DeliveryLocationSelection, DeliveryLocationSuggestion } from "@yubie/application";
+import type { DeliveryLocationAddress, DeliveryLocationProvider, DeliveryLocationSelection, DeliveryLocationSuggestion } from "@yubie/application";
 type JsonObject = Record<string, unknown>;
 const object = (v: unknown): JsonObject | null => typeof v === "object" && v !== null && !Array.isArray(v) ? v as JsonObject : null;
 const placeId = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{4,256}$/.test(v);
 const token = (v: string) => /^[a-f0-9-]{36}$/i.test(v);
 const point = (latitude: unknown, longitude: unknown): boolean => typeof latitude === "number" && Number.isFinite(latitude) && Math.abs(latitude) <= 90 && typeof longitude === "number" && Number.isFinite(longitude) && Math.abs(longitude) <= 180;
 const label = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 500;
+
+/**
+ * Best-effort structured Indonesian administrative parts from Google address
+ * components. Handles both wire shapes — legacy Geocoding API
+ * ({types, long_name}) and Places API (New) ({types, text}) — and keeps the
+ * provider's `id`-language naming (e.g. administrative_area_level_2 long name
+ * "Kabupaten Bogor"), because shipping coverage is matched against the exact
+ * city strings the operator approved.
+ */
+function parseAddressComponents(components: unknown): DeliveryLocationAddress | undefined {
+  if (!Array.isArray(components)) return undefined;
+  const address: DeliveryLocationAddress = {};
+  const part = (value: string | undefined): string | undefined => {
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    return trimmed.length > 0 && trimmed.length <= 100 ? trimmed : undefined;
+  };
+  for (const entry of components) {
+    const component = object(entry);
+    if (!component || !Array.isArray(component.types)) continue;
+    const value = part(typeof component.long_name === "string" ? component.long_name : typeof component.text === "string" ? component.text : undefined);
+    if (!value) continue;
+    const types = component.types.filter((t): t is string => typeof t === "string");
+    if (!address.province && types.includes("administrative_area_level_1")) address.province = value;
+    else if (!address.city && types.includes("administrative_area_level_2")) address.city = value;
+    else if (!address.district && types.includes("administrative_area_level_3")) address.district = value;
+    else if (!address.postalCode && types.includes("postal_code") && value.length <= 10) address.postalCode = value;
+  }
+  const structured = Object.keys(address).length > 0 ? address : undefined;
+  return structured;
+}
+
 
 /** Fixed Google endpoints only. No response, address, key or coordinate is logged. */
 export class GoogleDeliveryLocationProvider implements DeliveryLocationProvider {
@@ -43,7 +74,8 @@ export class GoogleDeliveryLocationProvider implements DeliveryLocationProvider 
     const country = Array.isArray(data.addressComponents) && data.addressComponents.some(value => { const c = object(value); return Array.isArray(c?.types) && c.types.includes("country") && c.shortText === "ID"; });
     const location = object(data.location);
     if (!country || !location || !point(location.latitude, location.longitude) || !label(data.formattedAddress) || data.id !== input.placeId) return null;
-    return { label: data.formattedAddress, latitude: location.latitude as number, longitude: location.longitude as number, countryCode: "ID", placeId: input.placeId };
+    const address = parseAddressComponents(data.addressComponents);
+    return { label: data.formattedAddress, latitude: location.latitude as number, longitude: location.longitude as number, countryCode: "ID", placeId: input.placeId, ...(address ? { address } : {}) };
   }
   async reverse(input: { latitude: number; longitude: number }): Promise<DeliveryLocationSelection | null> {
     if (!point(input.latitude, input.longitude)) throw new Error("LOCATION_REQUEST_INVALID");
@@ -54,7 +86,10 @@ export class GoogleDeliveryLocationProvider implements DeliveryLocationProvider 
     for (const value of data.results.slice(0, 5)) {
       const result = object(value); if (!result || !Array.isArray(result.address_components)) continue;
       const country = result.address_components.some(v => { const c = object(v); return Array.isArray(c?.types) && c.types.includes("country") && c.short_name === "ID"; });
-      if (country && label(result.formatted_address)) return { latitude: input.latitude, longitude: input.longitude, label: result.formatted_address, countryCode: "ID", ...(placeId(result.place_id) ? { placeId: result.place_id } : {}) };
+      if (country && label(result.formatted_address)) {
+        const address = parseAddressComponents(result.address_components);
+        return { latitude: input.latitude, longitude: input.longitude, label: result.formatted_address, countryCode: "ID", ...(placeId(result.place_id) ? { placeId: result.place_id } : {}), ...(address ? { address } : {}) };
+      }
     }
     return null;
   }
