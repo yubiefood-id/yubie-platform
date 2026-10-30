@@ -17,10 +17,22 @@ function ipaymuHostForEnv(env: IpaymuEnvironment): string {
 }
 
 /**
- * Host trust for provider-returned redirect/session URLs: exact https host for
- * the selected environment, no embedded credentials. Path/query stay open
+ * Host trust for provider-returned redirect/session URLs: exact https hosts
+ * for the selected environment, no embedded credentials. Path/query stay open
  * because session URLs carry provider-generated paths and query parameters.
+ *
+ * Production allows TWO hosts: iPaymu decoupled its hosted checkout page from
+ * the API host — since at least 2026-10-30, `POST /api/v2/payment` on
+ * my.ipaymu.com returns `Data.Url` on `https://payment.ipaymu.com/#/<SessionID>`
+ * (verified live: two signed diagnostic creates plus two real checkouts whose
+ * responses were rejected here). Both hosts are official iPaymu origins; the
+ * API origin itself stays pinned to my.ipaymu.com by isIpaymuApiOrigin.
  */
+const IPAYMU_REDIRECT_HOSTS: Record<IpaymuEnvironment, readonly string[]> = {
+  production: ["my.ipaymu.com", "payment.ipaymu.com"],
+  sandbox: ["sandbox.ipaymu.com"],
+};
+
 export function isIpaymuRedirectUrl(url: string, env: IpaymuEnvironment): boolean {
   try {
     const parsed = new URL(url);
@@ -28,7 +40,7 @@ export function isIpaymuRedirectUrl(url: string, env: IpaymuEnvironment): boolea
       parsed.protocol === "https:" &&
       parsed.username === "" &&
       parsed.password === "" &&
-      parsed.host === ipaymuHostForEnv(env)
+      IPAYMU_REDIRECT_HOSTS[env].includes(parsed.host)
     );
   } catch {
     return false;
@@ -37,14 +49,24 @@ export function isIpaymuRedirectUrl(url: string, env: IpaymuEnvironment): boolea
 
 /**
  * Strict origin check for the configured API base URL: it must equal the
- * official origin for the selected environment with no credentials, port,
+ * official API origin for the selected environment with no credentials, port,
  * path, query, or fragment. Cross-environment origins are rejected so sandbox
- * credentials can never be sent to the live host and vice versa.
+ * credentials can never be sent to the live host and vice versa. Deliberately
+ * NOT broadened with the redirect hosts: requests are only ever sent to the
+ * single official API host.
  */
 export function isIpaymuApiOrigin(url: string, env: IpaymuEnvironment): boolean {
   try {
     const parsed = new URL(url);
-    return isIpaymuRedirectUrl(url, env) && parsed.pathname === "/" && parsed.search === "" && parsed.hash === "";
+    return (
+      parsed.protocol === "https:" &&
+      parsed.username === "" &&
+      parsed.password === "" &&
+      parsed.host === ipaymuHostForEnv(env) &&
+      parsed.pathname === "/" &&
+      parsed.search === "" &&
+      parsed.hash === ""
+    );
   } catch {
     return false;
   }
