@@ -1,15 +1,15 @@
 # Paket Verifikasi Merchant iPaymu — Halaman Legal & Identitas Usaha
 
-Tanggal: 2026-10-31 (UTC) · Cabang: `feat/ipaymu-merchant-compliance-pages` · Dokumen ini adalah paket operator untuk pengajuan verifikasi merchant iPaymu serta gerbang rilis yang menyertainya.
+Tanggal: 2026-10-31 (UTC) · Sumber: PR #62 (merge commit `f38455d` di `main`, basis `d8a660d`) · RC: run [41190019949](https://github.com/yubiefood-id/yubie-platform/actions/runs/41190019949) — **menunggu approval lingkungan `staging` dari owner** · Dokumen ini adalah paket operator untuk pengajuan verifikasi merchant iPaymu serta gerbang rilis yang menyertainya.
 
 ## 1. Status (harus dibaca dulu)
 
 | Tahap | Status | Bukti |
 |---|---|---|
-| IMPLEMENTED | YA — 5 halaman legal + footer + link checkout + modul identitas | Kode pada cabang fitur |
-| TESTED | YA — `npm run check` hijau; `test:catalog` terverifikasi; e2e mock+catalog lulus | log CI pada PR |
-| MERGED | Menunggu review + 5 check PR | tautan PR (lihat laporan sesi) |
-| RC | `commerce-release-<SHA>` setelah merge + approval staging | workflow release-candidate |
+| IMPLEMENTED | YA — 5 halaman legal + footer + link checkout + modul identitas | PR #62 merged (`f38455d`) |
+| TESTED | YA — 5 check PR hijau; `npm run check` hijau; catalog artifact terverifikasi; e2e mock 126/126 + catalog 96/96 lokal, browser job CI penuh hijau | PR #62 checks + run CI main 41189081453 success |
+| MERGED | YA — `f38455d` di `main`, CI main hijau | run 41189081453 |
+| RC | MENUNGGU approval `staging` → akan menerbitkan `commerce-release-f38455d` | run 41190019949 (waiting) |
 | DEPLOYED | BELUM — terblokir gerbang identitas + approval rilis frontend terpisah | lihat §4 |
 | IPAYMU-READY | BELUM — menunggu identitas terisi, deploy, dan verifikasi URL publik | lihat §6 |
 
@@ -71,7 +71,7 @@ Keamanan: jangan menyalin-buat commit berisi dokumen identitas (KTP, dsb.). Yang
 ## 5. Runbook rilis storefront (setelah identitas lengkap)
 
 1. Pastikan PR identitas sudah merge dan 5 check (`quality`, `persistence`, `security`, `browser`, `containers`) hijau di `main`.
-2. Terbitkan RC: jalankan workflow `release-candidate.yml` untuk SHA `main` → approval lingkungan `staging` → artifact `commerce-release-<SHA>` terbit.
+2. Terbitkan RC: jalankan workflow `release-candidate.yml` untuk SHA `main` → approval lingkungan `staging` → artifact `commerce-release-<SHA>` terbit. (Untuk rilis ini: setelah identitas terisi. RC `f38455d` yang saat ini menunggu TIDAK untuk di-deploy — identitasnya belum lengkap; boleh di-approve hanya untuk menerbitkan artifact, deploy tetap menunggu §4.)
 3. Minta **approval frontend terpisah** untuk digest sumber/artifact persis (aturan CONTROLLED_RELEASE — approval RC tidak mencakup deploy).
 4. Dari checkout bersih SHA tersebut:
    1. `npm ci`
