@@ -21,19 +21,19 @@ test('reverse preview returns only approved fields, excluding internal caller co
 });
 
 test('reverse preview exposes structured Indonesian administrative parts',async()=>{
- const provider=new integrations.GoogleDeliveryLocationProvider({apiKey:'synthetic',fetchFn:async()=>Response.json({status:'OK',results:[{formatted_address:'Jl. Contoh No. 1, Jatinangor, Kabupaten Bogor, Jawa Barat 16911',address_components:[
+ const provider=new integrations.GoogleDeliveryLocationProvider({apiKey:'synthetic',fetchFn:async()=>Response.json({status:'OK',results:[{formatted_address:'Jl. Contoh No. 1, Cibinong, Kabupaten Bogor, Jawa Barat 16911',address_components:[
   {types:['street_number'],long_name:'1'},{types:['route'],long_name:'Jalan Contoh'},
-  {types:['administrative_area_level_4'],long_name:'Jatinangor'},
-  {types:['administrative_area_level_3'],long_name:'Jatinangor'},
+  
+  {types:['administrative_area_level_3'],long_name:'Cibinong'},
   {types:['administrative_area_level_2'],long_name:'Kabupaten Bogor'},
   {types:['administrative_area_level_1'],long_name:'Jawa Barat'},
   {types:['postal_code'],long_name:'16911'},
   {types:['country'],short_name:'ID',long_name:'Indonesia'},
  ]}]})});
- const result=await provider.reverse({latitude:-6.36,longitude:107.17});
+ const result=await provider.reverse({latitude:-6.48,longitude:106.85});
  assert.equal(result.address.city,'Kabupaten Bogor');
  assert.equal(result.address.province,'Jawa Barat');
- assert.equal(result.address.district,'Jatinangor');
+ assert.equal(result.address.district,'Cibinong');
  assert.equal(result.address.postalCode,'16911');
 });
 

@@ -10,10 +10,10 @@ import {syntheticCommerceReads} from "../support/synthetic-commerce.js";
 const REVERSE_BODY = {
   ok: true,
   data: {
-    label: "Jl. Raya Jatinangor No. 1, Jatinangor, Kabupaten Bogor, Jawa Barat 16911",
-    latitude: -6.3676,
-    longitude: 107.1726,
-    address: { province: "Jawa Barat", city: "Kabupaten Bogor", district: "Jatinangor", postalCode: "16911" },
+    label: "Jl. Raya Cibinong No. 1, Cibinong, Kabupaten Bogor, Jawa Barat 16911",
+    latitude: -6.4817,
+    longitude: 106.8543,
+    address: { province: "Jawa Barat", city: "Kabupaten Bogor", district: "Cibinong", postalCode: "16911" },
   },
 };
 
@@ -22,7 +22,7 @@ test.beforeEach(async ({ page, context }) => {
   await page.addInitScript(() => sessionStorage.setItem("yubie.promo.dismissed.v1", "1"));
   await page.addInitScript(() => {
     Object.defineProperty(navigator.geolocation, "getCurrentPosition", {
-      value: (success: PositionCallback) => success({ coords: { latitude: -6.3676, longitude: 107.1726, accuracy: 30, altitude: null, altitudeAccuracy: null, heading: null, speed: null }, timestamp: Date.now() } as GeolocationPosition),
+      value: (success: PositionCallback) => success({ coords: { latitude: -6.4817, longitude: 106.8543, accuracy: 30, altitude: null, altitudeAccuracy: null, heading: null, speed: null }, timestamp: Date.now() } as GeolocationPosition),
       configurable: true,
     });
   });
@@ -53,7 +53,7 @@ test("activate location autofills the address and free-shipping city from the se
   await expect(page.getByRole("button", { name: /Gratis ongkir — Kabupaten Bogor/ })).toBeVisible();
   await page.getByRole("button", { name: "📍 Aktifkan lokasi saya" }).click();
 
-  await expect(page.getByRole("textbox", { name: "Alamat lengkap" })).toHaveValue(/Jatinangor/);
+  await expect(page.getByRole("textbox", { name: "Alamat lengkap" })).toHaveValue(/Cibinong/);
   await expect(page.getByRole("combobox", { name: "Kota", exact: true })).toHaveValue("Kabupaten Bogor");
   await expect(page.getByRole("textbox", { name: "Kode pos" })).toHaveValue("16911");
   await expect(page.getByText(/Lokasi terdeteksi \(±30 m\)/)).toBeVisible();
