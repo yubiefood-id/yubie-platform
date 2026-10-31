@@ -239,6 +239,7 @@ export function CheckoutView() {
           <fieldset disabled={admission!=="enabled"||busy}>
             <legend>3 · Pembayaran</legend>
             <p className="checkout-note">Anda akan diarahkan ke halaman pembayaran aman milik penyedia pembayaran untuk menyelesaikan transaksi.</p>
+            <p className="checkout-note">Dengan melanjutkan pemesanan, Anda menyetujui <Link href="/terms">Syarat &amp; Ketentuan Yubie</Link> dan telah membaca <Link href="/privacy">Kebijakan Privasi</Link> serta <Link href="/refund-policy">Kebijakan Pengembalian Dana</Link>.</p>
           </fieldset>
           {(errorMessage||quoteError)&&<p className="checkout-error" role="alert">{errorMessage??quoteError}</p>}
           {quote&&!quote.stockAvailable&&<p role="status">Stok item belum tersedia atau belum terverifikasi.</p>}

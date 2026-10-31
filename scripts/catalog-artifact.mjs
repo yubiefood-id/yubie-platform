@@ -6,7 +6,7 @@ import { productFamilies } from "@yubie/domain";
 
 export const CATALOG_ORIGIN = "https://yubiefood.com";
 export const CONTACT_EMAIL = "hello@yubiefood.com";
-export const publicCatalogRoutes = ["/", "/products", "/our-story", "/our-roots", "/impact", "/b2b", "/faq", "/privacy", "/terms", ...productFamilies.map((product) => `/products/${product.slug}`)];
+export const publicCatalogRoutes = ["/", "/products", "/our-story", "/our-roots", "/impact", "/b2b", "/faq", "/privacy", "/terms", "/refund-policy", "/contact", ...productFamilies.map((product) => `/products/${product.slug}`)];
 export const baseHeaders = {
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",

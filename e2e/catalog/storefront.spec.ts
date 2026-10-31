@@ -4,7 +4,7 @@ import { testEnvironment } from "../support/environment.js";
 import { variants, escapePattern } from "../support/catalog-variants.js";
 import { siteConfig } from "../../apps/web/config/site.js";
 
-const publicRoutes = ["/", "/products", "/our-story", "/our-roots", "/impact", "/b2b", "/faq", "/terms", "/privacy", "/products/yubie-flour", "/products/yubie-shake", "/products/yubie-ppang", "/products/yubie-mie"];
+const publicRoutes = ["/", "/products", "/our-story", "/our-roots", "/impact", "/b2b", "/faq", "/terms", "/privacy", "/refund-policy", "/contact", "/products/yubie-flour", "/products/yubie-shake", "/products/yubie-ppang", "/products/yubie-mie"];
 
 for (const path of publicRoutes) {
   test(`catalog route ${path} has honest content and no browser error`, async ({ page }) => {

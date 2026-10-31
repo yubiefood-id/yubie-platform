@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { test, expect, assertAppOrigin } from "../support/fixtures.js";
 import { testEnvironment } from "../support/environment.js";
 
-const publicRoutes = ["/", "/products", "/shop", "/our-story", "/our-roots", "/recipes", "/b2b", "/faq", "/impact", "/terms", "/privacy", "/cart", "/login"];
+const publicRoutes = ["/", "/products", "/shop", "/our-story", "/our-roots", "/recipes", "/b2b", "/faq", "/impact", "/terms", "/privacy", "/refund-policy", "/contact", "/cart", "/login"];
 for (const path of publicRoutes) {
   test(`public route ${path} renders without a browser exception`, async ({ page }) => {
     let errors = 0;
