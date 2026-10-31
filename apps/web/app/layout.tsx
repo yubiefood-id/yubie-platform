@@ -6,6 +6,7 @@ import { CartProvider } from "@/features/cart/cart-context";
 import { StorefrontWidgets } from "@/components/commerce/storefront-widgets";
 import { siteConfig } from "@/config/site";
 import { directCommerce } from "@/config/launch";
+import { merchantIdentity, merchantIdentityComplete } from "@/config/merchant-identity";
 import "./globals.css";
 
 const manrope = Manrope({ variable: "--font-sans", subsets: ["latin"] });
@@ -26,7 +27,28 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const jsonLd = { "@context": "https://schema.org", "@type": "Organization", name: "Yubie", slogan: "Rooted here. Made for now.", address: { "@type": "PostalAddress", addressLocality: "Bogor", addressCountry: "ID" } };
+  // Organization structured data uses only owner-verified merchant identity
+  // fields; unverifiable facts (street address, phone, legal name) stay out
+  // until the merchant identity is complete.
+  const verified = merchantIdentityComplete ? merchantIdentity : null;
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: "Yubie",
+    url: siteConfig.origin,
+    email: siteConfig.email,
+    slogan: "Rooted here. Made for now.",
+    address: {
+      "@type": "PostalAddress",
+      addressLocality: "Bogor",
+      addressRegion: "Jawa Barat",
+      addressCountry: "ID",
+      ...(verified?.registeredAddress ? { streetAddress: verified.registeredAddress.value } : {}),
+    },
+    sameAs: [siteConfig.social.instagram, siteConfig.social.tiktok],
+    ...(verified?.legalOperatorName ? { legalName: verified.legalOperatorName.value } : {}),
+    ...(verified?.supportPhone ? { telephone: verified.supportPhone.value } : {}),
+  };
   const content = <><Header />{children}<Footer />{directCommerce && <StorefrontWidgets />}</>;
   return <html lang="id"><body className={`${manrope.variable} ${cormorant.variable}`}>{directCommerce ? <CartProvider>{content}</CartProvider> : content}<script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} /></body></html>;
 }

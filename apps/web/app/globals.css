@@ -169,6 +169,10 @@ h1, h2, h3, p { margin-top: 0; }
 .footer-logo { width: 150px; height: auto; }
 .footer-brand p { margin-top: 1rem; opacity: .65; font-family: var(--font-serif); font-size: 1.25rem; }
 .footer-social-row { width: var(--container); margin: 3rem auto 0; display: flex; align-items: center; gap: 1.5rem; }
+.footer-identity { width: var(--container); margin: 3rem auto 0; display: flex; flex-direction: column; gap: .55rem; }
+.footer-identity p { display: flex; flex-wrap: wrap; gap: .35rem 2rem; margin: 0; font-size: .8rem; line-height: 1.7; opacity: .82; max-width: 72ch; }
+.footer-identity span { overflow-wrap: anywhere; }
+.footer-identity a { text-decoration: underline; text-underline-offset: .2em; }
 .footer-social-row .footer-label { margin-bottom: 0; }
 .footer-social-row .social-links { gap: .8rem; }
 .footer-social-row .social-links a { width: 42px; height: 42px; border-color: rgba(255,255,255,.3); }
@@ -309,7 +313,16 @@ h1, h2, h3, p { margin-top: 0; }
 .faq-page > section { width: min(100%, 1000px); margin: auto; }
 .faq-page details { border-top: 1px solid var(--line); padding: 1.4rem 0; }
 .faq-page summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; font-size: clamp(1.2rem, 2.5vw, 2.2rem); font-weight: 800; }
+.faq-page summary::-webkit-details-marker { display: none; }
 .faq-page details p { max-width: 45rem; line-height: 1.75; padding-top: 1rem; }
+.faq-page details p a, .legal-page a, .contact-page a.text-link { text-decoration: underline; text-underline-offset: .2em; font-weight: 700; }
+.faq-page details[open] summary span { transform: rotate(45deg); }
+.faq-page summary span { transition: transform .25s var(--ease); }
+.faq-intro { max-width: 45rem; line-height: 1.75; margin-top: 1.5rem; }
+.faq-nav { width: min(100%, 1000px); margin: 0 auto 1rem; display: flex; flex-wrap: wrap; gap: .6rem; }
+.faq-nav a { padding: .45rem .85rem; border: 1px solid var(--line); border-radius: 999px; font-size: .78rem; font-weight: 700; letter-spacing: .03em; background: color-mix(in srgb, var(--lilac) 45%, transparent); }
+.faq-nav a:hover { background: var(--lilac); }
+.faq-page section h2 { font-size: clamp(1.7rem, 3.5vw, 2.5rem); letter-spacing: -.03em; margin: 3.5rem 0 .5rem; }
 .cart-page-grid { width: var(--container); margin: auto; display: grid; grid-template-columns: 1.4fr .6fr; gap: 4rem; }
 .cart-page-grid section article { display: grid; grid-template-columns: 1fr auto auto auto; gap: 1.2rem; align-items: center; border-top: 1px solid var(--line); padding: 1.5rem 0; }
 .cart-page-grid article h2 { margin-bottom: .3rem; }
@@ -384,9 +397,36 @@ h1, h2, h3, p { margin-top: 0; }
 .success-lines .total { border-bottom: 0; font-weight: 800; }
 .success-actions { display: flex; gap: .9rem; flex-wrap: wrap; }
 .legal-page { max-width: 850px; margin: auto; }
-.legal-page h1 { font-size: clamp(4rem, 9vw, 8rem); letter-spacing: -.06em; margin: 1.5rem 0 3rem; }
-.legal-page h2 { margin-top: 3rem; font-size: 2rem; }
-.legal-page p { line-height: 1.85; }
+.legal-page h1 { font-size: clamp(2.6rem, 6.5vw, 5.4rem); letter-spacing: -.05em; margin: 1.5rem 0 1.5rem; max-width: 18ch; }
+.legal-page h2 { margin-top: 3rem; font-size: 1.6rem; scroll-margin-top: 6rem; }
+.legal-page p, .legal-page li { line-height: 1.85; }
+.legal-page ul, .legal-page ol { padding-left: 1.4rem; }
+.legal-page li { margin-bottom: .5rem; }
+.legal-meta { font-size: .85rem; font-weight: 700; letter-spacing: .04em; color: color-mix(in srgb, var(--ink) 72%, transparent); border-bottom: 1px solid var(--line); padding-bottom: 1.6rem; }
+.legal-toc { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: .45rem 1.4rem; padding: 1.4rem 0 0; margin-bottom: 1rem; }
+.legal-toc a { font-size: .85rem; font-weight: 650; text-decoration: underline; text-underline-offset: .2em; }
+
+.contact-page { padding: clamp(5rem, 9vw, 9rem) max(3vw, 1.2rem); min-height: 70vh; }
+.contact-hero { width: var(--container); margin: 0 auto clamp(3rem, 6vw, 5rem); }
+.contact-hero h1 { font-size: clamp(3.4rem, 8vw, 8rem); line-height: .8; letter-spacing: -.06em; margin: 1.5rem 0 2rem; }
+.contact-hero h1 em { font-family: var(--font-serif); font-weight: 500; }
+.contact-hero p { max-width: 42rem; line-height: 1.85; }
+.contact-cards { width: min(100%, 1000px); margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 1.2rem; }
+.contact-card { border: 1px solid var(--line); background: var(--lilac); border-radius: 18px; padding: 1.4rem 1.4rem 1.2rem; display: flex; flex-direction: column; gap: .5rem; overflow-wrap: anywhere; }
+.contact-card-label { color: color-mix(in srgb, var(--ink) 85%, transparent); text-transform: uppercase; letter-spacing: .14em; font-size: .62rem; font-weight: 800; }
+.contact-card-value { font-size: 1.15rem; font-weight: 800; letter-spacing: -.01em; }
+.contact-card-value a { text-decoration: underline; text-underline-offset: .2em; }
+.contact-card p { margin: 0; font-size: .85rem; line-height: 1.6; color: color-mix(in srgb, var(--ink) 85%, transparent); }
+.contact-help, .contact-identity, .contact-shortcuts { width: min(100%, 1000px); margin: clamp(3rem, 6vw, 5rem) auto 0; }
+.contact-help h2, .contact-identity h2, .contact-shortcuts h2 { font-size: clamp(1.6rem, 3.2vw, 2.4rem); letter-spacing: -.03em; margin-bottom: 1.4rem; }
+.contact-help-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr)); gap: 1rem; }
+.contact-help-card { display: flex; flex-direction: column; gap: .5rem; border: 1px solid var(--line); border-radius: 16px; padding: 1.15rem 1.25rem; background: color-mix(in srgb, var(--lilac) 45%, transparent); transition: background .25s var(--ease); }
+.contact-help-card:hover { background: var(--lilac); }
+.contact-help-card strong { font-size: 1rem; letter-spacing: -.01em; }
+.contact-help-card span { font-size: .85rem; line-height: 1.6; color: color-mix(in srgb, var(--ink) 85%, transparent); }
+.contact-identity p, .contact-shortcuts li, .contact-shortcuts ul { line-height: 1.85; }
+.contact-shortcuts ul { padding-left: 1.4rem; }
+.contact-shortcuts a { text-decoration: underline; text-underline-offset: .2em; font-weight: 700; }
 .loading-page { min-height: 65vh; display: grid; place-content: center; justify-items: center; text-align: center; padding: 2rem; }
 .loading-page h1 { font-size: clamp(3rem, 8vw, 8rem); }
 .loading-line { width: 220px; height: 2px; margin: 2rem 0; background: linear-gradient(90deg, var(--purple) 50%, var(--lilac) 50%); background-size: 200% 100%; animation: loading 1.2s ease infinite; }

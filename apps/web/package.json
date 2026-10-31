@@ -12,6 +12,7 @@
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "NEXT_PUBLIC_YUBIE_LAUNCH_PROFILE=DIRECT_COMMERCE_SANDBOX npm run build && node --test tests/*.test.mjs",
     "validate:artifact": "bash scripts/validate-artifact.sh",
+    "verify:merchant-identity": "node scripts/verify-merchant-identity.mjs",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
     "typecheck": "bash scripts/sites-env.sh -- tsc --noEmit",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"
