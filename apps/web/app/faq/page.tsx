@@ -344,8 +344,8 @@ export default function FAQPage() {
           <em>clear answers.</em>
         </h1>
         <p className="faq-intro">
-          Semua yang perlu Anda ketahui tentang produk Yubie, pemesanan, pembayaran, pengiriman, dan pengembalian dana. Tidak menemukan jawabannya? Hubungi kami melalui halaman{" "}
-          <Link href="/contact">Hubungi Yubie</Link>.
+          Semua yang perlu Anda ketahui tentang produk Yubie, pemesanan, pembayaran, pengiriman, dan pengembalian dana. Tidak menemukan jawabannya? Email kami di{" "}
+          <a href={`mailto:${siteConfig.email}`}>{siteConfig.email}</a> atau buka halaman <Link href="/contact">Hubungi Yubie</Link>.
         </p>
       </header>
       <nav className="faq-nav" aria-label="Kategori pertanyaan">

@@ -111,7 +111,7 @@ export default function PrivacyPage() {
       <p>Sesuai UU PDP, Anda berhak untuk — antara lain — memperoleh informasi, mengakses, memperbaiki, meminta penghapusan, menarik persetujuan, serta mengajukan keberatan atas pemrosesan data pribadi tertentu. Untuk menggunakan hak tersebut:</p>
       <ol>
         <li>
-          Kirim email ke <a href={`mailto:${siteConfig.email}`}>{siteConfig.email}</a> dengan subjek "Permintaan Data Pribadi".
+          Kirim email ke <a href={`mailto:${siteConfig.email}`}>{siteConfig.email}</a> dengan subjek &quot;Permintaan Data Pribadi&quot;.
         </li>
         <li>Sertakan nomor pesanan (bila terkait pesanan) dan identitas yang diperlukan untuk memverifikasi kepemilikan data.</li>
         <li>Kami akan menanggapi dan menindaklanjuti permintaan Anda sesuai ketentuan yang berlaku.</li>

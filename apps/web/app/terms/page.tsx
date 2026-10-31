@@ -38,7 +38,7 @@ const OperatorIdentity = () => (
       <p>
         <span data-merchant-field="legal-name">{merchantIdentity.legalOperatorName.value}</span> (
         <span data-merchant-field="entity-type">{merchantIdentity.entityType.value}</span>), selaku pengelola dan pemilik merek Yubie, mengoperasikan situs{" "}
-        <a href={siteConfig.origin}>{siteConfig.origin.replace("https://", "")}</a> ("Situs").
+        <a href={siteConfig.origin}>{siteConfig.origin.replace("https://", "")}</a> (&quot;Situs&quot;).
       </p>
     ) : null}
     <p>
@@ -82,7 +82,7 @@ export default function TermsPage() {
 
       <h2 id="pendahuluan">1. Pendahuluan dan Ketentuan Umum</h2>
       <p>
-        Selamat datang di Yubie. Syarat &amp; Ketentuan ini ("Ketentuan") mengatur penggunaan Situs serta kegiatan transaksi produk Yubie melalui kanal resmi yang tersedia di Situs. Dengan mengakses, menggunakan Situs, dan/atau melakukan pemesanan, Anda dianggap telah membaca, memahami, dan menyetujui seluruh Ketentuan yang berlaku, termasuk <Link href="/privacy">Kebijakan Privasi</Link> dan <Link href="/refund-policy">Kebijakan Pengembalian Dana dan Pembatalan</Link> yang merupakan bagian tidak terpisahkan dari Ketentuan ini.
+        Selamat datang di Yubie. Syarat &amp; Ketentuan ini (&quot;Ketentuan&quot;) mengatur penggunaan Situs serta kegiatan transaksi produk Yubie melalui kanal resmi yang tersedia di Situs. Dengan mengakses, menggunakan Situs, dan/atau melakukan pemesanan, Anda dianggap telah membaca, memahami, dan menyetujui seluruh Ketentuan yang berlaku, termasuk <Link href="/privacy">Kebijakan Privasi</Link> dan <Link href="/refund-policy">Kebijakan Pengembalian Dana dan Pembatalan</Link> yang merupakan bagian tidak terpisahkan dari Ketentuan ini.
       </p>
       <p>
         Apabila Anda tidak menyetujui sebagian atau seluruh Ketentuan ini, mohon untuk tidak menggunakan Situs. Ketentuan ini berlaku untuk seluruh pengunjung dan pelanggan, termasuk pelanggan perorangan (konsumen) dan pelanggan bisnis.
@@ -155,7 +155,7 @@ export default function TermsPage() {
             Pembayaran pesanan langsung di Situs diproses melalui iPaymu, penyedia jasa pembayaran yang bekerja sama dengan Yubie. Anda akan diarahkan ke halaman pembayaran terpisah milik penyedia pembayaran untuk menyelesaikan transaksi. Metode pembayaran yang tersedia (misalnya virtual account bank atau dompet digital) bergantung pada konfigurasi yang aktif pada halaman pembayaran saat transaksi dan seluruhnya dalam Rupiah.
           </p>
           <p>
-            Keterlibatan penyedia pembayaran pihak ketiga tidak mengalihkan tanggung jawab Yubie sebagai penjual atas keberhasilan transaksi dan pemenuhan pesanan Anda. Halaman kembali dari penyedia pembayaran (termasuk halaman "sukses" pada peramban) bukan bukti pembayaran berhasil; status pembayaran yang sahih ditetapkan oleh sistem Yubie berdasarkan konfirmasi resmi dari penyedia pembayaran. Apabila status pembayaran tidak jelas, jangan melakukan pembayaran kedua — gunakan halaman status pesanan atau hubungi kami.
+            Keterlibatan penyedia pembayaran pihak ketiga tidak mengalihkan tanggung jawab Yubie sebagai penjual atas keberhasilan transaksi dan pemenuhan pesanan Anda. Halaman kembali dari penyedia pembayaran (termasuk halaman &quot;sukses&quot; pada peramban) bukan bukti pembayaran berhasil; status pembayaran yang sahih ditetapkan oleh sistem Yubie berdasarkan konfirmasi resmi dari penyedia pembayaran. Apabila status pembayaran tidak jelas, jangan melakukan pembayaran kedua — gunakan halaman status pesanan atau hubungi kami.
           </p>
         </>
       ) : (
@@ -178,7 +178,7 @@ export default function TermsPage() {
 
       <h2 id="pembatalan">10. Pembatalan, Retur, dan Refund</h2>
       <p>
-        Pembatalan sebelum pesanan diproses/dikirim dapat diajukan sesuai prosedur pada <Link href="/refund-policy">Kebijakan Pengembalian Dana dan Pembatalan</Link>. Untuk produk pangan, retur tidak dimaksudkan sebagai fasilitas "pencobaan barang" — namun Anda tetap dilindungi hukum untuk kondisi produk yang tidak sesuai, rusak, cacat, kedaluwarsa, salah kirim, tagihan ganda, atau pesanan tidak terkirim. Proses pengembalian dana dilakukan oleh tim keuangan kami melalui penyedia pembayaran dengan tinjauan dan persetujuan berjenjang. Rincian selengkapnya mengikuti kebijakan tersebut.
+        Pembatalan sebelum pesanan diproses/dikirim dapat diajukan sesuai prosedur pada <Link href="/refund-policy">Kebijakan Pengembalian Dana dan Pembatalan</Link>. Untuk produk pangan, retur tidak dimaksudkan sebagai fasilitas &quot;pencobaan barang&quot; — namun Anda tetap dilindungi hukum untuk kondisi produk yang tidak sesuai, rusak, cacat, kedaluwarsa, salah kirim, tagihan ganda, atau pesanan tidak terkirim. Proses pengembalian dana dilakukan oleh tim keuangan kami melalui penyedia pembayaran dengan tinjauan dan persetujuan berjenjang. Rincian selengkapnya mengikuti kebijakan tersebut.
       </p>
 
       <h2 id="perlindungan-konsumen">11. Perlindungan Konsumen dan Keamanan Produk</h2>

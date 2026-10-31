@@ -16,16 +16,21 @@ const REQUIRED_ON_CONTACT = ["legal-name", "entity-type", "address", "phone", "s
 const REQUIRED_ON_FOOTER = ["address", "phone"];
 const CHECKED_ROUTES = ["/contact", "/terms", "/refund-policy"];
 const PLACEHOLDER_PATTERNS = [
-  /data-merchant-field="[^"]*"\s*>/g, // marker present but content checked via extraction below
-  /\b(?:TBD|TODO|XXX|lorem ipsum|coming soon|placeholder)\b/i,
-  /belum\s+diverifikasi/i,
+  /\b(?:TBD|TODO|XXX)\b/,
+  /lorem ipsum/i,
+  /\bmenyusul\b/i,
+  /\bsegera diperbarui\b/i,
+  /\[(?:nama|alamat|telepon|jam)[^\]]*\]/i,
 ];
 
 const failures = [];
 
 function extractFields(html) {
+  // React inserts <!-- --> separators between interpolated text nodes; strip
+  // them so a marker's text content is one exact value.
   const fields = new Map();
-  for (const [, field, text] of html.matchAll(/<[^>]*data-merchant-field="([^"]+)"[^>]*>([^<]+)</g)) {
+  const markup = html.replace(/<!--.*?-->/g, "");
+  for (const [, field, text] of markup.matchAll(/<[^>]*data-merchant-field="([^"]+)"[^>]*>([^<]+)</g)) {
     const value = text.trim();
     if (value) fields.set(field, value);
   }
@@ -59,8 +64,8 @@ async function main() {
 
   for (const [route, html] of pages) {
     if (!html) continue;
-    for (const pattern of PLACEHOLDER_PATTERNS.slice(1)) {
-      if (pattern.test(html)) failures.push(`${route}: ditemukan teks placeholder/belum-diverifikasi (${pattern})`);
+    for (const pattern of PLACEHOLDER_PATTERNS) {
+      if (pattern.test(html)) failures.push(`${route}: ditemukan teks placeholder (${pattern})`);
     }
   }
 

@@ -97,12 +97,12 @@ export default function ContactPage() {
         <section className="contact-identity" aria-labelledby="contact-identity-title">
           <h2 id="contact-identity-title">Identitas Badan Usaha</h2>
           <p>
-            <span data-merchant-field="legal-name">{merchantIdentity.legalOperatorName.value}</span> —{" "}
+            Pengelola merek Yubie: <span data-merchant-field="legal-name">{merchantIdentity.legalOperatorName.value}</span> — jenis badan usaha{" "}
             <span data-merchant-field="entity-type">{merchantIdentity.entityType.value}</span>
             {merchantIdentity.registeredAddress ? (
               <>
                 {" "}
-                · <span data-merchant-field="address">{merchantIdentity.registeredAddress.value}</span>
+                · alamat terdaftar: <span data-merchant-field="address">{merchantIdentity.registeredAddress.value}</span>
               </>
             ) : null}
             .

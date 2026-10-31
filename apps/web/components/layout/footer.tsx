@@ -23,8 +23,8 @@ export function Footer() {
         <span>Wilayah usaha: {merchantIdentity.publicRegion}</span>
         <span>Email: <a href={`mailto:${siteConfig.email}`}>{siteConfig.email}</a></span>
         {identityReady && merchantIdentity.supportPhone ? <span>Telepon: <a href={merchantIdentity.supportPhone.telUrl} data-merchant-field="phone">{merchantIdentity.supportPhone.value}</a></span> : null}
-        {identityReady && merchantIdentity.registeredAddress ? <span data-merchant-field="address">Alamat usaha terdaftar: {merchantIdentity.registeredAddress.value}</span> : null}
-        {identityReady && merchantIdentity.legalOperatorName ? <span data-merchant-field="legal-name">Pengelola: {merchantIdentity.legalOperatorName.value}{merchantIdentity.entityType ? ` (${merchantIdentity.entityType.value})` : ""}</span> : null}
+        {identityReady && merchantIdentity.registeredAddress ? <span>Alamat usaha terdaftar: <span data-merchant-field="address">{merchantIdentity.registeredAddress.value}</span></span> : null}
+        {identityReady && merchantIdentity.legalOperatorName ? <span>Pengelola: <span data-merchant-field="legal-name">{merchantIdentity.legalOperatorName.value}</span>{merchantIdentity.entityType ? <> (<span data-merchant-field="entity-type">{merchantIdentity.entityType.value}</span>)</> : null}</span> : null}
       </p>
     </div>
     <div className="footer-social-row"><span className="footer-label">Follow Us</span><SocialLinks /></div>
