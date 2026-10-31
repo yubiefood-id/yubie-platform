@@ -79,11 +79,21 @@ export function CheckoutView() {
   useEffect(() => { if (hydrated && count > 0) trackEvent("begin_checkout", { item_count: count }); }, [hydrated, count]);
   useEffect(() => {
     let active=true;
+    // Every coverage field is untrusted JSON: normalize through explicit type
+    // guards so no `any` escapes Array.isArray's unknown->any[] narrowing.
+    const asRecord=(value:unknown):Record<string,unknown>|null=>typeof value==="object"&&value!==null&&!Array.isArray(value)?value as Record<string,unknown>:null;
+    const cityList=(value:unknown):string[]=>Array.isArray(value)?value.filter((entry):entry is string=>typeof entry==="string"&&entry.trim().length>=2&&entry.trim().length<=80):[];
+    const policyCities=(value:unknown):string[]=>{
+      if(typeof value!=="object"||value===null||!("cities" in value))return[];
+      return cityList(value.cities);
+    };
     fetch("/api/shipping/coverage",{cache:"no-store"}).then(async response=>{
       if(!active||!response.ok)return;
-      const body=await response.json().catch(()=>null);
-      const cities=(body?.ok?body.data?.policies??[]:[]).flatMap((policy:{cities?:unknown})=>Array.isArray(policy.cities)?policy.cities:[]).filter((city):city is string=>typeof city==="string"&&city.trim().length>=2);
-      if(active)setCoveredCities(cities.slice(0,20));
+      const body=asRecord(await response.json().catch(()=>null));
+      const data=asRecord(body&&body.ok===true?body.data:null);
+      const rawPolicies=data?.policies;
+      const policies:unknown[]=Array.isArray(rawPolicies)?rawPolicies:[];
+      if(active)setCoveredCities(policies.flatMap(policyCities).slice(0,20));
     }).catch(()=>{/* Manual entry stays fully available. */});
     return()=>{active=false;};
   },[]);
