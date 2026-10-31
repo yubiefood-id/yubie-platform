@@ -20,6 +20,7 @@ PRIOR_COMPOSE_SHA256 = [
     "180f6ad41cbcbf2864ba23b240b9ed6b5174ca14f5e0e3c91e139368309c240c",  # pre-088312e era compose
     "19e96bfab5399eada4b4ef2db738dcc4120ca25541afe89a59ce34bbaf2101fc",  # rendered by release 088312e53e7d6c968d8227e71a589d5a17633439
     "6d178eac90fdc455e2fd245c59ae433b6a1cc7ff67fe64a3cdd7b1a70dc533e9",  # rendered by release 667f9ab59e3349cf6247ec58efb5f4e7f23a894d
+    "ad292f5d303ba4aeeb1c17c78ea9eae8ec08af30311f9c4927dcde5bc96de681",  # rendered by release b23890073a9eb05be8f1d8149eabce556e88db78
 ]
 
 

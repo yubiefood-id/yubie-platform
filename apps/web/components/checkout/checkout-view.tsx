@@ -4,14 +4,20 @@ import Link from "next/link";
 import {useRouter} from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PurchaseOptions } from "@/components/commerce/purchase-options";
+import { DeliveryMap } from "@/components/delivery/delivery-map";
 import { useCart, useCartDisplayLines } from "@/features/cart/cart-context";
 import { trackEvent } from "@/lib/analytics";
 import { formatRupiah } from "@/lib/format";
 import { CHECKOUT_ATTEMPT_STORAGE_KEY, rememberRecoveredCheckout, storedAttemptForRequest, classifyCheckoutResponse, type HeldAttempt } from "@/lib/proxy-headers";
 
 import {prepareCheckoutSession,withCheckoutLock,type CheckoutSessionReadiness} from "@/lib/checkout-session";
+import { customerRequest } from "@/lib/customer-api";
+import type { DeliveryMapPoint } from "@yubie/integrations/google-maps/browser";
 type CheckoutPhase = "form" | "creating" | "redirecting" | "pending" | "unknown" | "exception" | "unavailable" | "stock_unavailable" | "error";
 interface Quote {subtotalAmount:number;discountAmount:number;shippingAmount:number|null;totalAmount:number|null;stockAvailable:boolean;shippingAvailable:boolean}
+/** Server-side reverse-geocode preview: the structured parts are best-effort
+ *  suggestions the customer may edit; nothing is submitted automatically. */
+interface LocationPreview { label: string; latitude: number; longitude: number; address?: { province?: string; city?: string; district?: string; postalCode?: string } }
 
 interface CheckoutFormState {
   email: string;
@@ -47,6 +53,12 @@ export function CheckoutView() {
   const sessionReadyRef = useRef<Promise<CheckoutSessionReadiness> | null>(null);
   const [admission,setAdmission]=useState<"loading"|"enabled"|"disabled"|"unavailable">("loading");
   const [quotation,setQuotation]=useState<{body:string;value:Quote|null;error:string|null}|null>(null);
+  // Free-shipping quick picks come from the server's active coverage; the
+  // checkout quote stays the only authority on whether a city actually ships.
+  const [coveredCities,setCoveredCities]=useState<string[]>([]);
+  const [locating,setLocating]=useState(false);
+  const [locationNote,setLocationNote]=useState<string|null>(null);
+  const [mapPoint,setMapPoint]=useState<DeliveryMapPoint|null>(null);
   const requestBody=JSON.stringify({lines:lines.map(({line})=>({productId:line.productId,sizeId:line.sizeId,quantity:line.quantity})),customerEmail:form.email.trim(),...(form.name.trim()?{customerName:form.name.trim()}:{}),delivery:{...(form.name.trim()?{name:form.name.trim()}:{}),phone:form.phone.trim(),address:form.address.trim(),city:form.city.trim(),...(form.postalCode.trim()?{postalCode:form.postalCode.trim()}:{})},...(promoCode?{promoCode}:{})});
   const formValid = form.email.includes("@") && form.phone.trim().length >= 8 && form.address.trim().length >= 8 && form.city.trim().length >= 2;
   const quote=quotation?.body===requestBody?quotation.value:null;
@@ -65,6 +77,54 @@ export function CheckoutView() {
   },[router]);
 
   useEffect(() => { if (hydrated && count > 0) trackEvent("begin_checkout", { item_count: count }); }, [hydrated, count]);
+  useEffect(() => {
+    let active=true;
+    // Every coverage field is untrusted JSON: normalize through explicit type
+    // guards so no `any` escapes Array.isArray's unknown->any[] narrowing.
+    const asRecord=(value:unknown):Record<string,unknown>|null=>typeof value==="object"&&value!==null&&!Array.isArray(value)?value as Record<string,unknown>:null;
+    const cityList=(value:unknown):string[]=>Array.isArray(value)?value.filter((entry):entry is string=>typeof entry==="string"&&entry.trim().length>=2&&entry.trim().length<=80):[];
+    const policyCities=(value:unknown):string[]=>{
+      if(typeof value!=="object"||value===null||!("cities" in value))return[];
+      return cityList(value.cities);
+    };
+    fetch("/api/shipping/coverage",{cache:"no-store"}).then(async response=>{
+      if(!active||!response.ok)return;
+      const body=asRecord(await response.json().catch(()=>null));
+      const data=asRecord(body&&body.ok===true?body.data:null);
+      const rawPolicies=data?.policies;
+      const policies:unknown[]=Array.isArray(rawPolicies)?rawPolicies:[];
+      if(active)setCoveredCities(policies.flatMap(policyCities).slice(0,20));
+    }).catch(()=>{/* Manual entry stays fully available. */});
+    return()=>{active=false;};
+  },[]);
+  /** Geolocation → server reverse-geocode → fill editable address suggestions. */
+  const applyLocationPreview=useCallback(async(preview:LocationPreview|null,accuracyMeters?:number)=>{
+    if(!preview){setLocationNote("Lokasi belum dapat dikenali. Isi alamat manual tetap bisa.");return;}
+    setForm(form=>({...form,address:preview.label||form.address,city:preview.address?.city?.trim()||form.city,postalCode:preview.address?.postalCode?.trim()||form.postalCode}));
+    setMapPoint({latitude:preview.latitude,longitude:preview.longitude});
+    setLocationNote(`Lokasi terdeteksi${typeof accuracyMeters==="number"&&Number.isFinite(accuracyMeters)?` (±${Math.round(accuracyMeters)} m)`:""}. Periksa dan lengkapi bila perlu.`);
+  },[]);
+  const activateLocation=useCallback(async()=>{
+    setLocationNote(null);
+    if(locating)return;
+    if(typeof navigator==="undefined"||!navigator.geolocation){setLocationNote("Perangkat tidak mendukung deteksi lokasi.");return;}
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(async position=>{
+      try{
+        const preview=await customerRequest<LocationPreview|null>("/api/locations/reverse-geocode","POST",{latitude:position.coords.latitude,longitude:position.coords.longitude});
+        await applyLocationPreview(preview,position.coords.accuracy);
+      }catch{
+        setLocationNote("Lokasi belum dapat dikenali. Isi alamat manual tetap bisa.");
+      }finally{setLocating(false);}
+    },()=>{setLocating(false);setLocationNote("Izin lokasi ditolak. Isi alamat manual tetap bisa.");},{enableHighAccuracy:true,timeout:8000,maximumAge:0});
+  },[applyLocationPreview,locating]);
+  const moveMapPin=useCallback(async(point:DeliveryMapPoint)=>{
+    setMapPoint(point);
+    try{
+      const preview=await customerRequest<LocationPreview|null>("/api/locations/reverse-geocode","POST",{latitude:point.latitude,longitude:point.longitude});
+      if(preview)setForm(form=>({...form,address:preview.label||form.address,city:preview.address?.city?.trim()||form.city,postalCode:preview.address?.postalCode?.trim()||form.postalCode}));
+    }catch{/* Pin moves keep the last recognized address; manual edit remains. */}
+  },[]);
   useEffect(() => {
     let active=true;
     sessionReadyRef.current=withCheckoutLock(prepareCheckoutSession);
@@ -162,10 +222,18 @@ export function CheckoutView() {
           </fieldset>
           <fieldset disabled={admission!=="enabled"||busy}>
             <legend>2 · Pengiriman</legend>
+            {coveredCities.length>0&&<div className="coverage-chips" role="group" aria-label="Pilihan kota gratis ongkir">
+              {coveredCities.map(city=><button key={city} type="button" className="chip" onClick={()=>setForm(form=>({...form,city}))}>🚚 Gratis ongkir — {city}</button>)}
+            </div>}
             <label>Nama penerima<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} autoComplete="name" /></label>
             <label>No. WhatsApp<input type="tel" inputMode="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} autoComplete="tel" required /></label>
+            <button type="button" className="button warm location-activate" onClick={()=>void activateLocation()} disabled={locating||admission!=="enabled"||busy}>{locating?"Mendeteksi lokasi…":"📍 Aktifkan lokasi saya"}</button>
+            {locationNote&&<p className="checkout-note" role="status">{locationNote}</p>}
+            {mapPoint&&<DeliveryMap point={mapPoint} onChange={(point)=>void moveMapPin(point)} />}
             <label className="wide">Alamat lengkap<textarea rows={3} value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} autoComplete="street-address" required /></label>
-            <label>Kota<input value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} autoComplete="address-level2" required /></label>
+            <label>Kota<input value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} list="yubie-covered-cities" autoComplete="address-level2" required />
+              <datalist id="yubie-covered-cities">{coveredCities.map(city=><option key={city} value={city} />)}</datalist>
+            </label>
             <label>Kode pos<input value={form.postalCode} onChange={(event) => setForm({ ...form, postalCode: event.target.value })} inputMode="numeric" autoComplete="postal-code" /></label>
           </fieldset>
           <fieldset disabled={admission!=="enabled"||busy}>
@@ -191,6 +259,7 @@ export function CheckoutView() {
         </form>
         {!!quote?.discountAmount&&<div className="discount-row"><span>Diskon terverifikasi <button type="button" onClick={clearPromo}>Hapus</button></span><span>−{formatRupiah(quote.discountAmount)}</span></div>}
         <div className="total"><span>Total final</span><span>{total===null?"Belum tersedia":formatRupiah(total)}</span></div>
+        {quote?.shippingAvailable&&quote.shippingAmount===0&&total!==null&&<p className="checkout-note free-shipping" role="status">🚚 Gratis ongkir ke {form.city.trim()} — termasuk dalam total.</p>}
         <p>Ongkir dan total final diverifikasi oleh server sebelum halaman pembayaran dibuat.</p>
         <Link className="button warm full" href="/cart">Kembali ke keranjang</Link>
       </aside>

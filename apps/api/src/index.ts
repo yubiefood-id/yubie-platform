@@ -301,6 +301,15 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
       return json({ok:true,data},{headers:{"cache-control":"no-store"}});
     }catch{return json({ok:false,code:"AVAILABILITY_UNAVAILABLE"},{status:503,headers:{"cache-control":"no-store"}});}
   }
+  if (request.method === "GET" && url.pathname === "/v1/shipping/coverage") {
+    // Public, PII-free read of the exact city strings active free-promotional
+    // policies cover, so storefronts can offer them as quick picks. Whether a
+    // submitted checkout actually ships free stays authoritative in the quote.
+    try {
+      const policies=await ctx.tx.run("shipping.coverage",async repos=>repos.shipping?.listCoverage?repos.shipping.listCoverage(ctx.clock.now()):[]);
+      return json({ok:true,data:{policies}},{headers:{"cache-control":"no-store"}});
+    }catch{return json({ok:false,code:"SHIPPING_UNAVAILABLE"},{status:503,headers:{"cache-control":"no-store"}});}
+  }
   if (request.method === "POST" && url.pathname === "/v1/checkouts/quote") {
     const body=await readJsonBody(request,MAX_JSON_BYTES);if(!body.ok)return tooLarge();
     const parsed=checkoutRequestSchema.pick({lines:true,promoCode:true,delivery:true}).safeParse(body.value);
