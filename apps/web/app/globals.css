@@ -375,6 +375,7 @@ h1, h2, h3, p { margin-top: 0; }
 .checkout-form fieldset:disabled { opacity: .65; }
 .checkout-form fieldset:disabled, .checkout-form fieldset:disabled input, .checkout-form fieldset:disabled textarea, .checkout-form fieldset:disabled button { cursor: progress; }
 .checkout-form small { color: #a32626; }
+.checkout-form .city-hint { color: var(--green); font-weight: 700; line-height: 1.5; }
 .checkout-note { font-size: .78rem; line-height: 1.6; opacity: .7; }
 .checkout-error { color: #a32626; font-size: .85rem; font-weight: 700; }
 .account-grid { width: var(--container); margin: 0 auto; display: grid; grid-template-columns: 1.4fr .6fr; gap: 4rem; align-items: start; }
