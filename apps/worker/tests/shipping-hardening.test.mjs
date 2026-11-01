@@ -33,10 +33,14 @@ async function ephemeral() {
 
 const NOW = () => new Date().toISOString();
 
-/** Minimal bare order row for pre-seeded committed bookings (FK target only). */
-async function seedBareOrder(db, orderId) {
+/** Bare order + committed shipment + committed pilot ledger row (pre-existing usage). */
+async function seedCommittedBooking(db, orderId, shipmentId, { quoted = 20000, actual = null } = {}) {
   await db.client`INSERT INTO orders (id,checkout_ref,checkout_public_token,status,customer_email,total_amount,subtotal_amount,shipping_amount,discount_amount,grand_total_amount,created_at,updated_at)
     VALUES (${orderId},${"ref_" + orderId},${"tok_" + orderId},'completed','ops@example.invalid',20000,0,20000,0,20000,now(),now())`;
+  await db.client`INSERT INTO shipments (id,order_id,package_index,dispatch_generation,reference_id,provider_order_id,status,quoted_amount_idr,actual_amount_idr,version,created_at,updated_at)
+    VALUES (${shipmentId},${orderId},0,1,${"ybshp-" + shipmentId},${"bs_" + shipmentId},'booked',${quoted},${actual},1,now(),now())`;
+  await db.client`INSERT INTO shipment_pilot_ledger (id,shipment_id,reference_id,state,amount_idr,created_at,updated_at)
+    VALUES (${"led_" + shipmentId},${shipmentId},${"ybshp-" + shipmentId},'committed',${actual ?? quoted},now(),now())`;
 }
 
 async function seedBase(db) {
@@ -93,9 +97,7 @@ test("P0-A pilot count is a hard maximum: 4 of 5 used with 5 ready -> exactly on
     await seedBase(db);
     // 4 committed bookings already consume the pilot count.
     for (let i = 1; i <= 4; i += 1) {
-      await seedBareOrder(db, "o_c" + i);
-      await db.client`INSERT INTO shipments (id,order_id,package_index,dispatch_generation,reference_id,provider_order_id,status,quoted_amount_idr,actual_amount_idr,version,created_at,updated_at)
-        VALUES (${"shp_c" + i},${"o_c" + i},0,1,${"ybshp-c" + i},${"bs_c" + i},'booked',20000,20000,1,now(),now())`;
+      await seedCommittedBooking(db, "o_c" + i, "shp_c" + i);
     }
     const calls = { posts: [] };
     globalThis.fetch = countingFetch(calls);
@@ -120,9 +122,7 @@ test("P0-A budget admission counts each new booking's estimated cost", { skip: !
   try {
     await seedBase(db);
     // Committed cost 40000; next booking quoted 20000 would exceed 50000.
-    await seedBareOrder(db, "o_b1");
-    await db.client`INSERT INTO shipments (id,order_id,package_index,dispatch_generation,reference_id,provider_order_id,status,quoted_amount_idr,actual_amount_idr,version,created_at,updated_at)
-      VALUES ('shp_b1','o_b1',0,1,'ybshp-b1','bs_b1','booked',40000,40000,1,now(),now())`;
+    await seedCommittedBooking(db, "o_b1", "shp_b1", { quoted: 40000, actual: 40000 });
     const calls = { posts: [] };
     globalThis.fetch = countingFetch(calls);
     await seedOrder(db, "ord_budget");
@@ -193,10 +193,8 @@ test("P0-A price adjustment raises committed cost and blocks further budget use 
     await seedBase(db);
     const repo = new persistence.PostgresShipmentRepository(db);
     // Quoted 20000 -> booked -> provider repriced to 45000 (actual > quoted).
-    await seedBareOrder(db, "o_p1");
-    await db.client`INSERT INTO shipments (id,order_id,package_index,dispatch_generation,reference_id,provider_order_id,status,quoted_amount_idr,version,created_at,updated_at)
-      VALUES ('shp_p1','o_p1',0,1,'ybshp-p1','bs_p1','booked',20000,1,now(),now())`;
-    await repo.recordPriceChange({ providerOrderId: "bs_p1", priceIdr: 45000, shippingFeeIdr: null, occurredAt: NOW() }, NOW());
+    await seedCommittedBooking(db, "o_p1", "shp_p1", { quoted: 20000, actual: null });
+    await repo.recordPriceChange({ providerOrderId: "bs_shp_p1", priceIdr: 45000, shippingFeeIdr: null, occurredAt: NOW() }, NOW());
     const calls = { posts: [] };
     globalThis.fetch = countingFetch(calls);
     await seedOrder(db, "ord_p2");

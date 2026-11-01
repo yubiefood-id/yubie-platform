@@ -270,9 +270,11 @@ export class PostgresShipmentRepository {
   /** Pilot usage snapshot (observability; enforcement lives in the bounded claim): every provider order ever created, cost GREATEST(actual, quoted). */
   async pilotUsage(now: string): Promise<{ bookings: number; committedIdr: number }> {
     void now;
-    const rows = await this.database.db.execute(sql`SELECT COUNT(*)::int AS bookings, COALESCE(SUM(GREATEST(COALESCE(actual_amount_idr,0),COALESCE(quoted_amount_idr,0))),0)::bigint AS committed FROM shipments WHERE provider_order_id IS NOT NULL`);
-    const row = rows[0] as { bookings: number; committed: string };
-    return { bookings: row.bookings, committedIdr: Number(row.committed) };
+    const rows = await this.database.client`SELECT COUNT(*) FILTER (WHERE l.state <> 'released')::int AS bookings,
+        COALESCE(SUM(CASE WHEN l.state='committed' THEN GREATEST(l.amount_idr, COALESCE(s.actual_amount_idr, 0)) ELSE l.amount_idr END),0)::bigint AS cost
+      FROM shipment_pilot_ledger l JOIN shipments s ON s.id=l.shipment_id WHERE l.state <> 'released'`;
+    const row = (rows as unknown as Array<{ bookings: number; cost: string }>)[0] ?? { bookings: 0, cost: "0" };
+    return { bookings: row.bookings, committedIdr: Number(row.cost) };
   }
 }
 
