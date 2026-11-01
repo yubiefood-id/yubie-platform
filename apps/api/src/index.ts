@@ -332,6 +332,7 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     if(!principal)return json({ok:false,code:"INVALID_REQUEST"},{status:400,headers:{"cache-control":"no-store"}});
     const result=await requestShippingRates({principalKey:principal,lines:parsed.data.lines,delivery:parsed.data.delivery},{
       provider:ctx.shippingProvider,tx:ctx.tx,
+      couriers:(process.env.BITESHIP_COURIERS??"").trim()||null,
       ...(ctx.shippingQuotes?{quotes:ctx.shippingQuotes}:{}),
       ...(ctx.shippingCatalog?{origins:ctx.shippingCatalog,profiles:ctx.shippingCatalog}:{}),
       clock:ctx.clock,ids:ctx.ids,
@@ -348,6 +349,23 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     const proof=parsed.data.promoCode&&user.value?await currentCustomerProof(request,ctx):undefined;
     const result=await quoteCheckout({lines:parsed.data.lines,...(parsed.data.delivery?{city:parsed.data.delivery.city}:{}),...(parsed.data.promoCode?{promoCode:parsed.data.promoCode}:{}),userId:user.value?.id??null,...(proof?{customerProof:proof}:{})},{tx:ctx.tx,clock:ctx.clock});
     if(!result.ok){const mapping=checkoutError(result.error.code);return json({ok:false,code:mapping.code},{status:mapping.status,headers:{"cache-control":"no-store"}});}
+    // Issue #73 P0-C: when this destination is free-covered AND the owner has
+    // armed the subsidy lever, mint (or reuse) a subsidized server quote so a
+    // paid order auto-books a real courier after packing. Outside every
+    // transaction; failures degrade to plain free — the quote answer above is
+    // already authoritative and never blocked by this side effect.
+    if(result.value.shippingAvailable&&result.value.shippingAmount===0&&parsed.data.delivery){
+      const subsidyMax=Number(process.env.SHIPPING_FREE_SUBSIDY_MAX_IDR??"0");
+      if(ctx.shippingExecutionMode!=="disabled"&&ctx.shippingProvider&&ctx.shippingQuotes&&ctx.shippingCatalog&&Number.isSafeInteger(subsidyMax)&&subsidyMax>0){
+        const guestMint=guestCheckoutToken(request);
+        const mintPrincipal=checkoutPrincipalKey({userId:user.value?.id??null,guestToken:guestMint.token});
+        if(mintPrincipal&&parsed.data.delivery.address.trim()&&parsed.data.delivery.postalCode?.trim()){
+          await requestShippingRates({principalKey:mintPrincipal,lines:parsed.data.lines,delivery:parsed.data.delivery,subsidizedFree:{maxSubsidyIdr:subsidyMax}},{
+            provider:ctx.shippingProvider,tx:ctx.tx,couriers:(process.env.BITESHIP_COURIERS??"").trim()||null,quotes:ctx.shippingQuotes,origins:ctx.shippingCatalog,profiles:ctx.shippingCatalog,clock:ctx.clock,ids:ctx.ids,
+          }).catch(()=>{/* Subsidy minting is best-effort; plain free stays correct. */});
+        }
+      }
+    }
     return json({ok:true,data:result.value},{headers:{"cache-control":"no-store"}});
   }
 

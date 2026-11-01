@@ -38,23 +38,19 @@ export async function runShipmentDispatch(database: Database, correlationId: str
   const repo = new PostgresShipmentRepository(database);
   const now = new Date().toISOString();
 
-  if (mode === "pilot") {
-    const usage = await repo.pilotUsage(now);
-    const maxBookings = Number(process.env.SHIPPING_PILOT_MAX_BOOKINGS ?? "0");
-    const budgetIdr = Number(process.env.SHIPPING_PILOT_BUDGET_IDR ?? "0");
-    if (usage.bookings >= maxBookings || usage.committedIdr >= budgetIdr) {
-      console.log(JSON.stringify({ level: "warn", event: "worker.shipment_pilot_budget_exhausted", correlationId, bookings: usage.bookings, committedIdr: usage.committedIdr }));
-      increment("shipment_pilot_budget_exhausted_total");
-      return;
-    }
-  }
-
-  const leases = await repo.claimDispatchIntents(MAX_BOOKINGS_PER_RUN, now, LEASE_MS);
+  // Issue #73 P0-A: the bounded claim IS the enforcement — quota and budget
+  // are admitted atomically under the pilot advisory lock, per lease, with
+  // ambiguous outcomes holding reservation until reconciled. No pre-check.
+  const bounds = mode === "pilot"
+    ? { maxBookings: Number(process.env.SHIPPING_PILOT_MAX_BOOKINGS ?? "0"), budgetIdr: Number(process.env.SHIPPING_PILOT_BUDGET_IDR ?? "0") }
+    : undefined;
+  const leases = await repo.claimDispatchIntents(MAX_BOOKINGS_PER_RUN, now, LEASE_MS, bounds);
+  if (leases.length === 0 && bounds) increment("shipment_pilot_quota_window_full_total");
   for (const lease of leases) {
     if (!lease.courierCompany || !lease.courierServiceCode || !lease.origin || !lease.delivery) {
-      await repo.recordBookingRefused({ intentId: lease.intentId, shipmentId: lease.shipmentId, errorCode: "DISPATCH_CONTEXT_INCOMPLETE", attempts: lease.attempts, maxAttempts: lease.maxAttempts }, new Date().toISOString());
-      console.error(JSON.stringify({ level: "warn", event: "worker.shipment_dispatch_refused", errorCode: "DISPATCH_CONTEXT_INCOMPLETE", shipmentId: lease.shipmentId }));
-      increment("shipment_dispatch_refused_total");
+      await repo.blockDispatch({ shipmentId: lease.shipmentId, intentId: lease.intentId, orderId: lease.orderId, reason: "DISPATCH_CONTEXT_INCOMPLETE" }, new Date().toISOString());
+      console.error(JSON.stringify({ level: "warn", event: "worker.shipment_dispatch_blocked", shipmentId: lease.shipmentId, reason: "DISPATCH_CONTEXT_INCOMPLETE" }));
+      increment("shipment_dispatch_blocked_total");
       continue;
     }
     const phone = typeof lease.delivery.phone === "string" ? lease.delivery.phone : (lease.customerPhone ?? "");
@@ -62,22 +58,46 @@ export async function runShipmentDispatch(database: Database, correlationId: str
     const postalCode = typeof lease.delivery.postalCode === "string" ? lease.delivery.postalCode : null;
     const name = (typeof lease.delivery.name === "string" ? lease.delivery.name : "") || (lease.customerName ?? "Pelanggan Yubie");
     if (!phone || !address) {
-      await repo.recordBookingRefused({ intentId: lease.intentId, shipmentId: lease.shipmentId, errorCode: "DESTINATION_INCOMPLETE", attempts: lease.attempts, maxAttempts: lease.maxAttempts }, new Date().toISOString());
-      increment("shipment_dispatch_refused_total");
+      await repo.blockDispatch({ shipmentId: lease.shipmentId, intentId: lease.intentId, orderId: lease.orderId, reason: "DESTINATION_INCOMPLETE" }, new Date().toISOString());
+      increment("shipment_dispatch_blocked_total");
       continue;
     }
+    // Issue #73 P0-B: dispatch-time business blockers re-verified against the
+    // authoritative order/payment/inventory state (the packing check ran
+    // earlier; recalls can land in between). Any blocker => held shipment,
+    // machine-readable reason, audit event — never a partial booking.
+    const blocker = await repo.dispatchBlockers(lease.shipmentId, lease.orderId);
+    if (blocker) {
+      await repo.blockDispatch({ shipmentId: lease.shipmentId, intentId: lease.intentId, orderId: lease.orderId, reason: blocker }, new Date().toISOString());
+      console.error(JSON.stringify({ level: "warn", event: "worker.shipment_dispatch_blocked", shipmentId: lease.shipmentId, reason: blocker }));
+      increment("shipment_dispatch_blocked_total");
+      continue;
+    }
+
     // Items are rebuilt server-side from the order lines + approved SKU
-    // logistics profiles; weights never come from the browser.
+    // logistics profiles; weights never come from the browser. EVERY line
+    // must resolve an effective profile — a paid order is never booked with
+    // omitted or substituted goods (strict 1:1 mapping, no fabricated data).
     const lines = Array.isArray(lease.lines) ? (lease.lines as OrderLineRecord[]) : [];
+    if (lines.length === 0) {
+      await repo.blockDispatch({ shipmentId: lease.shipmentId, intentId: lease.intentId, orderId: lease.orderId, reason: "ORDER_LINES_MISSING" }, new Date().toISOString());
+      increment("shipment_dispatch_blocked_total");
+      continue;
+    }
     const skus = lines.map((line) => lineSku(line.productId, line.sizeId)).filter((sku): sku is string => sku !== null);
     const catalog = new PostgresShippingCatalogRepository(database);
     const profiles = new Map((await catalog.findEffective(skus, now)).map((profile) => [profile.sku, profile]));
-    const items = lines.flatMap((line) => {
+    const items: Array<{ name: string; category: "food_and_drink" | "frozen_food"; sku: string; valueIdr: number; quantity: number; weightGrams: number; lengthCm?: number; widthCm?: number; heightCm?: number }> = [];
+    let lineBlock: string | null = null;
+    for (const line of lines) {
       const sku = lineSku(line.productId, line.sizeId);
       const profile = sku ? profiles.get(sku) : undefined;
-      if (!profile || !sku) return [];
+      if (!sku || !profile) { lineBlock = "SKU_PROFILE_MISSING"; break; }
+      if (!Number.isSafeInteger(profile.weightGrams) || profile.weightGrams <= 0) { lineBlock = "PROFILE_WEIGHT_INVALID"; break; }
+      if (profile.storageClass !== "shelf_stable") { lineBlock = "STORAGE_CLASS_BLOCKED"; break; }
+      if (!Number.isSafeInteger(line.quantity) || line.quantity < 1 || !Number.isSafeInteger(line.unitPrice) || line.unitPrice <= 0) { lineBlock = "ORDER_LINE_INVALID"; break; }
       const category: "food_and_drink" | "frozen_food" = profile.storageClass === "shelf_stable" ? "food_and_drink" : "frozen_food";
-      return [{
+      items.push({
         name: `${line.productName} ${line.sizeLabel}`.trim(),
         category,
         sku,
@@ -87,12 +107,17 @@ export async function runShipmentDispatch(database: Database, correlationId: str
         ...(profile.lengthCm ? { lengthCm: profile.lengthCm } : {}),
         ...(profile.widthCm ? { widthCm: profile.widthCm } : {}),
         ...(profile.heightCm ? { heightCm: profile.heightCm } : {}),
-      }];
-    });
-    if (items.length === 0) {
-      await repo.recordBookingRefused({ intentId: lease.intentId, shipmentId: lease.shipmentId, errorCode: "SKU_PROFILES_MISSING", attempts: lease.attempts, maxAttempts: lease.maxAttempts }, new Date().toISOString());
-      console.error(JSON.stringify({ level: "warn", event: "worker.shipment_dispatch_refused", errorCode: "SKU_PROFILES_MISSING", shipmentId: lease.shipmentId, skus: skus.join(",") }));
-      increment("shipment_dispatch_refused_total");
+      });
+    }
+    if (lineBlock !== null) {
+      await repo.blockDispatch({ shipmentId: lease.shipmentId, intentId: lease.intentId, orderId: lease.orderId, reason: lineBlock }, new Date().toISOString());
+      console.error(JSON.stringify({ level: "warn", event: "worker.shipment_dispatch_blocked", shipmentId: lease.shipmentId, reason: lineBlock }));
+      increment("shipment_dispatch_blocked_total");
+      continue;
+    }
+    if (items.length !== lines.length) {
+      await repo.blockDispatch({ shipmentId: lease.shipmentId, intentId: lease.intentId, orderId: lease.orderId, reason: "ITEM_COUNT_MISMATCH" }, new Date().toISOString());
+      increment("shipment_dispatch_blocked_total");
       continue;
     }
 

@@ -5,11 +5,13 @@ import {
   InMemoryTransactionManager,
   SequentialIdGenerator,
   consumeCheckoutShippingQuote,
+  consumeSubsidizedFreeQuote,
   courierOrderShipping,
   parcelizeCheckout,
   parcelsDigest,
   requestShippingRates,
   shippingCartHash,
+  subsidizedOrderShipping,
   shippingDestinationHash,
 } from "../dist/index.js";
 
@@ -54,6 +56,7 @@ function makeDeps({ provider = null, quotes = fakeQuotes(), origin = { id: "orig
   const tx = new InMemoryTransactionManager({});
   return {
     provider,
+    couriers: "jne,jnt,sicepat,lion,sap",
     tx,
     quotes,
     origins: { async findActive() { return origin; } },
@@ -107,6 +110,7 @@ test("rates keep only pickup-capable services, cap options and persist server-ow
   assert.deepEqual(result.value.options.map((option) => option.courierServiceCode), ["sicepat_best", "jne_reg"], "drop-off-only instant service filtered out, cheapest first");
   assert.equal(quotes.rows.size, 2);
   const request = provider.calls[0];
+  assert.equal(request.couriers, "jne,jnt,sicepat,lion,sap", "owner-approved courier list forwarded verbatim");
   assert.equal(request.origin.postalCode, "45363");
   assert.equal(request.destination.postalCode, "40115");
   assert.equal(request.items[0].weightGrams, 260);
@@ -173,4 +177,64 @@ test("quote consumption validates principal, cart and destination binding exactl
   assert.equal(await consumeCheckoutShippingQuote(repos, { ...base, quoteId: "sq_2", principalKey: "guest:" + "b".repeat(64) }), null, "principal mismatch rejected");
   assert.equal(await consumeCheckoutShippingQuote(repos, { ...base, quoteId: "sq_2" }), null, "cart mismatch rejected");
   assert.equal(await consumeCheckoutShippingQuote(repos, { ...base, quoteId: "sq_2", now: "2026-11-01T08:11:00.000Z" }), null, "expired quote rejected");
+});
+
+test("P1 instant services are never offered (no destination coordinates persisted)", async () => {
+  const quotes = fakeQuotes();
+  const rates = [
+    { courierCompany: "Gojek", courierName: null, courierServiceCode: "gojek_instant", courierServiceName: "Instant", serviceType: "instant", deliveryType: "now", availableForPickup: true, availableForInsurance: false, availableForInstantWaybill: true, priceIdr: 18000, shippingFeeIdr: 18000, insuranceFeeIdr: 0, currency: "IDR", durationDescription: "1 - 3 hours" },
+    { courierCompany: "JNE", courierName: null, courierServiceCode: "jne_reg", courierServiceName: "Reguler", serviceType: "standard", deliveryType: "scheduled", availableForPickup: true, availableForInsurance: false, availableForInstantWaybill: false, priceIdr: 20000, shippingFeeIdr: 20000, insuranceFeeIdr: 0, currency: "IDR", durationDescription: null },
+  ];
+  const provider = fakeProvider(rates);
+  const deps = makeDeps({ provider, quotes });
+  deps.tx.run = async (operation, work) => work({ shipping: { async authorize() { return null; } }, shippingQuotes: quotes });
+  const result = await requestShippingRates({ principalKey: "guest:" + "a".repeat(64), lines: [FLOUR_SACHET], delivery: { address: "Jl. A 1", city: "Bandung", postalCode: "40115" } }, deps);
+  assert.deepEqual(result.value.options.map((option) => option.courierServiceCode), ["jne_reg"], "instant excluded: unbookable without coordinates");
+});
+
+test("P0-C subsidized free coverage mints a Rp0 quote with the compliant cheapest courier", async () => {
+  const quotes = fakeQuotes();
+  const rates = [
+    { courierCompany: "GoSend", courierName: null, courierServiceCode: "gosend_instant", courierServiceName: "Instant", serviceType: "instant", deliveryType: "now", availableForPickup: true, availableForInsurance: false, availableForInstantWaybill: true, priceIdr: 15000, shippingFeeIdr: 15000, insuranceFeeIdr: 0, currency: "IDR", durationDescription: null },
+    { courierCompany: "Expensive", courierName: null, courierServiceCode: "exp_same", courierServiceName: "Same Day", serviceType: "same_day", deliveryType: "scheduled", availableForPickup: true, availableForInsurance: false, availableForInstantWaybill: false, priceIdr: 60000, shippingFeeIdr: 60000, insuranceFeeIdr: 0, currency: "IDR", durationDescription: null },
+    { courierCompany: "SiCepat", courierName: null, courierServiceCode: "sicepat_best", courierServiceName: "Best", serviceType: "standard", deliveryType: "scheduled", availableForPickup: true, availableForInsurance: false, availableForInstantWaybill: false, priceIdr: 18000, shippingFeeIdr: 18000, insuranceFeeIdr: 0, currency: "IDR", durationDescription: "1 - 2 days" },
+    { courierCompany: "DropOffOnly", courierName: null, courierServiceCode: "drop_reg", courierServiceName: "Reg", serviceType: "standard", deliveryType: "scheduled", availableForPickup: false, availableForInsurance: false, availableForInstantWaybill: false, priceIdr: 9000, shippingFeeIdr: 9000, insuranceFeeIdr: 0, currency: "IDR", durationDescription: null },
+  ];
+  const provider = fakeProvider(rates);
+  const deps = makeDeps({ provider, quotes });
+  deps.tx.run = async (operation, work) => work({ shipping: { async authorize(city) { return city === "Kabupaten Bogor" ? { policy: "free_promotional", amount: 0, reason: "approved" } : null; } }, shippingQuotes: quotes });
+  const input = { principalKey: "guest:" + "a".repeat(64), lines: [FLOUR_SACHET], delivery: { address: "Jl. A 1", city: "Kabupaten Bogor", postalCode: "16110" }, subsidizedFree: { maxSubsidyIdr: 50000 } };
+  const result = await requestShippingRates(input, deps);
+  assert.equal(result.value.mode, "free_promotional_subsidized");
+  assert.equal(result.value.providerAmountIdr, 18000, "cheapest COMPLIANT: instant excluded, drop-off excluded, over-cap excluded");
+  assert.equal(result.value.subsidyAmountIdr, 18000);
+  const stored = [...quotes.rows.values()][0];
+  assert.equal(stored.offeredAmountIdr, 0, "customer charge Rp0");
+  assert.equal(stored.providerAmountIdr, 18000);
+  assert.equal(stored.subsidyAmountIdr, 18000);
+  assert.equal(stored.taxPolicyVersion, "free-subsidy-v1");
+  // Subsequent request reuses the subsidized row without another provider call.
+  await requestShippingRates(input, deps);
+  assert.equal(provider.calls.length, 1);
+  // Subsidized snapshot stays Rp0 for the customer with courier identity.
+  const shipping = subsidizedOrderShipping(stored);
+  assert.deepEqual({ policy: shipping.policy, amount: shipping.amount, quoteId: shipping.quoteId, subsidyAmountIdr: shipping.subsidyAmountIdr }, { policy: "free_promotional", amount: 0, quoteId: stored.id, subsidyAmountIdr: 18000 });
+});
+
+test("P0-C guards: subsidy off / over cap / no compliant service degrade to plain free", async () => {
+  const rates = [
+    { courierCompany: "JNE", courierName: null, courierServiceCode: "jne_reg", courierServiceName: "Reguler", serviceType: "standard", deliveryType: "scheduled", availableForPickup: true, availableForInsurance: false, availableForInstantWaybill: false, priceIdr: 20000, shippingFeeIdr: 20000, insuranceFeeIdr: 0, currency: "IDR", durationDescription: null },
+  ];
+  const deps0 = makeDeps({ provider: fakeProvider(rates), quotes: fakeQuotes() });
+  deps0.tx.run = async (operation, work) => work({ shipping: { async authorize() { return { policy: "free_promotional", amount: 0, reason: "ok" }; } }, shippingQuotes: deps0.quotes });
+  const base = { principalKey: "guest:" + "a".repeat(64), lines: [FLOUR_SACHET], delivery: { address: "Jl. A 1", city: "Kabupaten Bogor", postalCode: "16110" } };
+  // Lever unset -> plain free.
+  assert.deepEqual((await requestShippingRates(base, deps0)).value, { mode: "free_promotional" });
+  // Cap below every compliant price -> plain free, nothing persisted.
+  const deps1 = makeDeps({ provider: fakeProvider(rates), quotes: fakeQuotes() });
+  deps1.tx.run = async (operation, work) => work({ shipping: { async authorize() { return { policy: "free_promotional", amount: 0, reason: "ok" }; } }, shippingQuotes: deps1.quotes });
+  assert.deepEqual((await requestShippingRates({ ...base, subsidizedFree: { maxSubsidyIdr: 10000 } }, deps1)).value, { mode: "free_promotional" });
+  assert.equal(deps1.quotes.rows.size, 0);
+  // TX1 fallback: consumeSubsidizedFreeQuote returns null with no subsidized row.
+  assert.equal(await consumeSubsidizedFreeQuote({ shippingQuotes: deps1.quotes }, { principalKey: base.principalKey, cartHash: "c".repeat(64), destinationHash: "d".repeat(64), orderId: "ord_x", now: NOW }), null);
 });

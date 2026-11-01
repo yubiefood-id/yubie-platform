@@ -84,3 +84,28 @@ Paid order appears in admin → staff packs and marks `packed` → the system
 books the courier pickup automatically → waybill appears in the order view
 and on the customer's status page. Staff never opens JNE/GoSend/Lalamove
 apps for normal dispatch.
+
+
+## 6. Merchant-subsidized free shipping (Issue #73 P0-C)
+
+- Activation lever: `SHIPPING_FREE_SUBSIDY_MAX_IDR` (positive integer). UNSET
+  = approved free coverage stays Rp0 with manual fulfillment (today's
+  behavior). Setting it arms automatic courier booking for free-covered
+  destinations.
+- Selection policy (owner-approved, encoded in
+  `requestShippingRates`): cheapest COMPLIANT service — pickup-capable,
+  non-instant, shelf-stable, price ≤ the subsidy cap. A cheaper
+  non-compliant service is never chosen.
+- Financial invariant per subsidized order: customer shipping Rp0;
+  `shipment_finance_events` records `customer_charged 0`,
+  `merchant_subsidy = provider cost`, `provider_booked = actual cost`.
+- Pilot accounting counts subsidized bookings against the same hard
+  booking-count/budget limits.
+
+## 7. Instant courier prerequisites (P1 — not yet available)
+
+Instant services (GoSend/Grab/Lalamove-style) stay excluded from quotes and
+checkout until ALL of: verified destination coordinates captured at checkout
+and persisted on the order; verified origin coordinates; service coverage
+confirmation; immutable quote binding to coordinates; pickup readiness; real
+sandbox validation. A regression test keeps them un purchasable until then.

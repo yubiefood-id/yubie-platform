@@ -106,3 +106,31 @@ unusable until approved.
   origins; help-center article is login-gated) — owner checks dashboard.
 - Wallet/billing balance mechanics and top-up lead time.
 - Exact webhook header key configured in the merchant dashboard.
+
+
+## Live sandbox verification — 2026-11-02 (owner-provided test key, never committed)
+
+Proven against `https://api.biteship.com` (account "yubiefood", test key):
+- **`couriers` is REQUIRED** on `POST /v1/rates/couriers` for this account:
+  omitted/empty → error `40001002`. Wired as `BITESHIP_COURIERS` (required
+  for any active mode).
+- **`courier_service_code` is the per-company TIER code** (`reg`, `ez`,
+  `best`, `jtr`), NOT globally unique — the service identity is
+  (company, code). Booking `courier_type` = that tier code. Our quotes store
+  the pair and booking sends `courier_company` + `courier_type` accordingly.
+- Entitled couriers returning rates on the Sumedang→Bandung lane: jne
+  (reg 9000 / jtr 60000), jnt (ez 8000), sicepat (best 13000), lion
+  (reg_pack 10500), sap (reg 12000). All pickup-capable except none excluded;
+  instant couriers absent without coordinates (as expected).
+- Order lifecycle receipt: create → `confirmed` (price 9000, waybill
+  `WYB-1793558546373`, tracking id + dev tracking link), retrieve →
+  confirmed, `POST /v1/orders/{id}/cancel` with empty body → `cancelled`
+  (default reason), retrieve confirms `cancelled`.
+  Evidence order id (safe to store): `6ae788129a30646864504949` (cancelled).
+- `GET /v1/trackings/{courier}/{waybill}` returns `success:false` in the
+  sandbox environment — live tracking needs the production environment.
+- Biteship activation requires one DELIVERED + one CANCELLED simulated
+  order: the cancel half is proven via API above; the Delivered simulation
+  is a dashboard action (owner, one click) per Biteship's help guide.
+Reproducible via the manual workflow `.github/workflows/biteship-sandbox-probe.yml`
+(environment `biteship-sandbox`, secret `BITESHIP_SANDBOX_API_KEY`).

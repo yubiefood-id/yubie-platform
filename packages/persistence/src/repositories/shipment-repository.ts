@@ -13,9 +13,17 @@ import type { Database } from "../client.js";
 export class PostgresShipmentRepository {
   constructor(private readonly database: Database) {}
 
-  /** Idempotently create the not_ready shipment for a courier-paid order (payment success). */
+  /**
+   * Idempotently create the not_ready shipment for an auto-shippable order
+   * (payment success). Courier orders always qualify; a free_promotional
+   * order qualifies ONLY when it carries a subsidized server quote
+   * (Issue #73 P0-C) — historic plain-free orders stay manual and are never
+   * backfilled.
+   */
   async ensureForPaidOrder(input: { orderId: string; checkoutRef: string; shipping: { policy: string; quoteId?: string | undefined; amount: number; providerAmountIdr?: number | undefined; subsidyAmountIdr?: number | undefined; taxAmountIdr?: number | undefined } | null; currency: string }, now: string): Promise<"created" | "existing" | "skipped"> {
-    if (!input.shipping || input.shipping.policy !== "courier") return "skipped";
+    if (!input.shipping) return "skipped";
+    const autoShippable = input.shipping.policy === "courier" || (input.shipping.policy === "free_promotional" && typeof input.shipping.quoteId === "string" && input.shipping.quoteId.length > 0);
+    if (!autoShippable) return "skipped";
     const id = `shp_${sqlFraction(input.orderId)}`;
     const rows = await this.database.db.execute(sql`INSERT INTO shipments
       (id,order_id,package_index,dispatch_generation,reference_id,status,quote_id,quoted_amount_idr,currency,weight_grams,version,created_at,updated_at)
@@ -25,6 +33,12 @@ export class PostgresShipmentRepository {
     await this.database.db.execute(sql`INSERT INTO shipment_finance_events (id,shipment_id,order_id,kind,amount_idr,currency,provider_ref,policy_version,snapshot,created_at)
       VALUES (${`fin_${sqlFraction(input.orderId)}_charge`},${id},${input.orderId},'customer_charged',${input.shipping.amount},'IDR',${input.shipping.quoteId ?? null},'order-snapshot', ${JSON.stringify({ quotedAmountIdr: input.shipping.amount, providerAmountIdr: input.shipping.providerAmountIdr ?? null, subsidyAmountIdr: input.shipping.subsidyAmountIdr ?? null, taxAmountIdr: input.shipping.taxAmountIdr ?? null })}::jsonb,${now}::timestamptz)
       ON CONFLICT DO NOTHING`);
+    const subsidy = input.shipping.subsidyAmountIdr ?? 0;
+    if (subsidy > 0) {
+      await this.database.db.execute(sql`INSERT INTO shipment_finance_events (id,shipment_id,order_id,kind,amount_idr,currency,provider_ref,policy_version,snapshot,created_at)
+        VALUES (${`fin_${sqlFraction(input.orderId)}_subsidy`},${id},${input.orderId},'merchant_subsidy',${subsidy},'IDR',${input.shipping.quoteId ?? null},'free-subsidy-v1', ${JSON.stringify({ customerShippingIdr: 0, providerAmountIdr: input.shipping.providerAmountIdr ?? null })}::jsonb,${now}::timestamptz)
+        ON CONFLICT DO NOTHING`);
+    }
     return "created";
   }
 
@@ -38,55 +52,172 @@ export class PostgresShipmentRepository {
   }
 
   /**
+   * Issue #73 P0-B — dispatch-time business blockers, mirroring the ops
+   * fulfill guards (payment verified, no holds, no refund execution, no
+   * recalled/quarantined/expired lots) plus quote-consistency: the consumed
+   * quote must exist and belong to this order. Returns a machine-readable
+   * block code or null when dispatch may proceed.
+   */
+  async dispatchBlockers(shipmentId: string, orderId: string): Promise<string | null> {
+    const rows = await this.database.client`SELECT CASE
+        WHEN o.fulfillment_hold IS NOT NULL THEN 'ORDER_HOLD'
+        WHEN EXISTS (SELECT 1 FROM ops_refund_executions r WHERE r.order_id=${orderId}) THEN 'REFUND_HOLD'
+        WHEN EXISTS (SELECT 1 FROM inventory_reservations rv JOIN inventory_lots l ON l.id=rv.lot_id
+            WHERE rv.order_id=${orderId} AND rv.status IN ('active','consumed')
+              AND (l.status IN ('recalled','quarantined','received') OR l.expiry_date<=CURRENT_DATE)) THEN 'INVENTORY_BLOCKED'
+        WHEN NOT EXISTS (SELECT 1 FROM order_payments p WHERE p.order_id=${orderId} AND p.status='succeeded'
+            AND (p.reconciliation_state IS NULL OR p.reconciliation_state IN ('', 'reconciled_by_webhook'))
+            AND p.amount=o.grand_total_amount AND p.currency='IDR' AND o.currency='IDR') THEN 'PAYMENT_UNVERIFIED'
+        WHEN s.quote_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM shipping_quotes q WHERE q.id=s.quote_id AND q.status='consumed' AND q.order_id=${orderId}) THEN 'QUOTE_MISMATCH'
+        ELSE NULL
+      END AS blocker
+      FROM shipments s JOIN orders o ON o.id=s.order_id WHERE s.id=${shipmentId}`;
+    const row = (rows as unknown as Array<{ blocker: string | null }>)[0];
+    return row ? row.blocker : "SHIPMENT_MISSING";
+  }
+
+  /**
+   * Block dispatch with a machine-readable reason: shipment -> held (a legal
+   * transition from ready/booking_pending), intent back to pending, and an
+   * append-only audit event. No provider call may have happened for this
+   * lease; the operator fixes data and requeues.
+   */
+  async blockDispatch(input: { shipmentId: string; intentId: string; orderId: string; reason: string }, now: string): Promise<void> {
+    await this.database.client.begin(async tx => {
+      await tx`UPDATE shipments SET status='held', blocked_reason=${input.reason}, version=version+1, updated_at=${now}::timestamptz WHERE id=${input.shipmentId} AND status IN ('ready','booking_pending')`;
+      await tx`UPDATE shipment_dispatch_intents SET state='pending', last_error_code=${input.reason}, updated_at=${now}::timestamptz WHERE id=${input.intentId}`;
+      // The leased reservation is released: no provider call happened for it.
+      await tx`UPDATE shipment_pilot_ledger SET state='released', updated_at=${now}::timestamptz WHERE shipment_id=${input.shipmentId} AND state='reserved'`;
+    });
+    await this.database.client`INSERT INTO audit_events (id, actor, action, resource_type, resource_id, occurred_at)
+      VALUES (${"aud_" + Math.random().toString(36).slice(2, 14)}, ${"system:dispatch"}, ${"shipment.dispatch_blocked"}, ${"shipment"}, ${input.shipmentId}, ${now}::timestamptz)`;
+  }
+
+  /** Operator requeue after fixing the block cause: held -> ready, reason cleared, intent re-armed. */
+  async requeueHeldShipment(input: { orderId: string; actor: string }, now: string): Promise<boolean> {
+    const rows = await this.database.client`UPDATE shipments SET status='ready', blocked_reason=NULL, version=version+1, updated_at=${now}::timestamptz
+      WHERE order_id=${input.orderId} AND status='held' RETURNING id`;
+    if ((rows as unknown as unknown[]).length === 0) return false;
+    await this.database.client`UPDATE shipment_dispatch_intents i SET state='pending', last_error_code=NULL, updated_at=${now}::timestamptz
+      FROM shipments s WHERE i.shipment_id=s.id AND s.order_id=${input.orderId}`;
+    await this.database.client`INSERT INTO audit_events (id, actor, action, resource_type, resource_id, occurred_at)
+      VALUES (${"aud_" + Math.random().toString(36).slice(2, 14)}, ${input.actor}, ${"shipment.dispatch_requeued"}, ${"shipment"}, ${input.orderId}, ${now}::timestamptz)`;
+    return true;
+  }
+
+  /**
    * Lease up to `limit` ready dispatch intents (pending, or leased with an
    * expired lease) and flip their shipments to booking_pending, returning the
-   * booking context. COMMIT before the provider call.
+   * booking context. COMMIT happens before any provider call.
+   *
+   * Issue #73 P0-A — with `bounds`, the claim IS the atomic reservation
+   * ledger, all inside ONE transaction under a pilot-quota advisory lock:
+   *
+   *   usage = committed (every shipment that ever received a provider order,
+   *           cost GREATEST(actual, quoted), all-time per pilot)
+   *         + reserved (shipments without a provider order whose dispatch
+   *           intent is leased/dispatched, or whose outcome is ambiguous —
+   *           booking_pending/booking_unknown hold quota until reconciled)
+   *
+   *   admission = one slot per lease while committed+reserved+quoted stays
+   *   within budget; a shipment with no quoted amount is never admitted in
+   *   bounded mode (unbounded cost). Two concurrent workers serialize on the
+   *   advisory lock, so hard limits cannot be exceeded by batching, retries
+   *   or crashes (an expired lease is reclaimed but keeps reserving until its
+   *   reference resolves the booking or a definitive failure).
    */
-  async claimDispatchIntents(limit: number, now: string, leaseMs: number): Promise<DispatchLease[]> {
-    // postgres.js tagged template (not drizzle execute): drizzle's prepared
-    // path drops the RETURNING rows of this CTE-UPDATE shape in pg driver 2.x.
-    const rows = await (this.database.client as unknown as (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Array<{ id: string; shipment_id: string; attempts: number; max_attempts: number }>>)`WITH claimed AS (
-        SELECT i.id FROM shipment_dispatch_intents i
-        JOIN shipments s ON s.id=i.shipment_id
-        WHERE (i.state='pending' OR (i.state='leased' AND i.lease_expires_at<${now}::timestamptz)) AND s.status IN ('ready','booking_pending')
-        ORDER BY i.created_at LIMIT ${limit} FOR UPDATE OF i SKIP LOCKED)
-      UPDATE shipment_dispatch_intents i SET state='leased', attempts=i.attempts+1, lease_expires_at=${new Date(Date.parse(now) + leaseMs).toISOString()}::timestamptz, updated_at=${now}::timestamptz
-      FROM claimed WHERE i.id=claimed.id RETURNING i.id, i.shipment_id, i.attempts, i.max_attempts`;
-    if (rows.length === 0) return [];
-    const leases: DispatchLease[] = [];
-    for (const claimed of rows) {
-      const context = await this.database.db.execute(sql`SELECT s.id AS shipment_id, s.order_id, s.reference_id, s.dispatch_generation, s.quote_id, s.weight_grams,
-          o.checkout_ref, o.customer_name, o.customer_phone, o.delivery_jsonb, o.shipping_jsonb, o.lines_jsonb, o.currency,
-          q.courier_company, q.courier_service_code, q.courier_service_name, q.service_type, q.delivery_type,
-          org.contact_name AS origin_contact_name, org.contact_phone AS origin_contact_phone, org.address AS origin_address, org.postal_code AS origin_postal_code, org.latitude AS origin_latitude, org.longitude AS origin_longitude
-        FROM shipments s
-        JOIN orders o ON o.id=s.order_id
-        LEFT JOIN shipping_quotes q ON q.id=s.quote_id
-        LEFT JOIN shipping_origins org ON org.id=q.origin_id
-        WHERE s.id=${claimed.shipment_id}`);
-      const c = context[0];
-      if (!c) continue;
-      await this.database.db.execute(sql`UPDATE shipments SET status='booking_pending', version=version+1, updated_at=${now}::timestamptz WHERE id=${c.shipment_id}`);
-      leases.push({ ...mapLease(c), intentId: claimed.id, attempts: claimed.attempts, maxAttempts: claimed.max_attempts });
-    }
-    return leases;
+  async claimDispatchIntents(limit: number, now: string, leaseMs: number, bounds?: { maxBookings: number; budgetIdr: number }): Promise<DispatchLease[]> {
+    const leaseUntil = new Date(Date.parse(now) + leaseMs).toISOString();
+    return await this.database.client.begin(async tx => {
+      await tx`SELECT pg_advisory_xact_lock(hashtext('shipment-pilot-quota'))`;
+      let admittedIds: string[] | null = null;
+      if (bounds) {
+        const committed = (await tx`SELECT COUNT(*)::int AS bookings, COALESCE(SUM(GREATEST(COALESCE(actual_amount_idr,0),COALESCE(quoted_amount_idr,0))),0)::bigint AS committed
+          FROM shipments WHERE provider_order_id IS NOT NULL`)[0] as { bookings: number; committed: string };
+        const reserved = (await tx`SELECT COUNT(*)::int AS bookings, COALESCE(SUM(COALESCE(s.quoted_amount_idr,0)),0)::bigint AS committed
+          FROM shipments s WHERE s.provider_order_id IS NULL AND s.status IN ('ready','booking_pending','booking_unknown')
+            AND EXISTS (SELECT 1 FROM shipment_dispatch_intents i WHERE i.shipment_id=s.id AND i.state IN ('leased','dispatched','unknown'))`)[0] as { bookings: number; committed: string };
+        let slots = bounds.maxBookings - Number(committed.bookings) - Number(reserved.bookings);
+        let budgetLeft = bounds.budgetIdr - Number(committed.committed) - Number(reserved.committed);
+        const candidates = (await tx`SELECT i.id, s.quoted_amount_idr
+          FROM shipment_dispatch_intents i JOIN shipments s ON s.id=i.shipment_id
+          WHERE (i.state='pending' OR (i.state='leased' AND i.lease_expires_at<${now}::timestamptz)) AND s.status IN ('ready','booking_pending')
+          ORDER BY i.created_at FOR UPDATE OF i SKIP LOCKED`) as unknown as Array<{ id: string; quoted_amount_idr: number | null }>;
+        admittedIds = [];
+        for (const candidate of candidates) {
+          if (admittedIds.length >= limit || slots <= 0) break;
+          const quoted = candidate.quoted_amount_idr === null ? null : Number(candidate.quoted_amount_idr);
+          if (quoted === null || quoted > budgetLeft) continue;
+          admittedIds.push(candidate.id);
+          slots -= 1;
+          budgetLeft -= quoted;
+        }
+        if (admittedIds.length === 0) return [];
+      }
+      // postgres.js tagged template (not drizzle execute): drizzle's prepared
+      // path drops the RETURNING rows of this CTE-UPDATE shape in pg driver 2.x.
+      const rows = admittedIds
+        ? await tx`UPDATE shipment_dispatch_intents i SET state='leased', attempts=i.attempts+1, lease_expires_at=${leaseUntil}::timestamptz, updated_at=${now}::timestamptz
+            WHERE i.id = ANY(${sqlArray(admittedIds)}) RETURNING i.id, i.shipment_id, i.attempts, i.max_attempts`
+        : await tx`WITH claimed AS (
+            SELECT i.id FROM shipment_dispatch_intents i
+            JOIN shipments s ON s.id=i.shipment_id
+            WHERE (i.state='pending' OR (i.state='leased' AND i.lease_expires_at<${now}::timestamptz)) AND s.status IN ('ready','booking_pending')
+            ORDER BY i.created_at LIMIT ${limit} FOR UPDATE OF i SKIP LOCKED)
+          UPDATE shipment_dispatch_intents i SET state='leased', attempts=i.attempts+1, lease_expires_at=${leaseUntil}::timestamptz, updated_at=${now}::timestamptz
+          FROM claimed WHERE i.id=claimed.id RETURNING i.id, i.shipment_id, i.attempts, i.max_attempts`;
+      const claimedRows = rows as unknown as Array<{ id: string; shipment_id: string; attempts: number; max_attempts: number }>;
+      const leases: DispatchLease[] = [];
+      for (const claimed of claimedRows) {
+        const context = (await tx`SELECT s.id AS shipment_id, s.order_id, s.reference_id, s.dispatch_generation, s.quote_id, s.weight_grams,
+            o.checkout_ref, o.customer_name, o.customer_phone, o.delivery_jsonb, o.shipping_jsonb, o.lines_jsonb, o.currency,
+            q.courier_company, q.courier_service_code AS courier_service_code, q.courier_service_code AS courier_type, q.courier_service_name, q.service_type, q.delivery_type,
+            org.contact_name AS origin_contact_name, org.contact_phone AS origin_contact_phone, org.address AS origin_address, org.postal_code AS origin_postal_code, org.latitude AS origin_latitude, org.longitude AS origin_longitude
+          FROM shipments s
+          JOIN orders o ON o.id=s.order_id
+          LEFT JOIN shipping_quotes q ON q.id=s.quote_id
+          LEFT JOIN shipping_origins org ON org.id=q.origin_id
+          WHERE s.id=${claimed.shipment_id}`) as unknown as Array<Record<string, unknown>>;
+        const c = context[0];
+        if (!c) continue;
+        await tx`UPDATE shipments SET status='booking_pending', version=version+1, updated_at=${now}::timestamptz WHERE id=${String(c.shipment_id)}`;
+        leases.push({ ...mapLease(c), intentId: claimed.id, attempts: Number(claimed.attempts), maxAttempts: Number(claimed.max_attempts) });
+      }
+      return leases;
+    });
   }
 
   /** Provider accepted the booking (or a reference-conflict recovery verified by getOrder). */
+  /**
+   * Provider accepted the booking (or a reference-conflict recovery verified
+   * by getOrder). Ledger row flips reserved->committed in the SAME
+   * transaction as the provider-order persistence, so pilot accounting can
+   * never drift.
+   */
   async recordBookingAccepted(input: { intentId: string; shipmentId: string; orderId: string; providerOrderId: string; referenceId: string; priceIdr: number | null; waybillId: string | null; trackingId: string | null; trackingUrl: string | null; courierCompany: string | null; courierType: string | null; rawStatus: string | null }, now: string): Promise<void> {
-    await this.database.db.execute(sql`UPDATE shipments SET status='booked', provider_order_id=${input.providerOrderId}, courier_company=COALESCE(${input.courierCompany},courier_company), courier_service=COALESCE(courier_service,${input.courierCompany}), courier_type=COALESCE(courier_type,${input.courierType}), waybill_id=COALESCE(${input.waybillId},waybill_id), tracking_id=COALESCE(${input.trackingId},tracking_id), tracking_url=COALESCE(${input.trackingUrl},tracking_url), actual_amount_idr=COALESCE(${input.priceIdr},actual_amount_idr), latest_provider_status=${input.rawStatus}, version=version+1, updated_at=${now}::timestamptz WHERE id=${input.shipmentId} AND status IN ('booking_pending','booking_unknown','ready')`);
-    await this.database.db.execute(sql`UPDATE shipment_dispatch_intents SET state='complete', updated_at=${now}::timestamptz WHERE id=${input.intentId}`);
-    if (input.priceIdr !== null) {
-      await this.database.db.execute(sql`INSERT INTO shipment_finance_events (id,shipment_id,order_id,kind,amount_idr,currency,provider_ref,snapshot,created_at)
-        VALUES (${`fin_${sqlFraction(input.shipmentId)}_booked`},${input.shipmentId},${input.orderId},'provider_booked',${input.priceIdr},'IDR',${input.providerOrderId},${JSON.stringify({ referenceId: input.referenceId, rawStatus: input.rawStatus })}::jsonb,${now}::timestamptz) ON CONFLICT DO NOTHING`);
-    }
+    await this.database.client.begin(async tx => {
+      await tx`UPDATE shipments SET status='booked', provider_order_id=${input.providerOrderId}, courier_company=COALESCE(${input.courierCompany},courier_company), courier_service=COALESCE(courier_service,${input.courierCompany}), courier_type=COALESCE(courier_type,${input.courierType}), waybill_id=COALESCE(${input.waybillId},waybill_id), tracking_id=COALESCE(${input.trackingId},tracking_id), tracking_url=COALESCE(${input.trackingUrl},tracking_url), actual_amount_idr=COALESCE(${input.priceIdr},actual_amount_idr), latest_provider_status=${input.rawStatus}, version=version+1, updated_at=${now}::timestamptz WHERE id=${input.shipmentId} AND status IN ('booking_pending','booking_unknown','ready')`;
+      await tx`UPDATE shipment_dispatch_intents SET state='complete', updated_at=${now}::timestamptz WHERE id=${input.intentId}`;
+      await tx`INSERT INTO shipment_pilot_ledger (id, shipment_id, reference_id, state, amount_idr, created_at, updated_at)
+        VALUES (${"led_" + Math.random().toString(36).slice(2, 14)}, ${input.shipmentId}, ${input.referenceId}, 'committed', ${input.priceIdr ?? 0}, ${now}::timestamptz, ${now}::timestamptz)
+        ON CONFLICT (shipment_id) DO UPDATE SET state='committed', amount_idr=COALESCE(EXCLUDED.amount_idr, shipment_pilot_ledger.amount_idr), updated_at=EXCLUDED.updated_at`;
+      if (input.priceIdr !== null) {
+        await tx`INSERT INTO shipment_finance_events (id,shipment_id,order_id,kind,amount_idr,currency,provider_ref,snapshot,created_at)
+          VALUES (${`fin_${sqlFraction(input.shipmentId)}_booked`},${input.shipmentId},${input.orderId},'provider_booked',${input.priceIdr},'IDR',${input.providerOrderId},${JSON.stringify({ referenceId: input.referenceId, rawStatus: input.rawStatus })}::jsonb,${now}::timestamptz) ON CONFLICT DO NOTHING`;
+      }
+    });
   }
 
   /** Definitive provider refusal (validation): intent dead or retried on a new generation by ops. */
   async recordBookingRefused(input: { intentId: string; shipmentId: string; errorCode: string; attempts: number; maxAttempts: number }, now: string): Promise<void> {
     const dead = input.attempts >= input.maxAttempts;
-    await this.database.db.execute(sql`UPDATE shipment_dispatch_intents SET state=${dead ? "dead" : "pending"}, last_error_code=${input.errorCode}, updated_at=${now}::timestamptz WHERE id=${input.intentId}`);
-    await this.database.db.execute(sql`UPDATE shipments SET status=${dead ? "failed" : "ready"}, version=version+1, updated_at=${now}::timestamptz WHERE id=${input.shipmentId} AND status='booking_pending'`);
+    await this.database.client.begin(async tx => {
+      await tx`UPDATE shipment_dispatch_intents SET state=${dead ? "dead" : "pending"}, last_error_code=${input.errorCode}, updated_at=${now}::timestamptz WHERE id=${input.intentId}`;
+      await tx`UPDATE shipments SET status=${dead ? "failed" : "ready"}, version=version+1, updated_at=${now}::timestamptz WHERE id=${input.shipmentId} AND status='booking_pending'`;
+      // A definitive provider refusal releases the reservation ONLY when the
+      // lease dies; a same-lease retry keeps reserving (conservative).
+      if (dead) await tx`UPDATE shipment_pilot_ledger SET state='released', updated_at=${now}::timestamptz WHERE shipment_id=${input.shipmentId} AND state='reserved'`;
+    });
   }
 
   /** Ambiguous provider outcome: freeze for reconciliation; never blind-retry. */
@@ -124,7 +255,12 @@ export class PostgresShipmentRepository {
     const row = rows[0] as { id: string; status: string } | undefined;
     if (!row) return false;
     if (!canTransitionShipment(row.status as ShipmentStatus, status)) return false;
-    await this.database.db.execute(sql`UPDATE shipments SET status=${status}, version=version+1, updated_at=${now}::timestamptz WHERE id=${row.id}`);
+    await this.database.client.begin(async tx => {
+      await tx`UPDATE shipments SET status=${status}, version=version+1, updated_at=${now}::timestamptz WHERE id=${row.id}`;
+      if (status === "cancelled" || status === "failed") {
+        await tx`UPDATE shipment_pilot_ledger SET state='released', updated_at=${now}::timestamptz WHERE shipment_id=${row.id} AND state='reserved'`;
+      }
+    });
     return true;
   }
 
@@ -156,11 +292,14 @@ export class PostgresShipmentRepository {
     return row ? { id: row.id, orderId: row.order_id, status: row.status, waybillId: row.waybill_id, courierCompany: row.courier_company } : null;
   }
 
-  /** Pilot budget guard: booked shipments + committed provider cost inside the window. */
+  /** Pilot usage snapshot (observability; enforcement lives in the bounded claim): every provider order ever created, cost GREATEST(actual, quoted). */
   async pilotUsage(now: string): Promise<{ bookings: number; committedIdr: number }> {
-    const rows = await this.database.db.execute(sql`SELECT COUNT(*)::int AS bookings, COALESCE(SUM(COALESCE(actual_amount_idr,quoted_amount_idr,0)),0)::int AS committed FROM shipments WHERE status NOT IN ('cancelled','failed','returned') AND provider_order_id IS NOT NULL AND created_at > ${now}::timestamptz - interval '30 days'`);
-    const row = rows[0] as { bookings: number; committed: number };
-    return { bookings: row.bookings, committedIdr: row.committed };
+    void now;
+    const rows = await this.database.client`SELECT COUNT(*) FILTER (WHERE l.state <> 'released')::int AS bookings,
+        COALESCE(SUM(CASE WHEN l.state='committed' THEN GREATEST(l.amount_idr, COALESCE(s.actual_amount_idr, 0)) ELSE l.amount_idr END),0)::bigint AS cost
+      FROM shipment_pilot_ledger l JOIN shipments s ON s.id=l.shipment_id WHERE l.state <> 'released'`;
+    const row = (rows as unknown as Array<{ bookings: number; cost: string }>)[0] ?? { bookings: 0, cost: "0" };
+    return { bookings: row.bookings, committedIdr: Number(row.cost) };
   }
 }
 
@@ -224,6 +363,11 @@ export async function markShipmentReadyForDispatchTx(tx: unknown, input: { order
   const run = (tx as { unsafe: (query: string, values?: unknown[]) => Promise<unknown[]> }).unsafe.bind(tx) as (query: string, values: unknown[]) => Promise<unknown[]>;
   await run("UPDATE shipments SET status='ready', weight_grams=COALESCE($1,weight_grams), version=version+1, updated_at=$2::timestamptz WHERE order_id=$3 AND status IN ('not_ready','failed','held')", [input.weightGrams, now, input.orderId]);
   await run("INSERT INTO shipment_dispatch_intents (id,shipment_id,generation,reference_id,state,attempts,max_attempts,created_at,updated_at) SELECT 'int_' || left(md5(s.id), 12) || '_g' || s.dispatch_generation, s.id, s.dispatch_generation, s.reference_id, 'pending', 0, 5, $2::timestamptz, $2::timestamptz FROM shipments s WHERE s.order_id=$1 AND s.status='ready' ON CONFLICT(shipment_id,generation) DO UPDATE SET state='pending', updated_at=EXCLUDED.updated_at", [input.orderId, now]);
+}
+
+/** postgres.js accepts plain arrays as parameters; typed helper keeps tsc happy. */
+function sqlArray(values: string[]): string[] {
+  return values;
 }
 
 function sanitizeRef(value: string): string {

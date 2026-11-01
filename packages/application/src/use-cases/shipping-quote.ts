@@ -145,11 +145,14 @@ export interface ShippingRateOption {
 
 export type ShippingRatesOutcome =
   | { mode: "free_promotional" }
+  | { mode: "free_promotional_subsidized"; quoteId: string; courierCompany: string; courierServiceCode: string; courierServiceName: string | null; providerAmountIdr: number; subsidyAmountIdr: number; validUntil: string }
   | { mode: "unavailable"; reason: "missing_postal_code" | "no_origin" | "missing_profiles" | "perishable_unapproved" | "no_coverage" | "provider_unconfigured" }
   | { mode: "courier"; options: ShippingRateOption[]; validUntil: string };
 
 export interface ShippingRatesDeps {
   provider: ShippingProviderPort | null;
+  /** Owner-approved courier list; the live API rejects empty lists (error 40001002). */
+  couriers?: string | null;
   /** Coverage + quote persistence run transactionally; provider calls never do. */
   tx: { run<T>(operation: string, work: (repos: TransactionalRepositories) => Promise<T>): Promise<T> };
   /** Absent on non-transactional (preview/in-memory) deployments: courier quotes are then never offered. */
@@ -169,7 +172,7 @@ export interface ShippingRatesDeps {
  * per keystroke. No HTTP call happens inside a transaction.
  */
 export async function requestShippingRates(
-  input: { principalKey: string; lines: ReadonlyArray<{ productId: string; sizeId: string; quantity: number }>; delivery: { address: string; city: string; postalCode?: string | null | undefined } },
+  input: { principalKey: string; lines: ReadonlyArray<{ productId: string; sizeId: string; quantity: number }>; delivery: { address: string; city: string; postalCode?: string | null | undefined }; subsidizedFree?: { maxSubsidyIdr: number } | undefined },
   deps: ShippingRatesDeps,
 ): Promise<UseCaseResult<ShippingRatesOutcome>> {
   const now = deps.clock.now();
@@ -181,7 +184,80 @@ export async function requestShippingRates(
   }
 
   const covered = await deps.tx.run("shipping.coverage", async (repos) => (repos.shipping ? repos.shipping.authorize(input.delivery.city, now) : null));
-  if (covered) return ok({ mode: "free_promotional" });
+  if (covered) {
+    // Issue #73 P0-C: free coverage stays Rp0 for the customer, but when the
+    // owner has armed the subsidy lever the server still resolves a REAL
+    // pickup courier and records the merchant-subsidized provider cost so
+    // packing triggers automatic booking. Selection policy (owner-approved):
+    // cheapest COMPLIANT service - pickup-capable, non-instant, food-suitable
+    // and within the approved subsidy cap; a cheaper non-compliant service is
+    // never chosen. Any guard failing degrades to plain free (no auto-booking)
+    // rather than rejecting an operator-approved promotion.
+    const subsidy = input.subsidizedFree;
+    if (!subsidy || !deps.provider || !deps.quotes || !deps.origins || !deps.profiles) return ok({ mode: "free_promotional" });
+    const freePostal = input.delivery.postalCode?.trim() ?? "";
+    if (!freePostal) return ok({ mode: "free_promotional" });
+    const freeOrigin = await deps.origins.findActive(now);
+    if (!freeOrigin || !freeOrigin.postalCode) return ok({ mode: "free_promotional" });
+    const freeSkus = priced.map((line) => checkoutLineSku(line.productId, line.sizeId)).filter((sku): sku is string => sku !== null);
+    const freeProfiles = new Map((await deps.profiles.findEffective(freeSkus, now)).map((profile) => [profile.sku, profile]));
+    const freeParcel = parcelizeCheckout(input.lines, freeProfiles);
+    if (!freeParcel.complete || freeParcel.perishable) return ok({ mode: "free_promotional" });
+    const freeCartHash = shippingCartHash(input.lines);
+    const freeDestinationHash = shippingDestinationHash(input.delivery);
+    const reusableFree = await deps.quotes.listUsable({ principalKey: input.principalKey, cartHash: freeCartHash, destinationHash: freeDestinationHash, now });
+    const existingSubsidized = reusableFree.ok ? reusableFree.value.filter((quote) => quote.subsidyAmountIdr > 0) : [];
+    if (existingSubsidized.length > 0) {
+      const quote = existingSubsidized[0]!;
+      return ok({ mode: "free_promotional_subsidized", quoteId: quote.id, courierCompany: quote.courierCompany, courierServiceCode: quote.courierServiceCode, courierServiceName: quote.courierServiceName, providerAmountIdr: quote.providerAmountIdr, subsidyAmountIdr: quote.subsidyAmountIdr, validUntil: quote.validUntil });
+    }
+    const freeRates = await deps.provider.getRates({
+      origin: { postalCode: freeOrigin.postalCode },
+      destination: { postalCode: freePostal },
+      couriers: deps.couriers ?? undefined,
+      items: freeParcel.items.map((item) => ({
+        name: item.name, category: item.category, sku: item.sku, valueIdr: item.valueIdr, quantity: item.quantity, weightGrams: item.weightGrams,
+        ...(item.lengthCm ? { lengthCm: item.lengthCm } : {}), ...(item.widthCm ? { widthCm: item.widthCm } : {}), ...(item.heightCm ? { heightCm: item.heightCm } : {}),
+      })),
+    });
+    if (!freeRates.ok) return ok({ mode: "free_promotional" });
+    const compliant = freeRates.value
+      .filter((rate) => rate.availableForPickup && rate.deliveryType !== "now" && Number.isSafeInteger(rate.priceIdr) && rate.priceIdr > 0 && rate.priceIdr <= subsidy.maxSubsidyIdr)
+      .sort((a, b) => a.priceIdr - b.priceIdr)[0];
+    if (!compliant) return ok({ mode: "free_promotional" });
+    const freeValidUntil = new Date(Date.parse(now) + SHIPPING_QUOTE_TTL_MS).toISOString();
+    const subsidizedQuote: ShippingQuoteRecord = {
+      id: `sq_${deps.ids.nextId()}`,
+      principalKey: input.principalKey,
+      cartHash: freeCartHash,
+      destinationHash: freeDestinationHash,
+      originId: freeOrigin.id,
+      parcelsDigest: parcelsDigest(freeParcel.items),
+      courierCompany: compliant.courierCompany,
+      courierServiceCode: compliant.courierServiceCode,
+      courierServiceName: compliant.courierServiceName,
+      serviceType: compliant.serviceType,
+      deliveryType: compliant.deliveryType ?? "scheduled",
+      offeredAmountIdr: 0,
+      providerAmountIdr: compliant.priceIdr,
+      subsidyAmountIdr: compliant.priceIdr,
+      taxAmountIdr: 0,
+      taxPolicyVersion: "free-subsidy-v1",
+      currency: "IDR",
+      status: "quoted",
+      validUntil: freeValidUntil,
+      createdAt: now,
+      consumedAt: null,
+      orderId: null,
+    };
+    const freeInserted = await deps.tx.run("shipping.quotes.insert", async (repos) => {
+      if (!repos.shippingQuotes) return false;
+      await repos.shippingQuotes.insert(subsidizedQuote);
+      return true;
+    });
+    if (!freeInserted) return ok({ mode: "free_promotional" });
+    return ok({ mode: "free_promotional_subsidized", quoteId: subsidizedQuote.id, courierCompany: subsidizedQuote.courierCompany, courierServiceCode: subsidizedQuote.courierServiceCode, courierServiceName: subsidizedQuote.courierServiceName, providerAmountIdr: subsidizedQuote.providerAmountIdr, subsidyAmountIdr: subsidizedQuote.subsidyAmountIdr, validUntil: freeValidUntil });
+  }
 
   const postalCode = input.delivery.postalCode?.trim() ?? "";
   if (!postalCode) return ok({ mode: "unavailable", reason: "missing_postal_code" });
@@ -206,14 +282,16 @@ export async function requestShippingRates(
   // Reuse still-valid stored quotes for the same triple (cost discipline).
   if (deps.quotes) {
     const reusable = await deps.quotes.listUsable({ principalKey: input.principalKey, cartHash, destinationHash, now });
-    if (reusable.ok && reusable.value.length > 0) {
-      return ok({ mode: "courier", options: reusable.value.map(quoteToOption), validUntil: reusable.value[0]!.validUntil });
+    const paidQuotes = reusable.ok ? reusable.value.filter((quote) => quote.subsidyAmountIdr === 0) : [];
+    if (paidQuotes.length > 0) {
+      return ok({ mode: "courier", options: paidQuotes.map(quoteToOption), validUntil: paidQuotes[0]!.validUntil });
     }
   }
 
   const rates = await deps.provider.getRates({
     origin: { postalCode: origin.postalCode },
     destination: { postalCode },
+    couriers: deps.couriers ?? undefined,
     items: parcel.items.map((item) => ({
       name: item.name,
       category: item.category,
@@ -316,6 +394,44 @@ export async function consumeCheckoutShippingQuote(
   const consumed = await repos.shippingQuotes.consume(quote.id, input.orderId, input.now);
   if (!consumed.ok || !consumed.value) return null;
   return quote;
+}
+
+/**
+ * Issue #73 P0-C TX1 hook for free-covered destinations: find the latest
+ * still-quoted SUBSIDIZED row for this principal/cart/destination and consume
+ * it exactly once. Returns null when none exists (plain free Rp0, manual
+ * fulfillment - the historic behavior; historic orders are never backfilled).
+ */
+export async function consumeSubsidizedFreeQuote(
+  repos: Pick<TransactionalRepositories, "shippingQuotes">,
+  input: { principalKey: string; cartHash: string; destinationHash: string; orderId: string; now: string },
+): Promise<ShippingQuoteRecord | null> {
+  if (!repos.shippingQuotes) return null;
+  const usable = await repos.shippingQuotes.listUsable({ principalKey: input.principalKey, cartHash: input.cartHash, destinationHash: input.destinationHash, now: input.now });
+  if (!usable.ok) return null;
+  const subsidized = usable.value.filter((quote) => quote.subsidyAmountIdr > 0)[0];
+  if (!subsidized) return null;
+  const consumed = await repos.shippingQuotes.consume(subsidized.id, input.orderId, input.now);
+  if (!consumed.ok || !consumed.value) return null;
+  return subsidized;
+}
+
+/** Rp0 customer charge with the merchant-subsidized courier identity snapshotted. */
+export function subsidizedOrderShipping(quote: ShippingQuoteRecord): OrderShipping {
+  return {
+    policy: "free_promotional",
+    amount: 0,
+    reason: `Merchant-subsidized courier ${quote.courierCompany} ${quote.courierServiceCode}`,
+    quoteId: quote.id,
+    courierCompany: quote.courierCompany,
+    courierServiceCode: quote.courierServiceCode,
+    ...(quote.courierServiceName ? { courierServiceName: quote.courierServiceName } : {}),
+    deliveryType: quote.deliveryType,
+    providerAmountIdr: quote.providerAmountIdr,
+    subsidyAmountIdr: quote.subsidyAmountIdr,
+    taxAmountIdr: 0,
+    taxPolicyVersion: quote.taxPolicyVersion,
+  };
 }
 
 /** Snapshot a consumed quote onto the order (immutable once written). */

@@ -12,7 +12,7 @@ export async function handleOperationsRequest(request: Request, subject: string,
   const resource = /^\/v1\/([a-z-]+)$/.exec(url.pathname)?.[1];
   const detail = new RegExp(`^/v1/orders/${ids}$`).exec(url.pathname);
   const action = new RegExp(`^/v1/requests/${ids}/(approve|apply|refund-execution|refund-confirmation)$`).exec(url.pathname);
-  const orderAction = new RegExp(`^/v1/orders/${ids}/(fulfillment|notes)$`).exec(url.pathname);
+  const orderAction = new RegExp(`^/v1/orders/${ids}/(fulfillment|notes|shipment\/requeue)$`).exec(url.pathname);
   const paymentAction = new RegExp(`^/v1/payments/${ids}/(reconcile|triage)$`).exec(url.pathname);
   const known = resource && Object.hasOwn(getPermissions, resource) || detail || action || orderAction || paymentAction || ["/v1/inventory/preview", "/v1/reports/daily", "/v1/checkout-freeze"].includes(url.pathname);
   if (!known) return null;
@@ -31,7 +31,7 @@ export async function handleOperationsRequest(request: Request, subject: string,
       return json({ ok: false, code: "METHOD_NOT_ALLOWED" }, 405);
     }
     if (request.method !== "POST") return json({ ok: false, code: "METHOD_NOT_ALLOWED" }, 405);
-    let permission: OperationsPermission | null = url.pathname === "/v1/checkout-freeze" ? "inventory:apply" : resource === "staff" ? "staff:manage" : url.pathname === "/v1/inventory/preview" ? "inventory:propose" : orderAction?.[2] === "fulfillment" ? "fulfillment:write" : orderAction?.[2] === "notes" ? "notes:write" : paymentAction?.[2] === "reconcile" ? "reconciliation:request" : paymentAction?.[2] === "triage" ? "exceptions:triage" : action?.[2]?.startsWith("refund-") ? "refunds:record" : null;
+    let permission: OperationsPermission | null = url.pathname === "/v1/checkout-freeze" ? "inventory:apply" : resource === "staff" ? "staff:manage" : url.pathname === "/v1/inventory/preview" ? "inventory:propose" : orderAction?.[2] === "fulfillment" ? "fulfillment:write" : orderAction?.[2] === "notes" ? "notes:write" : orderAction?.[2] === "shipment/requeue" ? "fulfillment:write" : paymentAction?.[2] === "reconcile" ? "reconciliation:request" : paymentAction?.[2] === "triage" ? "exceptions:triage" : action?.[2]?.startsWith("refund-") ? "refunds:record" : null;
     if (permission && !allowed(permission)) return json({ ok: false, code: "FORBIDDEN" }, 403);
     if (action?.[2] === "approve" && !["inventory:approve", "shipping:approve", "refunds:approve"].some(p => allowed(p as OperationsPermission))) return json({ ok: false, code: "FORBIDDEN" }, 403);
     if (action?.[2] === "apply" && !["inventory:apply", "shipping:apply", "refunds:record"].some(p => allowed(p as OperationsPermission))) return json({ ok: false, code: "FORBIDDEN" }, 403);
@@ -57,7 +57,9 @@ export async function handleOperationsRequest(request: Request, subject: string,
       else if (action[2] === "refund-execution") data = await operations.recordRefund(subject, key, id, refundExecutionSchema.parse(body));
       else data = await operations.confirmRefund(subject, key, id, operationsApprovalSchema.parse(body));
     } else if (orderAction) {
-      data = orderAction[2] === "fulfillment" ? await operations.fulfill(subject, key, orderAction[1]!, fulfillmentCommandSchema.parse(body)) : await operations.addNote(subject, key, orderAction[1]!, operationNoteSchema.parse(body));
+      if (orderAction[2] === "fulfillment") data = await operations.fulfill(subject, key, orderAction[1]!, fulfillmentCommandSchema.parse(body));
+      else if (orderAction[2] === "shipment/requeue") data = await operations.requeueShipment?.(subject, key, orderAction[1]!, operationsApprovalSchema.pick({ reason: true }).parse(body).reason) ?? { orderId: orderAction[1], requeued: false };
+      else data = await operations.addNote(subject, key, orderAction[1]!, operationNoteSchema.parse(body));
     } else if (paymentAction) {
       if (paymentAction[2] === "reconcile") {
         const input = operationsApprovalSchema.pick({ reason: true }).parse(body);

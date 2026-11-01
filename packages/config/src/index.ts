@@ -630,6 +630,15 @@ export interface ShippingRuntimeConfig {
   /** Pilot bounds; required for "pilot", optional otherwise. */
   pilotMaxBookings: number | null;
   pilotBudgetIdr: number | null;
+  /**
+   * Issue #73 P0-C activation lever for merchant-subsidized free shipping:
+   * the maximum approved provider cost Yubie pays per free-covered order.
+   * UNSET keeps today's behavior exactly (free coverage without automatic
+   * courier booking). A positive integer arms the subsidized path.
+   */
+  freeSubsidyMaxIdr: number | null;
+  /** Owner-approved courier list for rate queries (required once a provider is admitted and mode != disabled). */
+  biteshipCouriers: string | null;
 }
 
 export type ShippingRuntimeConfigInspection =
@@ -669,7 +678,7 @@ export function parseBiteshipEnvName(raw: string | undefined): BiteshipEnvName {
   throw new RuntimeConfigError("BITESHIP_ENV must be sandbox or production (explicit selection; production is a reviewed operator gate)");
 }
 
-function parsePositiveInteger(env: RuntimeEnvSource, varName: "SHIPPING_PILOT_MAX_BOOKINGS" | "SHIPPING_PILOT_BUDGET_IDR"): number | null {
+function parsePositiveInteger(env: RuntimeEnvSource, varName: "SHIPPING_PILOT_MAX_BOOKINGS" | "SHIPPING_PILOT_BUDGET_IDR" | "SHIPPING_FREE_SUBSIDY_MAX_IDR"): number | null {
   const raw = env[varName];
   if (raw === undefined || raw === "") return null;
   const value = Number(raw);
@@ -713,6 +722,13 @@ export function parseShippingRuntimeConfig(env: RuntimeEnvSource = process.env):
   let webhookSecretHeader: string | null = null;
   let pilotMaxBookings: number | null = null;
   let pilotBudgetIdr: number | null = null;
+  let freeSubsidyMaxIdr: number | null = null;
+  const biteshipCouriers = (env.BITESHIP_COURIERS ?? "").trim() || null;
+  try {
+    freeSubsidyMaxIdr = parsePositiveInteger(env, "SHIPPING_FREE_SUBSIDY_MAX_IDR");
+  } catch (error) {
+    errors.push(configMessage(error));
+  }
 
   if (provider === "biteship") {
     biteshipApiKeyConfigured = Boolean(env.BITESHIP_API_KEY);
@@ -743,6 +759,9 @@ export function parseShippingRuntimeConfig(env: RuntimeEnvSource = process.env):
       errors.push(`SHIPPING_EXECUTION_MODE=${mode} requires BITESHIP_WEBHOOK_SECRET (webhook authenticity must be verifiable before any booking)`);
     } else {
       webhookSecretHeader = (env.BITESHIP_WEBHOOK_SECRET_HEADER ?? "").trim() || DEFAULT_BITESHIP_WEBHOOK_SECRET_HEADER;
+    }
+    if (provider === "biteship" && !biteshipCouriers) {
+      errors.push(`SHIPPING_EXECUTION_MODE=${mode} requires BITESHIP_COURIERS (live Biteship rate calls reject an empty courier list)`);
     }
     if (mode === "sandbox" && biteshipEnv !== null && biteshipEnv !== "sandbox") {
       errors.push("SHIPPING_EXECUTION_MODE=sandbox requires BITESHIP_ENV=sandbox");
@@ -781,6 +800,8 @@ export function parseShippingRuntimeConfig(env: RuntimeEnvSource = process.env):
     webhookSecretHeader,
     pilotMaxBookings,
     pilotBudgetIdr,
+    freeSubsidyMaxIdr,
+    biteshipCouriers,
   };
 }
 
