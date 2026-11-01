@@ -38,7 +38,10 @@ Verdict values: `PENDING`, `IMPLEMENTED`, `TESTED_MOCK`, `TESTED_PG`,
 | Server-authorized picked→shipped / delivered→completed | IMPLEMENTED + TESTED_PG | acceptance test 1 (PR #68) |
 | Customer tracking + admin shipment visibility | IMPLEMENTED + TESTED_MOCK | tracking gate 1/1; panel behind confirmed payment (PR #69) |
 | Onboarding manual + operator checklist | DONE | docs/shipping/BITESHIP_ONBOARDING_MANUAL.md (PR #70) |
+| Full implementation merged to main | DONE | main 8634dc5 (PR #65 + consolidated PR #71; 5/5 checks green) 2026-11-01 |
 | Browser E2E delivery-options specs | PENDING | mock-tier additions deferred to post-merge hardening |
+| RC artifact publication | BLOCKED_OPERATOR | run 41314287547 waiting on the protected staging-publication approval in GitHub (owner) |
+| Production deploy (mode=disabled) | BLOCKED_OPERATOR | controlled-release root bootstrap (OWNER_SETUP) + authorization.json are owner-only by design; live backend verified still d8a660d, ipaymu, db connected (read-only, 2026-11-01) |
 | Sandbox acceptance (Delivered+Cancelled) | BLOCKED_EXTERNAL | needs owner Biteship account + sandbox key |
 | Production deploy (mode=disabled) | PENDING | via docs/production/2026-10-26/CONTROLLED_RELEASE.md |
 | Shadow / sandbox / pilot / enabled | BLOCKED_EXTERNAL | gated in order; owner activation steps in the manual |
