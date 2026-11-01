@@ -50,7 +50,10 @@ test("activate location autofills the address and free-shipping city from the se
   await page.getByLabel("Email").fill("browser-test@example.invalid");
   await page.getByLabel("No. WhatsApp").fill("080000000000");
 
-  await expect(page.getByRole("button", { name: /Gratis ongkir — Kabupaten Bogor/ })).toBeVisible();
+  // The city is a dropdown of the server's covered cities, with the free-ongkir
+  // instruction rendered directly under the field.
+  await expect(page.getByRole("combobox", { name: "Kota", exact: true })).toContainText("Kabupaten Bogor");
+  await expect(page.getByText(/Gratis ongkir \(Rp0\) saat ini tersedia untuk: Kabupaten Bogor/)).toBeVisible();
   await page.getByRole("button", { name: "📍 Aktifkan lokasi saya" }).click();
 
   await expect(page.getByRole("textbox", { name: "Alamat lengkap" })).toHaveValue(/Cibinong/);
@@ -60,10 +63,11 @@ test("activate location autofills the address and free-shipping city from the se
   await expect(page.getByText(/Gratis ongkir ke Kabupaten Bogor/)).toBeVisible();
 });
 
-test("the free-shipping chip fills the city without geolocation", async ({ page }) => {
+test("picking the covered city from the dropdown selects free shipping without geolocation", async ({ page }) => {
   await page.goto("/products");
   await page.getByRole("button", { name: "Tambah", exact: true }).first().click();
   await page.goto("/checkout");
-  await page.getByRole("button", { name: /Gratis ongkir — Kabupaten Bogor/ }).click();
+  await page.getByRole("combobox", { name: "Kota", exact: true }).selectOption("Kabupaten Bogor");
   await expect(page.getByRole("combobox", { name: "Kota", exact: true })).toHaveValue("Kabupaten Bogor");
+  await expect(page.getByText(/🚚 Gratis ongkir — pengiriman ke Kabupaten Bogor gratis \(Rp0\)/)).toBeVisible();
 });

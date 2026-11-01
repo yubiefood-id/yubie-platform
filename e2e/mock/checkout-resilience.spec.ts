@@ -38,7 +38,7 @@ test("inputs stay fillable when the checkout session probe fails", async ({ page
   await page.getByLabel("Email").fill("mobile-user@example.invalid");
   await page.getByLabel("No. WhatsApp").fill("080000000000");
   await page.getByLabel("Alamat lengkap").fill("Jl. Raya Cibinong No. 1");
-  await page.getByRole("combobox", { name: "Kota", exact: true }).fill("Kabupaten Bogor");
+  await page.getByRole("combobox", { name: "Kota", exact: true }).selectOption("Kabupaten Bogor");
   await expect(page.getByLabel("Email")).toHaveValue("mobile-user@example.invalid");
   await expect(page.getByRole("combobox", { name: "Kota", exact: true })).toHaveValue("Kabupaten Bogor");
   await expect(page.getByText(/Gratis ongkir ke Kabupaten Bogor/)).toBeVisible();
@@ -62,7 +62,7 @@ test("legacy mobile browsers (no Web Locks, no AbortSignal.timeout) can complete
   await page.getByLabel("Email").fill("legacy-ios@example.invalid");
   await page.getByLabel("No. WhatsApp").fill("080000000000");
   await page.getByLabel("Alamat lengkap").fill("Jl. Raya Cibinong No. 1");
-  await page.getByRole("button", { name: /Gratis ongkir — Kabupaten Bogor/ }).click();
+  await page.getByRole("combobox", { name: "Kota", exact: true }).selectOption("Kabupaten Bogor");
   await expect(page.getByRole("combobox", { name: "Kota", exact: true })).toHaveValue("Kabupaten Bogor");
   await expect(page.getByText(/Gratis ongkir ke Kabupaten Bogor/)).toBeVisible();
   await expect(page.getByRole("button", { name: /^Bayar Rp/ })).toBeEnabled();

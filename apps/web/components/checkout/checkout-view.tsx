@@ -34,6 +34,9 @@ interface CheckoutFormState {
 
 const EMPTY_FORM: CheckoutFormState = { email: "", name: "", phone: "", address: "", city: "", postalCode: "" };
 
+/** Select sentinel for a destination outside the current free-shipping coverage. */
+const OTHER_CITY = "__other__";
+
 /**
  * Live checkout state machine: idle → validating → creating checkout →
  * redirect to the provider-hosted page. If the backend is still in preview
@@ -237,6 +240,13 @@ export function CheckoutView() {
   };
 
   const busy = phase === "creating" || phase === "redirecting";
+  // City selection UX: when the server publishes free-shipping coverage, the
+  // city is a plain choice (one tap on mobile) with the free-ongkir instruction
+  // directly under the field; a text fallback stays available for uncovered or
+  // unknown destinations and whenever the coverage list cannot be loaded.
+  const coveredCityMatch = coveredCities.find((city) => city.toLowerCase() === form.city.trim().toLowerCase()) ?? null;
+  const citySelectValue = form.city.trim() === "" ? "" : coveredCityMatch ?? OTHER_CITY;
+  const cityIsTextInput = coveredCities.length === 0 || citySelectValue === OTHER_CITY;
 
   return <div className="checkout-page">
     <header><span className="eyebrow">CHECKOUT</span><h1>Checkout</h1></header>
@@ -268,17 +278,28 @@ export function CheckoutView() {
           </fieldset>
           <fieldset disabled={busy}>
             <legend>2 · Pengiriman</legend>
-            {coveredCities.length>0&&<div className="coverage-chips" role="group" aria-label="Pilihan kota gratis ongkir">
-              {coveredCities.map(city=><button key={city} type="button" className="chip" onClick={()=>setForm(form=>({...form,city}))}>🚚 Gratis ongkir — {city}</button>)}
-            </div>}
             <label>Nama penerima<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} autoComplete="name" /></label>
             <label>No. WhatsApp<input type="tel" inputMode="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} autoComplete="tel" required /></label>
             <button type="button" className="button warm location-activate" onClick={()=>void activateLocation()} disabled={locating||busy}>{locating?"Mendeteksi lokasi…":"📍 Aktifkan lokasi saya"}</button>
             {locationNote&&<p className="checkout-note" role="status">{locationNote}</p>}
             {mapPoint&&<DeliveryMap point={mapPoint} onChange={(point)=>void moveMapPin(point)} />}
             <label className="wide">Alamat lengkap<textarea rows={3} value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} autoComplete="street-address" required /></label>
-            <label>Kota<input value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} list="yubie-covered-cities" autoComplete="address-level2" required />
-              <datalist id="yubie-covered-cities">{coveredCities.map(city=><option key={city} value={city} />)}</datalist>
+            <label>Kota
+              {cityIsTextInput ? <>
+                <input value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} list="yubie-covered-cities" autoComplete="address-level2" aria-label="Kota" required />
+                <datalist id="yubie-covered-cities">{coveredCities.map(city=><option key={city} value={city} />)}</datalist>
+              </> : <select value={citySelectValue} onChange={(event) => setForm(form=>({...form,city:event.target.value===OTHER_CITY?"":event.target.value}))} autoComplete="address-level2" aria-label="Kota" required>
+                <option value="" disabled>Pilih kota/kabupaten…</option>
+                {coveredCities.map(city=><option key={city} value={city}>{city}</option>)}
+                <option value={OTHER_CITY}>Kota lain…</option>
+              </select>}
+              <small className="city-hint" role="status">
+                {coveredCities.length===0
+                  ? "Gratis ongkir berlaku untuk kota tertentu — daftar kota akan dimuat otomatis di sini."
+                  : coveredCityMatch
+                    ? `🚚 Gratis ongkir — pengiriman ke ${coveredCityMatch} gratis (Rp0) dan sudah termasuk dalam total.`
+                    : `🚚 Gratis ongkir (Rp0) saat ini tersedia untuk: ${coveredCities.join(", ")}. Pilih kota Anda di atas.`}
+              </small>
             </label>
             <label>Kode pos<input value={form.postalCode} onChange={(event) => setForm({ ...form, postalCode: event.target.value })} inputMode="numeric" autoComplete="postal-code" /></label>
             {deliveryOptions!==null&&deliveryOptions.length>0&&<div className="courier-options" role="radiogroup" aria-label="Pilihan layanan kurir">
