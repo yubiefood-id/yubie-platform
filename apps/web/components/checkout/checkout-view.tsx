@@ -72,7 +72,6 @@ export function CheckoutView() {
   const formValid = form.email.includes("@") && form.phone.trim().length >= 8 && form.address.trim().length >= 8 && form.city.trim().length >= 2;
   const quote=quotation?.body===requestBody?quotation.value:null;
   const quoteError=quotation?.body===requestBody?quotation.error:null;
-  const canPay=admission==="enabled"&&!!quote?.stockAvailable&&(!!quote?.shippingAvailable||courierShippingIdr!==null)&&(typeof quote?.totalAmount==="number"||courierShippingIdr!==null);
   const recover=useCallback(async()=>{
     let attemptKey:string|null=null;
     try{const held=JSON.parse(localStorage.getItem(CHECKOUT_ATTEMPT_STORAGE_KEY)??"null");if(typeof held?.key==="string")attemptKey=held.key;}catch{/* Server-owned current attempt is still recoverable. */}
@@ -188,6 +187,7 @@ export function CheckoutView() {
   const subtotal = quote?.subtotalAmount??lines.reduce((sum,item)=>sum+item.lineTotal,0);
   const selectedOption=selectedQuoteId&&deliveryOptions?deliveryOptions.find(option=>option.quoteId===selectedQuoteId)??null:null;
   const courierShippingIdr=selectedOption?selectedOption.totalShippingIdr:null;
+  const canPay=admission==="enabled"&&!!quote?.stockAvailable&&(!!quote?.shippingAvailable||courierShippingIdr!==null)&&(typeof quote?.totalAmount==="number"||courierShippingIdr!==null);
   const displayShipping=quote?.shippingAvailable?quote.shippingAmount:courierShippingIdr;
   const total=quote?(quote.totalAmount??(courierShippingIdr!==null?subtotal-(quote.discountAmount??0)+courierShippingIdr:null)):null;
   const hasFlour=lines.some(({line})=>line.productId==="flour");
