@@ -83,8 +83,12 @@ export class PostgresShipmentRepository {
    * lease; the operator fixes data and requeues.
    */
   async blockDispatch(input: { shipmentId: string; intentId: string; orderId: string; reason: string }, now: string): Promise<void> {
-    await this.database.client`UPDATE shipments SET status='held', blocked_reason=${input.reason}, version=version+1, updated_at=${now}::timestamptz WHERE id=${input.shipmentId} AND status IN ('ready','booking_pending')`;
-    await this.database.client`UPDATE shipment_dispatch_intents SET state='pending', last_error_code=${input.reason}, updated_at=${now}::timestamptz WHERE id=${input.intentId}`;
+    await this.database.client.begin(async tx => {
+      await tx`UPDATE shipments SET status='held', blocked_reason=${input.reason}, version=version+1, updated_at=${now}::timestamptz WHERE id=${input.shipmentId} AND status IN ('ready','booking_pending')`;
+      await tx`UPDATE shipment_dispatch_intents SET state='pending', last_error_code=${input.reason}, updated_at=${now}::timestamptz WHERE id=${input.intentId}`;
+      // The leased reservation is released: no provider call happened for it.
+      await tx`UPDATE shipment_pilot_ledger SET state='released', updated_at=${now}::timestamptz WHERE shipment_id=${input.shipmentId} AND state='reserved'`;
+    });
     await this.database.client`INSERT INTO audit_events (id, actor, action, resource_type, resource_id, occurred_at)
       VALUES (${"aud_" + Math.random().toString(36).slice(2, 14)}, ${"system:dispatch"}, ${"shipment.dispatch_blocked"}, ${"shipment"}, ${input.shipmentId}, ${now}::timestamptz)`;
   }
@@ -184,20 +188,36 @@ export class PostgresShipmentRepository {
   }
 
   /** Provider accepted the booking (or a reference-conflict recovery verified by getOrder). */
+  /**
+   * Provider accepted the booking (or a reference-conflict recovery verified
+   * by getOrder). Ledger row flips reserved->committed in the SAME
+   * transaction as the provider-order persistence, so pilot accounting can
+   * never drift.
+   */
   async recordBookingAccepted(input: { intentId: string; shipmentId: string; orderId: string; providerOrderId: string; referenceId: string; priceIdr: number | null; waybillId: string | null; trackingId: string | null; trackingUrl: string | null; courierCompany: string | null; courierType: string | null; rawStatus: string | null }, now: string): Promise<void> {
-    await this.database.db.execute(sql`UPDATE shipments SET status='booked', provider_order_id=${input.providerOrderId}, courier_company=COALESCE(${input.courierCompany},courier_company), courier_service=COALESCE(courier_service,${input.courierCompany}), courier_type=COALESCE(courier_type,${input.courierType}), waybill_id=COALESCE(${input.waybillId},waybill_id), tracking_id=COALESCE(${input.trackingId},tracking_id), tracking_url=COALESCE(${input.trackingUrl},tracking_url), actual_amount_idr=COALESCE(${input.priceIdr},actual_amount_idr), latest_provider_status=${input.rawStatus}, version=version+1, updated_at=${now}::timestamptz WHERE id=${input.shipmentId} AND status IN ('booking_pending','booking_unknown','ready')`);
-    await this.database.db.execute(sql`UPDATE shipment_dispatch_intents SET state='complete', updated_at=${now}::timestamptz WHERE id=${input.intentId}`);
-    if (input.priceIdr !== null) {
-      await this.database.db.execute(sql`INSERT INTO shipment_finance_events (id,shipment_id,order_id,kind,amount_idr,currency,provider_ref,snapshot,created_at)
-        VALUES (${`fin_${sqlFraction(input.shipmentId)}_booked`},${input.shipmentId},${input.orderId},'provider_booked',${input.priceIdr},'IDR',${input.providerOrderId},${JSON.stringify({ referenceId: input.referenceId, rawStatus: input.rawStatus })}::jsonb,${now}::timestamptz) ON CONFLICT DO NOTHING`);
-    }
+    await this.database.client.begin(async tx => {
+      await tx`UPDATE shipments SET status='booked', provider_order_id=${input.providerOrderId}, courier_company=COALESCE(${input.courierCompany},courier_company), courier_service=COALESCE(courier_service,${input.courierCompany}), courier_type=COALESCE(courier_type,${input.courierType}), waybill_id=COALESCE(${input.waybillId},waybill_id), tracking_id=COALESCE(${input.trackingId},tracking_id), tracking_url=COALESCE(${input.trackingUrl},tracking_url), actual_amount_idr=COALESCE(${input.priceIdr},actual_amount_idr), latest_provider_status=${input.rawStatus}, version=version+1, updated_at=${now}::timestamptz WHERE id=${input.shipmentId} AND status IN ('booking_pending','booking_unknown','ready')`;
+      await tx`UPDATE shipment_dispatch_intents SET state='complete', updated_at=${now}::timestamptz WHERE id=${input.intentId}`;
+      await tx`INSERT INTO shipment_pilot_ledger (id, shipment_id, reference_id, state, amount_idr, created_at, updated_at)
+        VALUES (${"led_" + Math.random().toString(36).slice(2, 14)}, ${input.shipmentId}, ${input.referenceId}, 'committed', ${input.priceIdr ?? 0}, ${now}::timestamptz, ${now}::timestamptz)
+        ON CONFLICT (shipment_id) DO UPDATE SET state='committed', amount_idr=COALESCE(EXCLUDED.amount_idr, shipment_pilot_ledger.amount_idr), updated_at=EXCLUDED.updated_at`;
+      if (input.priceIdr !== null) {
+        await tx`INSERT INTO shipment_finance_events (id,shipment_id,order_id,kind,amount_idr,currency,provider_ref,snapshot,created_at)
+          VALUES (${`fin_${sqlFraction(input.shipmentId)}_booked`},${input.shipmentId},${input.orderId},'provider_booked',${input.priceIdr},'IDR',${input.providerOrderId},${JSON.stringify({ referenceId: input.referenceId, rawStatus: input.rawStatus })}::jsonb,${now}::timestamptz) ON CONFLICT DO NOTHING`;
+      }
+    });
   }
 
   /** Definitive provider refusal (validation): intent dead or retried on a new generation by ops. */
   async recordBookingRefused(input: { intentId: string; shipmentId: string; errorCode: string; attempts: number; maxAttempts: number }, now: string): Promise<void> {
     const dead = input.attempts >= input.maxAttempts;
-    await this.database.db.execute(sql`UPDATE shipment_dispatch_intents SET state=${dead ? "dead" : "pending"}, last_error_code=${input.errorCode}, updated_at=${now}::timestamptz WHERE id=${input.intentId}`);
-    await this.database.db.execute(sql`UPDATE shipments SET status=${dead ? "failed" : "ready"}, version=version+1, updated_at=${now}::timestamptz WHERE id=${input.shipmentId} AND status='booking_pending'`);
+    await this.database.client.begin(async tx => {
+      await tx`UPDATE shipment_dispatch_intents SET state=${dead ? "dead" : "pending"}, last_error_code=${input.errorCode}, updated_at=${now}::timestamptz WHERE id=${input.intentId}`;
+      await tx`UPDATE shipments SET status=${dead ? "failed" : "ready"}, version=version+1, updated_at=${now}::timestamptz WHERE id=${input.shipmentId} AND status='booking_pending'`;
+      // A definitive provider refusal releases the reservation ONLY when the
+      // lease dies; a same-lease retry keeps reserving (conservative).
+      if (dead) await tx`UPDATE shipment_pilot_ledger SET state='released', updated_at=${now}::timestamptz WHERE shipment_id=${input.shipmentId} AND state='reserved'`;
+    });
   }
 
   /** Ambiguous provider outcome: freeze for reconciliation; never blind-retry. */
@@ -235,7 +255,12 @@ export class PostgresShipmentRepository {
     const row = rows[0] as { id: string; status: string } | undefined;
     if (!row) return false;
     if (!canTransitionShipment(row.status as ShipmentStatus, status)) return false;
-    await this.database.db.execute(sql`UPDATE shipments SET status=${status}, version=version+1, updated_at=${now}::timestamptz WHERE id=${row.id}`);
+    await this.database.client.begin(async tx => {
+      await tx`UPDATE shipments SET status=${status}, version=version+1, updated_at=${now}::timestamptz WHERE id=${row.id}`;
+      if (status === "cancelled" || status === "failed") {
+        await tx`UPDATE shipment_pilot_ledger SET state='released', updated_at=${now}::timestamptz WHERE shipment_id=${row.id} AND state='reserved'`;
+      }
+    });
     return true;
   }
 
