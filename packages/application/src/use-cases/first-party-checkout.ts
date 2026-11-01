@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { paymentSessionMatches,flagPaymentMismatch,recordPaymentMismatch } from "./payment-session-verification.js";
 import { priceCheckoutLines } from "./checkout-quote.js";
+import { consumeCheckoutShippingQuote, courierOrderShipping, shippingCartHash, shippingDestinationHash } from "./shipping-quote.js";
 import {
   MAX_CART_LINE_QUANTITY,
   MAX_CHECKOUT_TOTAL_IDR,
@@ -15,6 +16,7 @@ import {
   type AppError,
   type OrderLineRecord,
   type OrderRecord,
+  type OrderShipping,
   type OrderTotals,
   type PaymentProviderKind,
   type PaymentRecord,
@@ -38,6 +40,8 @@ import type { CustomerProof } from "./phone-auth.js";
 import { lockCheckoutScope, CheckoutScopeError } from "./checkout-principals.js";
 class CheckoutTotalError extends Error {}
 class ShippingUnavailableError extends Error {}
+/** A client-selected shipping quote is stale, expired or bound to a different cart/address. */
+class ShippingQuoteStaleError extends Error {}
 class CheckoutSafetyHoldError extends Error {}
 
 export interface CheckoutLineInput {
@@ -62,6 +66,12 @@ export interface CreateFirstPartyCheckoutInput {
   /** SHIPPING_POLICY name; resolved server-side, never client-supplied. */
   shippingPolicy?: string;
   requireApprovedShipping?: boolean;
+  /**
+   * Server-issued quote id from POST /v1/shipping/rates (ADR-014 courier
+   * path). The stored quote — never a browser amount — prices the order; a
+   * stale/mismatched id refuses the checkout with a re-quote prompt.
+   */
+  shippingQuoteId?: string | null;
   /**
    * "lots" reserves sellable lot stock inside TX1 (food-safety sellability
    * gate); "none" is allowed only outside staging/production xendit mode.
@@ -342,12 +352,13 @@ export async function createFirstPartyCheckout(
   try { priced = priceCheckoutLines(input.lines); }
   catch (error) { return err({code:error instanceof RangeError?"validation":"out_of_stock",message:"Unavailable line or invalid quantity.",retryable:false,requestId:"checkout"}); }
 
-  let shipping: ReturnType<typeof resolveShippingPolicy>;
+  let shipping: OrderShipping;
   try {
     shipping = resolveShippingPolicy(input.shippingPolicy);
   } catch (error) {
     return err({ code: "validation", message: String(error), retryable: false, requestId: "checkout" });
   }
+  let courierTaxAmount = 0;
   const subtotalAmount = priced.reduce((total, line) => total + line.unitPrice * line.quantity, 0);
   let totals = buildOrderTotals(subtotalAmount, shipping.amount, 0, 0);
 
@@ -369,7 +380,7 @@ export async function createFirstPartyCheckout(
     currency: "IDR",
     totals,
     totalAmount: totals.grandTotalAmount,
-    shipping: { policy: shipping.policy, amount: shipping.amount, ...(shipping.reason ? { reason: shipping.reason } : {}) },
+    shipping,
     lines: priced,
     createdAt: now,
     updatedAt: now,
@@ -414,16 +425,48 @@ export async function createFirstPartyCheckout(
       if(await repos.inventory.checkoutFrozen?.() || await repos.payments.hasFinancialException())throw new CheckoutSafetyHoldError();
       if (input.requireApprovedShipping) {
         const approved = await repos.shipping?.authorize(input.delivery?.city ?? "", deps.clock.now());
-        if (!approved) throw new ShippingUnavailableError();
-        shipping = approved;
-        draftOrder.shipping = approved;
+        if (approved) {
+          shipping = approved;
+          draftOrder.shipping = approved;
+        } else if (input.shippingQuoteId && repos.shippingQuotes) {
+          // ADR-014 courier path: the stored server quote — never a browser
+          // amount — prices the order, under the same lock as the draft.
+          const quote = await consumeCheckoutShippingQuote(repos, {
+            quoteId: input.shippingQuoteId,
+            principalKey: input.idempotencyPrincipal,
+            cartHash: shippingCartHash(input.lines),
+            destinationHash: shippingDestinationHash(input.delivery ?? { address: "", city: "", postalCode: null }),
+            orderId,
+            now,
+          });
+          if (!quote) throw new ShippingQuoteStaleError();
+          shipping = courierOrderShipping(quote);
+          courierTaxAmount = quote.taxAmountIdr;
+          draftOrder.shipping = shipping;
+        } else {
+          throw new ShippingUnavailableError();
+        }
+      } else if (input.shippingQuoteId && repos.shippingQuotes) {
+        // Non-production courier parity: same strict revalidation.
+        const quote = await consumeCheckoutShippingQuote(repos, {
+          quoteId: input.shippingQuoteId,
+          principalKey: input.idempotencyPrincipal,
+          cartHash: shippingCartHash(input.lines),
+          destinationHash: shippingDestinationHash(input.delivery ?? { address: "", city: "", postalCode: null }),
+          orderId,
+          now,
+        });
+        if (!quote) throw new ShippingQuoteStaleError();
+        shipping = courierOrderShipping(quote);
+        courierTaxAmount = quote.taxAmountIdr;
+        draftOrder.shipping = shipping;
       }
       const promotion = await authorizeCheckoutPromotion({
         lines: priced, ...(input.userId === undefined ? {} : { userId: input.userId }),
         ...(input.customerProof ? { actor: input.customerProof } : {}), ...(input.promoCode ? { code: input.promoCode } : {}),
         ...(input.possessedGuestPrincipal ? { guestPrincipal: input.possessedGuestPrincipal } : {}),
       }, repos, deps.clock.now());
-      totals = buildOrderTotals(subtotalAmount, shipping.amount, 0, promotion?.quote.discountAmount ?? 0);
+      totals = buildOrderTotals(subtotalAmount, shipping.amount, courierTaxAmount, promotion?.quote.discountAmount ?? 0);
       if (!isPayableTotal(totals.grandTotalAmount)) throw new CheckoutTotalError();
       draftOrder.totals = totals; draftOrder.totalAmount = totals.grandTotalAmount; paymentIntent.amount = totals.grandTotalAmount;
       await repos.orders.save(draftOrder);
@@ -456,6 +499,7 @@ export async function createFirstPartyCheckout(
   } catch (error) {
     if(error instanceof CheckoutSafetyHoldError)return err({code:"checkout_safety_hold",message:"New checkout is frozen for operational or financial safety checks.",retryable:false,requestId:"checkout"});
     if (error instanceof ShippingUnavailableError) return err({code:"shipping_unavailable",message:"Shipping policy or destination is not approved.",retryable:false,requestId:"checkout"});
+    if (error instanceof ShippingQuoteStaleError) return err({code:"shipping_quote_stale",message:"Shipping quote expired or changed. Please re-select a delivery option.",retryable:false,requestId:"checkout"});
     if (error instanceof CheckoutScopeError) return err({ code: error.code, message: error.message, retryable: error.code === "pending_reconciliation", requestId: "checkout" });
     if (error instanceof PromotionAuthorizationError || error instanceof CheckoutTotalError) {
       if (claimed && idempotencyKey) await deps.tx.run("checkout.idempotency.release", repos => repos.idempotency.releaseClaim(claimInput)).catch(() => undefined);

@@ -35,11 +35,27 @@ export interface OrderDelivery {
   notes?: string | undefined;
 }
 
-/** Shipping policy snapshot stored on the order at purchase time. */
+/**
+ * Shipping policy snapshot stored on the order at purchase time.
+ * `free_promotional` is the legacy zero-cost city coverage (ADR-013 era);
+ * `courier` snapshots the consumed server-stored quote (ADR-014): the
+ * customer charge, provider cost, subsidy and tax are distinct integers and
+ * are immutable once written. Courier fields exist only when
+ * policy === "courier"; free_promotional rows never carry them.
+ */
 export interface OrderShipping {
-  policy: "free_promotional";
+  policy: "free_promotional" | "courier";
   amount: number;
   reason?: string | undefined;
+  quoteId?: string | undefined;
+  courierCompany?: string | undefined;
+  courierServiceCode?: string | undefined;
+  courierServiceName?: string | undefined;
+  deliveryType?: "now" | "scheduled" | undefined;
+  providerAmountIdr?: number | undefined;
+  subsidyAmountIdr?: number | undefined;
+  taxAmountIdr?: number | undefined;
+  taxPolicyVersion?: string | undefined;
 }
 
 export interface OrderTotals {

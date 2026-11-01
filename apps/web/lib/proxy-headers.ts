@@ -109,7 +109,7 @@ export function attemptKeyForCart(held: HeldAttempt | null, fingerprint: string,
   return { key: freshKey, fingerprint };
 }
 
-export type CheckoutUiOutcome = "redirect" | "preview" | "pending" | "unavailable" | "sold_out" | "invalid" | "failed";
+export type CheckoutUiOutcome = "redirect" | "preview" | "pending" | "unavailable" | "sold_out" | "invalid" | "quote_stale" | "failed";
 
 const PENDING_CODES = new Set(["PENDING_RECONCILIATION", "PROVIDER_UNAVAILABLE", "API_TIMEOUT", "IDEMPOTENCY_KEY_REUSED"]);
 
@@ -120,6 +120,9 @@ export function classifyCheckoutResponse(status: number, payload: { code?: unkno
   const code = typeof payload?.code === "string" ? payload.code : null;
   if (code === "CHECKOUT_DISABLED" || code === "CHECKOUT_SAFETY_HOLD" || code === "SHIPPING_UNAVAILABLE" || code === "FEATURE_DISABLED" || code === "PROMOTION_UNAVAILABLE") return "unavailable";
   if (code === "INSUFFICIENT_INVENTORY" || code === "UNAVAILABLE_LINE") return "sold_out";
+  // Server refused the selected shipping quote (expired / cart changed): the
+  // customer re-picks a delivery option; nothing was charged.
+  if (code === "SHIPPING_QUOTE_STALE") return "quote_stale";
   if ((code && PENDING_CODES.has(code)) || status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504) return "pending";
   if (status === 400) return "invalid";
   return "failed";

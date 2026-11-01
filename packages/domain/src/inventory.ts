@@ -72,7 +72,7 @@ export function fefoOrder(a: InventoryLot, b: InventoryLot): number {
 
 /** Aggregates lines by product/size so reservation math is per-SKU. */
 export function aggregateLineQuantities(
-  lines: Array<{ productId: string; sizeId: string; quantity: number }>,
+  lines: ReadonlyArray<{ productId: string; sizeId: string; quantity: number }>,
 ): Array<{ productId: string; sizeId: string; quantity: number }> {
   const totals = new Map<string, { productId: string; sizeId: string; quantity: number }>();
   for (const line of lines) {

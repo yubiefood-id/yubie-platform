@@ -29,21 +29,26 @@ import {
   type PaymentEventRepository,
   type PaymentProviderPort,
   type PaymentRepository,
+  type ShippingProviderPort,
+  type ShippingQuoteStore,
   type SessionRepository,
   type TransactionManager,
   type UserRepository,
 } from "@yubie/application";
 import {
   inspectCommerceRuntimeConfig,
+  inspectShippingRuntimeConfig,
   parseIdentityRuntimeConfig,
   parseDeliveryMapsConfig,
   parseCommerceRuntimeConfig,
   type CommerceRuntimeConfig,
 } from "@yubie/config";
-import { DefaultRedirectAllowlistPolicy, GoogleIdTokenVerifier, createCommercePaymentProvider, TurnstileVerifier, GoogleDeliveryLocationProvider } from "@yubie/integrations";
+import { DefaultRedirectAllowlistPolicy, GoogleIdTokenVerifier, createCommercePaymentProvider, TurnstileVerifier, GoogleDeliveryLocationProvider, createShippingProvider } from "@yubie/integrations";
 import {
   createDatabase,
   PostgresHealthProbe,
+  PostgresShippingCatalogRepository,
+  PostgresShippingQuoteRepository,
   PostgresMarketplaceListingRepository,
   PostgresOrderRepository,
   PostgresOutboundIntentRepository,
@@ -93,6 +98,11 @@ export interface AppContext {
   database?: ReturnType<typeof createDatabase>;
   phoneAuth?: { crypto: OtpCryptography; allowedCountries: string[]; verifyCaptcha(token: string, ip: string): Promise<boolean> };
   deliveryLocations?: import("@yubie/application").DeliveryLocationProvider;
+  // ADR-014 shipping execution (inert until admitted by config).
+  shippingProvider: ShippingProviderPort | null;
+  shippingCatalog?: import("@yubie/application").ShippingOriginReader & import("@yubie/application").SkuShippingProfileReader;
+  shippingQuotes?: ShippingQuoteStore;
+  shippingExecutionMode: "disabled" | "shadow" | "sandbox" | "pilot" | "enabled";
 }
 
 const STATIC_ACTIVE_LISTING: MarketplaceListing = {
@@ -162,6 +172,11 @@ export function createAppContext(): AppContext {
 
   const paymentMode = commerce.provider === "xendit" || commerce.provider === "ipaymu" ? commerce.provider : "preview";
   const paymentProvider = paymentMode === "preview" ? null : createCommercePaymentProvider(process.env);
+  // Shipping admission is independent of the PSP: unconfigured stays null and
+  // every shipping route degrades to "unavailable" without touching checkout.
+  const shippingProvider = createShippingProvider(process.env);
+  const shippingInspection = inspectShippingRuntimeConfig(process.env);
+  const shippingExecutionMode = shippingInspection.ok ? shippingInspection.config.mode : "disabled";
   const ipaymuVa = paymentMode === "ipaymu" ? (process.env.IPAYMU_VA ?? null) : null;
 
   const googleClientId = process.env.GOOGLE_CLIENT_ID ?? null;
@@ -219,6 +234,10 @@ export function createAppContext(): AppContext {
       identityTransactions,
       database,
       paymentNotifications: new PostgresPaymentNotificationInbox(database),
+      shippingProvider,
+      shippingCatalog: new PostgresShippingCatalogRepository(database),
+      shippingQuotes: new PostgresShippingQuoteRepository(database),
+      shippingExecutionMode,
       ...(phoneAuth ? { phoneAuth } : {}),
       ...(deliveryLocations ? { deliveryLocations } : {}),
       tx: transactional
@@ -244,6 +263,8 @@ export function createAppContext(): AppContext {
   const outbox = new InMemoryOutboxRepository();
   const idempotency = new InMemoryIdempotencyRepository();
   return {
+    shippingProvider: null,
+    shippingExecutionMode,
     listings: new InMemoryMarketplaceListingRepository([STATIC_ACTIVE_LISTING]),
     whatsapp: new InMemoryWhatsAppIntentRepository(),
     outbound: new InMemoryOutboundIntentRepository(),
