@@ -15,6 +15,7 @@ export type ListingHealthResult =
 
 export type ErrorCode =
   | "shipping_unavailable"
+  | "shipping_quote_stale"
   | "checkout_safety_hold"
   | "validation"
   | "unauthorized"

@@ -21,13 +21,13 @@ import {
   subscribeNewsletter,
   webhookError,
 } from "@yubie/application";
-import { b2bLeadSchema, checkoutRequestSchema, googleLoginSchema, newsletterSubmissionSchema, productWaitlistSchema } from "@yubie/validation";
+import { b2bLeadSchema, checkoutRequestSchema, googleLoginSchema, newsletterSubmissionSchema, productWaitlistSchema, shippingRatesRequestSchema } from "@yubie/validation";
 import { parseYubieEnvName } from "@yubie/config";
 import { customerRouteEnabled, parseLaunchProfile } from "@yubie/config/launch";
 import { paymentStatusFromProviderSession } from "@yubie/domain";
 import { parseIpaymuCallbackBody, verifyIpaymuCallback } from "@yubie/integrations";
 import { createDatabase, type Database } from "@yubie/persistence";
-import { tokensMatch } from "@yubie/application";
+import { tokensMatch, requestShippingRates } from "@yubie/application";
 import { catalog } from "./catalog.js";
 import { createAppContext, type AppContext } from "./composition/create-app.js";
 import { createRequestId } from "./middleware/request-id.js";
@@ -160,6 +160,8 @@ function checkoutError(code: string): { status: number; code: string } {
   switch (code) {
     case "shipping_unavailable":
       return { status: 503, code: "SHIPPING_UNAVAILABLE" };
+    case "shipping_quote_stale":
+      return { status: 409, code: "SHIPPING_QUOTE_STALE" };
     case "checkout_safety_hold":
       return { status: 503, code: "CHECKOUT_SAFETY_HOLD" };
     case "unauthorized":
@@ -310,6 +312,31 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
       return json({ok:true,data:{policies}},{headers:{"cache-control":"no-store"}});
     }catch{return json({ok:false,code:"SHIPPING_UNAVAILABLE"},{status:503,headers:{"cache-control":"no-store"}});}
   }
+  if (request.method === "POST" && url.pathname === "/v1/shipping/rates") {
+    // ADR-014 step 3: server-only courier rate quoting. Disabled mode answers
+    // inert "unavailable" so the storefront never offers dynamic shipping
+    // before activation; free-covered cities short-circuit without a paid
+    // provider call. Provider I/O happens here, never inside a transaction.
+    const body=await readJsonBody(request,MAX_JSON_BYTES);if(!body.ok)return tooLarge();
+    const parsed=shippingRatesRequestSchema.safeParse(body.value);
+    if(!parsed.success)return json({ok:false,code:"INVALID_REQUEST"},{status:400,headers:{"cache-control":"no-store"}});
+    if (ctx.shippingExecutionMode === "disabled") {
+      return json({ok:true,data:{shipping:{mode:"unavailable",reason:"provider_unconfigured"}}},{headers:{"cache-control":"no-store"}});
+    }
+    const user=await resolveSession(readSessionToken(request),{sessions:ctx.authSessions,users:ctx.users,tokens:ctx.tokens,clock:ctx.clock});
+    if(!user.ok)return json({ok:false,code:"CUSTOMER_STORAGE_UNAVAILABLE"},{status:503,headers:{"cache-control":"no-store"}});
+    const guest=guestCheckoutToken(request);
+    const principal=checkoutPrincipalKey({userId:user.value?.id??null,guestToken:guest.token});
+    if(!principal)return json({ok:false,code:"INVALID_REQUEST"},{status:400,headers:{"cache-control":"no-store"}});
+    const result=await requestShippingRates({principalKey:principal,lines:parsed.data.lines,delivery:parsed.data.delivery},{
+      provider:ctx.shippingProvider,tx:ctx.tx,
+      ...(ctx.shippingQuotes?{quotes:ctx.shippingQuotes}:{}),
+      ...(ctx.shippingCatalog?{origins:ctx.shippingCatalog,profiles:ctx.shippingCatalog}:{}),
+      clock:ctx.clock,ids:ctx.ids,
+    });
+    if(!result.ok){const mapping=checkoutError(result.error.code);return json({ok:false,code:mapping.code},{status:mapping.status,headers:{"cache-control":"no-store"}});}
+    return json({ok:true,data:{shipping:result.value}},{headers:{"cache-control":"no-store"}});
+  }
   if (request.method === "POST" && url.pathname === "/v1/checkouts/quote") {
     const body=await readJsonBody(request,MAX_JSON_BYTES);if(!body.ok)return tooLarge();
     const parsed=checkoutRequestSchema.pick({lines:true,promoCode:true,delivery:true}).safeParse(body.value);
@@ -424,6 +451,7 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
         idempotencyKey: request.headers.get("idempotency-key"),
         idempotencyPrincipal: principal,
         ...(parsed.data.promoCode ? { promoCode: parsed.data.promoCode } : {}),
+        ...(parsed.data.shippingQuoteId ? { shippingQuoteId: parsed.data.shippingQuoteId } : {}),
         ...(customerProof ? { customerProof } : {}),
         ...(guest.existing ? { possessedGuestPrincipal: checkoutPrincipalKey({ guestToken: guest.token })! } : {}),
       }, { tx: ctx.tx, provider: ctx.paymentProvider, clock: ctx.clock, ids: ctx.ids });

@@ -48,6 +48,14 @@ export const checkoutRequestSchema = z.object({
   customerName: z.string().trim().max(80).optional(),
   delivery: checkoutDeliverySchema.optional(),
   promoCode: z.string().trim().max(32).optional(),
+  /** Server-issued quote id from POST /v1/shipping/rates (ADR-014 courier path). */
+  shippingQuoteId: z.string().trim().min(6).max(64).optional(),
+});
+
+/** Server-side courier rate request: priced server-side from these lines. */
+export const shippingRatesRequestSchema = z.object({
+  lines: z.array(checkoutLineSchema).min(1).max(25),
+  delivery: checkoutDeliverySchema,
 });
 
 /** Explicit V3 contract; the legacy route keeps its V1 contract until adapted. */
