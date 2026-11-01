@@ -167,7 +167,7 @@ export class PostgresShipmentRepository {
       for (const claimed of claimedRows) {
         const context = (await tx`SELECT s.id AS shipment_id, s.order_id, s.reference_id, s.dispatch_generation, s.quote_id, s.weight_grams,
             o.checkout_ref, o.customer_name, o.customer_phone, o.delivery_jsonb, o.shipping_jsonb, o.lines_jsonb, o.currency,
-            q.courier_company, q.courier_service_code, q.courier_service_name, q.service_type, q.delivery_type,
+            q.courier_company, q.courier_service_code AS courier_service_code, q.courier_service_code AS courier_type, q.courier_service_name, q.service_type, q.delivery_type,
             org.contact_name AS origin_contact_name, org.contact_phone AS origin_contact_phone, org.address AS origin_address, org.postal_code AS origin_postal_code, org.latitude AS origin_latitude, org.longitude AS origin_longitude
           FROM shipments s
           JOIN orders o ON o.id=s.order_id

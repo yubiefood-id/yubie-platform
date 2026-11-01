@@ -637,6 +637,8 @@ export interface ShippingRuntimeConfig {
    * courier booking). A positive integer arms the subsidized path.
    */
   freeSubsidyMaxIdr: number | null;
+  /** Owner-approved courier list for rate queries (required once a provider is admitted and mode != disabled). */
+  biteshipCouriers: string | null;
 }
 
 export type ShippingRuntimeConfigInspection =
@@ -721,6 +723,7 @@ export function parseShippingRuntimeConfig(env: RuntimeEnvSource = process.env):
   let pilotMaxBookings: number | null = null;
   let pilotBudgetIdr: number | null = null;
   let freeSubsidyMaxIdr: number | null = null;
+  const biteshipCouriers = (env.BITESHIP_COURIERS ?? "").trim() || null;
   try {
     freeSubsidyMaxIdr = parsePositiveInteger(env, "SHIPPING_FREE_SUBSIDY_MAX_IDR");
   } catch (error) {
@@ -756,6 +759,9 @@ export function parseShippingRuntimeConfig(env: RuntimeEnvSource = process.env):
       errors.push(`SHIPPING_EXECUTION_MODE=${mode} requires BITESHIP_WEBHOOK_SECRET (webhook authenticity must be verifiable before any booking)`);
     } else {
       webhookSecretHeader = (env.BITESHIP_WEBHOOK_SECRET_HEADER ?? "").trim() || DEFAULT_BITESHIP_WEBHOOK_SECRET_HEADER;
+    }
+    if (provider === "biteship" && !biteshipCouriers) {
+      errors.push(`SHIPPING_EXECUTION_MODE=${mode} requires BITESHIP_COURIERS (live Biteship rate calls reject an empty courier list)`);
     }
     if (mode === "sandbox" && biteshipEnv !== null && biteshipEnv !== "sandbox") {
       errors.push("SHIPPING_EXECUTION_MODE=sandbox requires BITESHIP_ENV=sandbox");
@@ -795,6 +801,7 @@ export function parseShippingRuntimeConfig(env: RuntimeEnvSource = process.env):
     pilotMaxBookings,
     pilotBudgetIdr,
     freeSubsidyMaxIdr,
+    biteshipCouriers,
   };
 }
 

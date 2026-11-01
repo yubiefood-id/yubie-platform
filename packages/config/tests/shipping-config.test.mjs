@@ -16,6 +16,7 @@ const BITLESS = {
   BITESHIP_API_KEY: "biteship_test_key_placeholder",
   BITESHIP_WEBHOOK_SECRET: "webhook-secret-placeholder",
   BITESHIP_WEBHOOK_SECRET_HEADER: "x-biteship-secret",
+  BITESHIP_COURIERS: "jne,jnt,sicepat",
 };
 
 test("shipping execution mode defaults to disabled and rejects typos", () => {
@@ -156,4 +157,15 @@ test("SHIPPING_FREE_SUBSIDY_MAX_IDR is an optional positive-integer activation l
     () => parseShippingRuntimeConfig({ ...base, SHIPPING_FREE_SUBSIDY_MAX_IDR: "0" }),
     /SHIPPING_FREE_SUBSIDY_MAX_IDR must be a positive integer/,
   );
+});
+
+test("active modes require the owner-approved courier list (live API rejects empty lists)", () => {
+  const { BITESHIP_COURIERS, ...withoutCouriers } = BITLESS;
+  void BITESHIP_COURIERS;
+  assert.throws(
+    () => parseShippingRuntimeConfig({ ...withoutCouriers, SHIPPING_EXECUTION_MODE: "shadow" }),
+    /requires BITESHIP_COURIERS/,
+  );
+  const parsed = parseShippingRuntimeConfig({ ...BITLESS, SHIPPING_EXECUTION_MODE: "shadow" });
+  assert.equal(parsed.biteshipCouriers, "jne,jnt,sicepat");
 });

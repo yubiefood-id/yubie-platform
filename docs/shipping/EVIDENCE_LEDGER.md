@@ -17,7 +17,9 @@ Verdict values: `PENDING`, `IMPLEMENTED`, `TESTED_MOCK`, `TESTED_PG`,
 | Live storefront | DEPLOYED_LIVE | CF Worker `94b37f4e-…` from `f38455d` (docs/production/2026-10-31/STOREFRONT_DEPLOY_RECEIPT.md) |
 | Biteship API payload shapes pinned | DONE | docs/shipping/BITESHIP_API_NOTES.md (official docs, 2026-11-01) |
 | Baseline `npm ci && npm run check` on clean main | PASS | exit 0, 2026-11-01 |
-| Biteship account + sandbox token | BLOCKED_EXTERNAL | owner must provision Starter account + API keys |
+| Biteship account + sandbox token | DONE | owner-provided test key 2026-11-02 (env-only, never committed); live rates/booking/cancel proven |
+| Biteship sandbox order lifecycle (rates→book→cancel) | TESTED_SANDBOX | 2026-11-02: order 6ae788129a30646864504949 confirmed→cancelled via API; probe workflow added |
+| Biteship sandbox Delivered+Cancelled activation pair | PARTIAL/BLOCKED_OPERATOR | Cancelled proven via API; Delivered simulation is a Biteship dashboard action (owner, one click) |
 | Biteship sandbox Delivered+Cancelled evidence | BLOCKED_EXTERNAL | needs account (see BITESHIP_API_NOTES.md §Sandbox) |
 | Production token + activation + wallet | BLOCKED_EXTERNAL | owner + Biteship activation process |
 | Approved pickup origin / SKU weights / Ppang transit policy | BLOCKED_OPERATOR | owner input required |

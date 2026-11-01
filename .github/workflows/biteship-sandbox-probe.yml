@@ -1,0 +1,53 @@
+name: Biteship sandbox probe
+
+# Manual live-contract probe (ADR-014 activation evidence): real rates ->
+# pickup booking -> cancel against api.biteship.com with a TEST key only.
+# Never run against production credentials; never proves payment/delivery.
+on:
+  workflow_dispatch:
+    inputs:
+      origin_postal_code:
+        description: "Origin postal code"
+        required: true
+        default: "45363"
+      destination_postal_code:
+        description: "Destination postal code"
+        required: true
+        default: "40115"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    environment: biteship-sandbox
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677267
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace @yubie/config && npm run build --workspace @yubie/domain && npm run build --workspace @yubie/application && npm run build --workspace @yubie/integrations
+      - name: Run sandbox probe
+        env:
+          YUBIE_BITESHIP_SANDBOX_E2E: "1"
+          BITESHIP_API_KEY: ${{ secrets.BITESHIP_SANDBOX_API_KEY }}
+          BITESHIP_ENV: sandbox
+          BITESHIP_COURIERS: ${{ vars.BITESHIP_COURIERS }}
+          PROBE_ORIGIN: ${{ github.event.inputs.origin_postal_code }}
+          PROBE_DESTINATION: ${{ github.event.inputs.destination_postal_code }}
+        run: |
+          node --input-type=module -e "
+          import { runBiteshipSandboxProbe } from '@yubie/integrations';
+          const key = process.env.BITESHIP_API_KEY ?? '';
+          if (!key.startsWith('biteship_test.')) { console.log('REFUSED: non-test credential'); process.exit(1); }
+          const result = await runBiteshipSandboxProbe({
+            apiKey: key,
+            couriers: process.env.BITESHIP_COURIERS || 'jne,jnt,sicepat',
+            originPostalCode: Number(process.env.PROBE_ORIGIN),
+            destinationPostalCode: Number(process.env.PROBE_DESTINATION),
+            items: [{ name: 'Tepung Yubie 250g', valueIdr: 35000, quantity: 2, weightGrams: 260 }],
+          });
+          if (!result.ok) { console.log('PROBE_FAILED', JSON.stringify(result.error)); process.exit(1); }
+          console.log('PROBE_OK', JSON.stringify(result.value));
+          if (result.value.orderId === null || !result.value.cancelled) process.exit(1);
+          "

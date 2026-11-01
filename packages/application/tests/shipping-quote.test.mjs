@@ -56,6 +56,7 @@ function makeDeps({ provider = null, quotes = fakeQuotes(), origin = { id: "orig
   const tx = new InMemoryTransactionManager({});
   return {
     provider,
+    couriers: "jne,jnt,sicepat,lion,sap",
     tx,
     quotes,
     origins: { async findActive() { return origin; } },
@@ -109,6 +110,7 @@ test("rates keep only pickup-capable services, cap options and persist server-ow
   assert.deepEqual(result.value.options.map((option) => option.courierServiceCode), ["sicepat_best", "jne_reg"], "drop-off-only instant service filtered out, cheapest first");
   assert.equal(quotes.rows.size, 2);
   const request = provider.calls[0];
+  assert.equal(request.couriers, "jne,jnt,sicepat,lion,sap", "owner-approved courier list forwarded verbatim");
   assert.equal(request.origin.postalCode, "45363");
   assert.equal(request.destination.postalCode, "40115");
   assert.equal(request.items[0].weightGrams, 260);

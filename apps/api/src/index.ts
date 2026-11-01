@@ -332,6 +332,7 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     if(!principal)return json({ok:false,code:"INVALID_REQUEST"},{status:400,headers:{"cache-control":"no-store"}});
     const result=await requestShippingRates({principalKey:principal,lines:parsed.data.lines,delivery:parsed.data.delivery},{
       provider:ctx.shippingProvider,tx:ctx.tx,
+      couriers:(process.env.BITESHIP_COURIERS??"").trim()||null,
       ...(ctx.shippingQuotes?{quotes:ctx.shippingQuotes}:{}),
       ...(ctx.shippingCatalog?{origins:ctx.shippingCatalog,profiles:ctx.shippingCatalog}:{}),
       clock:ctx.clock,ids:ctx.ids,
@@ -360,7 +361,7 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
         const mintPrincipal=checkoutPrincipalKey({userId:user.value?.id??null,guestToken:guestMint.token});
         if(mintPrincipal&&parsed.data.delivery.address.trim()&&parsed.data.delivery.postalCode?.trim()){
           await requestShippingRates({principalKey:mintPrincipal,lines:parsed.data.lines,delivery:parsed.data.delivery,subsidizedFree:{maxSubsidyIdr:subsidyMax}},{
-            provider:ctx.shippingProvider,tx:ctx.tx,quotes:ctx.shippingQuotes,origins:ctx.shippingCatalog,profiles:ctx.shippingCatalog,clock:ctx.clock,ids:ctx.ids,
+            provider:ctx.shippingProvider,tx:ctx.tx,couriers:(process.env.BITESHIP_COURIERS??"").trim()||null,quotes:ctx.shippingQuotes,origins:ctx.shippingCatalog,profiles:ctx.shippingCatalog,clock:ctx.clock,ids:ctx.ids,
           }).catch(()=>{/* Subsidy minting is best-effort; plain free stays correct. */});
         }
       }

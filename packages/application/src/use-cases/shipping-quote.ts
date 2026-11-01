@@ -151,6 +151,8 @@ export type ShippingRatesOutcome =
 
 export interface ShippingRatesDeps {
   provider: ShippingProviderPort | null;
+  /** Owner-approved courier list; the live API rejects empty lists (error 40001002). */
+  couriers?: string | null;
   /** Coverage + quote persistence run transactionally; provider calls never do. */
   tx: { run<T>(operation: string, work: (repos: TransactionalRepositories) => Promise<T>): Promise<T> };
   /** Absent on non-transactional (preview/in-memory) deployments: courier quotes are then never offered. */
@@ -212,6 +214,7 @@ export async function requestShippingRates(
     const freeRates = await deps.provider.getRates({
       origin: { postalCode: freeOrigin.postalCode },
       destination: { postalCode: freePostal },
+      couriers: deps.couriers ?? undefined,
       items: freeParcel.items.map((item) => ({
         name: item.name, category: item.category, sku: item.sku, valueIdr: item.valueIdr, quantity: item.quantity, weightGrams: item.weightGrams,
         ...(item.lengthCm ? { lengthCm: item.lengthCm } : {}), ...(item.widthCm ? { widthCm: item.widthCm } : {}), ...(item.heightCm ? { heightCm: item.heightCm } : {}),
@@ -288,6 +291,7 @@ export async function requestShippingRates(
   const rates = await deps.provider.getRates({
     origin: { postalCode: origin.postalCode },
     destination: { postalCode },
+    couriers: deps.couriers ?? undefined,
     items: parcel.items.map((item) => ({
       name: item.name,
       category: item.category,
