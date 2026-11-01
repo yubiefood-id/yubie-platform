@@ -15,6 +15,10 @@ import { customerRequest } from "@/lib/customer-api";
 import type { DeliveryMapPoint } from "@yubie/integrations/google-maps/browser";
 type CheckoutPhase = "form" | "creating" | "redirecting" | "pending" | "unknown" | "exception" | "unavailable" | "stock_unavailable" | "error";
 interface Quote {subtotalAmount:number;discountAmount:number;shippingAmount:number|null;totalAmount:number|null;stockAvailable:boolean;shippingAvailable:boolean}
+/** ADR-014 courier delivery option: server-issued quote id is the ONLY thing
+ *  the browser contributes; every amount shown here is display-only and
+ *  re-derived server-side at payment-session creation. */
+interface DeliveryOption {quoteId:string;courierCompany:string;courierName:string|null;courierServiceCode:string;courierServiceName:string|null;deliveryType:"now"|"scheduled";durationDescription:string|null;totalShippingIdr:number;providerAmountIdr:number;taxAmountIdr:number}
 /** Server-side reverse-geocode preview: the structured parts are best-effort
  *  suggestions the customer may edit; nothing is submitted automatically. */
 interface LocationPreview { label: string; latitude: number; longitude: number; address?: { province?: string; city?: string; district?: string; postalCode?: string } }
@@ -56,6 +60,11 @@ export function CheckoutView() {
   // Free-shipping quick picks come from the server's active coverage; the
   // checkout quote stays the only authority on whether a city actually ships.
   const [coveredCities,setCoveredCities]=useState<string[]>([]);
+  // Courier delivery options arrive only when free city coverage does not
+  // cover the destination; selection resets whenever the cart or address changes.
+  const [deliveryOptions,setDeliveryOptions]=useState<DeliveryOption[]|null>(null);
+  const [selectedQuoteId,setSelectedQuoteId]=useState<string|null>(null);
+  const [deliveryNote,setDeliveryNote]=useState<string|null>(null);
   const [locating,setLocating]=useState(false);
   const [locationNote,setLocationNote]=useState<string|null>(null);
   const [mapPoint,setMapPoint]=useState<DeliveryMapPoint|null>(null);
@@ -63,7 +72,6 @@ export function CheckoutView() {
   const formValid = form.email.includes("@") && form.phone.trim().length >= 8 && form.address.trim().length >= 8 && form.city.trim().length >= 2;
   const quote=quotation?.body===requestBody?quotation.value:null;
   const quoteError=quotation?.body===requestBody?quotation.error:null;
-  const canPay=admission==="enabled"&&!!quote?.stockAvailable&&!!quote?.shippingAvailable&&typeof quote?.totalAmount==="number";
   const recover=useCallback(async()=>{
     let attemptKey:string|null=null;
     try{const held=JSON.parse(localStorage.getItem(CHECKOUT_ATTEMPT_STORAGE_KEY)??"null");if(typeof held?.key==="string")attemptKey=held.key;}catch{/* Server-owned current attempt is still recoverable. */}
@@ -147,6 +155,25 @@ export function CheckoutView() {
     }).catch(()=>{if(!abort.signal.aborted)setQuotation({body:requestBody,value:null,error:"Ringkasan checkout belum dapat diperoleh."});});},250);
     return()=>{abort.abort();clearTimeout(timer);};
   },[requestBody,formValid,lines.length]);
+  // Fetch server courier rates only when the quote says the destination is not
+  // free-covered: a paid provider call must never run per keystroke, and the
+  // server reuses stored quotes while they stay valid. All state resets ride
+  // the async boundary (no synchronous setState inside the effect).
+  const cartLinesJson=JSON.stringify(lines.map(({line})=>({productId:line.productId,sizeId:line.sizeId,quantity:line.quantity})));
+  const ratesGate=formValid&&lines.length>0&&form.postalCode.trim()!==""&&quote!==null&&!quote.shippingAvailable&&quote.stockAvailable;
+  const ratesKey=`${ratesGate}|${cartLinesJson}|${form.phone.trim()}|${form.address.trim()}|${form.city.trim()}|${form.postalCode.trim()}`;
+  useEffect(()=>{
+    if(!ratesGate)return;
+    const abort=new AbortController();
+    const timer=setTimeout(()=>{void fetch("/api/shipping/rates",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({lines:JSON.parse(cartLinesJson),delivery:{phone:form.phone.trim(),address:form.address.trim(),city:form.city.trim(),postalCode:form.postalCode.trim()}}),cache:"no-store",signal:abort.signal}).then(async response=>{
+      const result=await response.json();if(abort.signal.aborted)return;
+      const shipping=result?.ok?result.data?.shipping:null;
+      if(shipping?.mode==="courier"&&Array.isArray(shipping.options)&&shipping.options.length>0){
+        setDeliveryOptions(shipping.options);setSelectedQuoteId(shipping.options[0].quoteId);setDeliveryNote(null);
+      }else{setDeliveryOptions([]);setSelectedQuoteId(null);setDeliveryNote(shipping?.reason==="missing_postal_code"?"Kode pos diperlukan untuk menghitung ongkir.":"Belum ada layanan kurir untuk alamat ini.");}
+    }).catch(()=>{if(!abort.signal.aborted){setDeliveryOptions([]);setSelectedQuoteId(null);setDeliveryNote("Opsi pengiriman belum dapat diperoleh.");}});},300);
+    return()=>{abort.abort();clearTimeout(timer);};
+  },[ratesKey,ratesGate,cartLinesJson,form.phone,form.address,form.city,form.postalCode]);
 
   if (!hydrated) return <div className="checkout-page" aria-busy="true"><p className="cart-loading">Memuat checkout…</p></div>;
 
@@ -160,7 +187,11 @@ export function CheckoutView() {
   }
 
   const subtotal = quote?.subtotalAmount??lines.reduce((sum,item)=>sum+item.lineTotal,0);
-  const total=quote?.totalAmount??null;
+  const selectedOption=selectedQuoteId&&deliveryOptions?deliveryOptions.find(option=>option.quoteId===selectedQuoteId)??null:null;
+  const courierShippingIdr=selectedOption?selectedOption.totalShippingIdr:null;
+  const canPay=admission==="enabled"&&!!quote?.stockAvailable&&(!!quote?.shippingAvailable||courierShippingIdr!==null)&&(typeof quote?.totalAmount==="number"||courierShippingIdr!==null);
+  const displayShipping=quote?.shippingAvailable?quote.shippingAmount:courierShippingIdr;
+  const total=quote?(quote.totalAmount??(courierShippingIdr!==null?subtotal-(quote.discountAmount??0)+courierShippingIdr:null)):null;
   const hasFlour=lines.some(({line})=>line.productId==="flour");
   const submit=async(event?:React.FormEvent)=>{
     event?.preventDefault();if(!formValid||!canPay||phase==="creating"||phase==="redirecting")return;
@@ -173,7 +204,7 @@ export function CheckoutView() {
         if(localStorage.getItem(CHECKOUT_ATTEMPT_STORAGE_KEY)){setPhase("unknown");return;}
         const attempt=await storedAttemptForRequest(localStorage,requestBody,crypto.randomUUID());attemptRef.current=attempt;
         submitted=true;
-        const response=await fetch("/api/checkout",{method:"POST",headers:{"content-type":"application/json","idempotency-key":attempt.key},body:requestBody,cache:"no-store",signal:AbortSignal.timeout(20000)});
+        const response=await fetch("/api/checkout",{method:"POST",headers:{"content-type":"application/json","idempotency-key":attempt.key},body:JSON.stringify({...JSON.parse(requestBody),...(selectedQuoteId?{shippingQuoteId:selectedQuoteId}:{})}),cache:"no-store",signal:AbortSignal.timeout(20000)});
         const payload=await response.json().catch(()=>null);const outcome=classifyCheckoutResponse(response.status,payload);
         if(outcome==="redirect"){
           if(typeof payload.data.checkoutToken==="string")localStorage.setItem(CHECKOUT_ATTEMPT_STORAGE_KEY,JSON.stringify({...attempt,checkoutToken:payload.data.checkoutToken}));
@@ -182,6 +213,11 @@ export function CheckoutView() {
         if(outcome==="pending"){setPhase("unknown");return;}
         if(outcome==="unavailable"){localStorage.removeItem(CHECKOUT_ATTEMPT_STORAGE_KEY);setPhase("unavailable");setAdmission("disabled");return;}
         if(outcome==="preview"){localStorage.removeItem(CHECKOUT_ATTEMPT_STORAGE_KEY);setMode("preview");setPhase("form");return;}
+        if(outcome==="quote_stale"){
+          localStorage.removeItem(CHECKOUT_ATTEMPT_STORAGE_KEY);setPhase("form");
+          setSelectedQuoteId(null);setDeliveryOptions(null);
+          setErrorMessage("Opsi pengiriman sudah berubah. Silakan pilih ulang layanan kurir lalu bayar lagi.");return;
+        }
         if(outcome==="sold_out"||outcome==="invalid"){
           if(!await recover())localStorage.removeItem(CHECKOUT_ATTEMPT_STORAGE_KEY);
           setPhase(outcome==="sold_out"?"stock_unavailable":"error");setErrorMessage(outcome==="sold_out"?"Stok item berubah. Keranjang tetap tersimpan; periksa varian dan jumlahnya.":"Data checkout belum valid. Periksa kembali isian Anda.");return;
@@ -235,6 +271,15 @@ export function CheckoutView() {
               <datalist id="yubie-covered-cities">{coveredCities.map(city=><option key={city} value={city} />)}</datalist>
             </label>
             <label>Kode pos<input value={form.postalCode} onChange={(event) => setForm({ ...form, postalCode: event.target.value })} inputMode="numeric" autoComplete="postal-code" /></label>
+            {deliveryOptions!==null&&deliveryOptions.length>0&&<div className="courier-options" role="radiogroup" aria-label="Pilihan layanan kurir">
+              {deliveryOptions.map(option=><label key={option.quoteId} className="courier-option">
+                <input type="radio" name="yubie-courier" checked={selectedQuoteId===option.quoteId} onChange={()=>setSelectedQuoteId(option.quoteId)} />
+                <span className="courier-name">{option.courierServiceName??option.courierServiceCode}{option.courierCompany?` · ${option.courierCompany}`:""}</span>
+                <span className="courier-eta">{option.durationDescription??(option.deliveryType==="now"?"Instan":"Terjadwal")}</span>
+                <span className="courier-price">{formatRupiah(option.totalShippingIdr)}</span>
+              </label>)}
+            </div>}
+            {deliveryOptions!==null&&deliveryOptions.length===0&&deliveryNote&&<p className="checkout-note" role="status">{deliveryNote}</p>}
           </fieldset>
           <fieldset disabled={admission!=="enabled"||busy}>
             <legend>3 · Pembayaran</legend>
@@ -243,7 +288,7 @@ export function CheckoutView() {
           </fieldset>
           {(errorMessage||quoteError)&&<p className="checkout-error" role="alert">{errorMessage??quoteError}</p>}
           {quote&&!quote.stockAvailable&&<p role="status">Stok item belum tersedia atau belum terverifikasi.</p>}
-          {quote&&!quote.shippingAvailable&&<p role="status">Pengiriman ke tujuan ini belum disetujui.</p>}
+          {quote&&!quote.shippingAvailable&&deliveryOptions!==null&&deliveryOptions.length===0&&<p role="status">Pengiriman ke tujuan ini belum disetujui.</p>}
           <button className="button primary full" type="submit" disabled={!formValid || !canPay || busy}>
             {busy ? "Menyiapkan pembayaran…" : total===null?"Pembayaran belum tersedia":`Bayar ${formatRupiah(total)} →`}
           </button>
@@ -259,6 +304,7 @@ export function CheckoutView() {
           <div><input id="checkout-promo" name="promo" defaultValue={promoCode ?? ""} placeholder="Masukkan kode promo" autoCapitalize="characters" /><button type="submit">Terapkan</button></div>
         </form>
         {!!quote?.discountAmount&&<div className="discount-row"><span>Diskon terverifikasi <button type="button" onClick={clearPromo}>Hapus</button></span><span>−{formatRupiah(quote.discountAmount)}</span></div>}
+        {displayShipping!==null&&displayShipping!==undefined&&<div><span>Ongkir</span><span>{displayShipping===0?"Gratis":formatRupiah(displayShipping)}</span></div>}
         <div className="total"><span>Total final</span><span>{total===null?"Belum tersedia":formatRupiah(total)}</span></div>
         {quote?.shippingAvailable&&quote.shippingAmount===0&&total!==null&&<p className="checkout-note free-shipping" role="status">🚚 Gratis ongkir ke {form.city.trim()} — termasuk dalam total.</p>}
         <p>Ongkir dan total final diverifikasi oleh server sebelum halaman pembayaran dibuat.</p>

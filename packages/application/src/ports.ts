@@ -362,6 +362,9 @@ export interface GrowthRepository {
 /** Repositories sharing one transaction, handed to TransactionManager work. */
 export interface TransactionalRepositories {
   shipping?: { authorize(city: string, now: string): Promise<{policy:"free_promotional";amount:number;reason:string}|null>; listCoverage?(now: string): Promise<{policy:"free_promotional";amount:number;cities:string[]}[]> };
+  shippingQuotes?: ShippingQuoteStore;
+  /** Idempotent courier-shipment creation on authoritative payment success. */
+  shipments?: { ensureForPaidOrder(input: { orderId: string; checkoutRef: string; shipping: import("@yubie/domain").OrderShipping | null; currency: string }, now: string): Promise<"created" | "existing" | "skipped"> };
   customerIdentity?: import("./ports/customer-identity.js").CustomerIdentityRepository;
   customerAddresses?: import("./ports/customer-address.js").CustomerAddressRepository;
   promotions?: import("./ports/promotions.js").PromotionRepository;
@@ -379,6 +382,22 @@ export interface TransactionalRepositories {
 }
 
 /**
+ * Transactional access to stored server-side shipping quotes (ADR-014): a
+ * quote row is the ONLY shipping price authority at checkout time. Quotes are
+ * consumed exactly once by an order; stale or tampered selections are
+ * rejected rather than re-priced silently.
+ */
+export interface ShippingQuoteStore {
+  insert(record: import("@yubie/domain").ShippingQuoteRecord): Promise<UseCaseResult<void>>;
+  /** All still-quoted rows for this principal/cart/destination (rate-cache reuse); empty when none usable. */
+  listUsable(input: { principalKey: string; cartHash: string; destinationHash: string; now: string }): Promise<UseCaseResult<import("@yubie/domain").ShippingQuoteRecord[]>>;
+  /** Lock and load a still-quoted row by id (TX1 revalidation of a client selection). */
+  findById(id: string, now: string): Promise<UseCaseResult<import("@yubie/domain").ShippingQuoteRecord | null>>;
+  /** Atomically flip quoted -> consumed bound to one order; false when already consumed/expired. */
+  consume(id: string, orderId: string, now: string): Promise<UseCaseResult<boolean>>;
+}
+
+/**
  * Application-owned atomic write boundary: business state, audit and outbox
  * commit together or not at all. The provider-specific mechanism (PostgreSQL
  * BEGIN/COMMIT) stays inside @yubie/persistence — never in domain or use-case
@@ -393,3 +412,4 @@ export * from "./ports/customer-identity.js";
 export * from "./ports/customer-address.js";
 export * from "./ports/delivery-location.js";
 export * from "./ports/promotions.js";
+export * from "./ports/shipping-provider.js";

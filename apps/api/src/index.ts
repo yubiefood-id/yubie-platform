@@ -21,13 +21,15 @@ import {
   subscribeNewsletter,
   webhookError,
 } from "@yubie/application";
-import { b2bLeadSchema, checkoutRequestSchema, googleLoginSchema, newsletterSubmissionSchema, productWaitlistSchema } from "@yubie/validation";
+import { b2bLeadSchema, checkoutRequestSchema, googleLoginSchema, newsletterSubmissionSchema, productWaitlistSchema, shippingRatesRequestSchema } from "@yubie/validation";
 import { parseYubieEnvName } from "@yubie/config";
 import { customerRouteEnabled, parseLaunchProfile } from "@yubie/config/launch";
 import { paymentStatusFromProviderSession } from "@yubie/domain";
 import { parseIpaymuCallbackBody, verifyIpaymuCallback } from "@yubie/integrations";
 import { createDatabase, type Database } from "@yubie/persistence";
-import { tokensMatch } from "@yubie/application";
+import { tokensMatch, requestShippingRates } from "@yubie/application";
+import { parseBiteshipWebhook, verifyBiteshipWebhookSecret } from "@yubie/integrations";
+import { PostgresShipmentRepository } from "@yubie/persistence";
 import { catalog } from "./catalog.js";
 import { createAppContext, type AppContext } from "./composition/create-app.js";
 import { createRequestId } from "./middleware/request-id.js";
@@ -160,6 +162,8 @@ function checkoutError(code: string): { status: number; code: string } {
   switch (code) {
     case "shipping_unavailable":
       return { status: 503, code: "SHIPPING_UNAVAILABLE" };
+    case "shipping_quote_stale":
+      return { status: 409, code: "SHIPPING_QUOTE_STALE" };
     case "checkout_safety_hold":
       return { status: 503, code: "CHECKOUT_SAFETY_HOLD" };
     case "unauthorized":
@@ -310,6 +314,31 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
       return json({ok:true,data:{policies}},{headers:{"cache-control":"no-store"}});
     }catch{return json({ok:false,code:"SHIPPING_UNAVAILABLE"},{status:503,headers:{"cache-control":"no-store"}});}
   }
+  if (request.method === "POST" && url.pathname === "/v1/shipping/rates") {
+    // ADR-014 step 3: server-only courier rate quoting. Disabled mode answers
+    // inert "unavailable" so the storefront never offers dynamic shipping
+    // before activation; free-covered cities short-circuit without a paid
+    // provider call. Provider I/O happens here, never inside a transaction.
+    const body=await readJsonBody(request,MAX_JSON_BYTES);if(!body.ok)return tooLarge();
+    const parsed=shippingRatesRequestSchema.safeParse(body.value);
+    if(!parsed.success)return json({ok:false,code:"INVALID_REQUEST"},{status:400,headers:{"cache-control":"no-store"}});
+    if (ctx.shippingExecutionMode === "disabled") {
+      return json({ok:true,data:{shipping:{mode:"unavailable",reason:"provider_unconfigured"}}},{headers:{"cache-control":"no-store"}});
+    }
+    const user=await resolveSession(readSessionToken(request),{sessions:ctx.authSessions,users:ctx.users,tokens:ctx.tokens,clock:ctx.clock});
+    if(!user.ok)return json({ok:false,code:"CUSTOMER_STORAGE_UNAVAILABLE"},{status:503,headers:{"cache-control":"no-store"}});
+    const guest=guestCheckoutToken(request);
+    const principal=checkoutPrincipalKey({userId:user.value?.id??null,guestToken:guest.token});
+    if(!principal)return json({ok:false,code:"INVALID_REQUEST"},{status:400,headers:{"cache-control":"no-store"}});
+    const result=await requestShippingRates({principalKey:principal,lines:parsed.data.lines,delivery:parsed.data.delivery},{
+      provider:ctx.shippingProvider,tx:ctx.tx,
+      ...(ctx.shippingQuotes?{quotes:ctx.shippingQuotes}:{}),
+      ...(ctx.shippingCatalog?{origins:ctx.shippingCatalog,profiles:ctx.shippingCatalog}:{}),
+      clock:ctx.clock,ids:ctx.ids,
+    });
+    if(!result.ok){const mapping=checkoutError(result.error.code);return json({ok:false,code:mapping.code},{status:mapping.status,headers:{"cache-control":"no-store"}});}
+    return json({ok:true,data:{shipping:result.value}},{headers:{"cache-control":"no-store"}});
+  }
   if (request.method === "POST" && url.pathname === "/v1/checkouts/quote") {
     const body=await readJsonBody(request,MAX_JSON_BYTES);if(!body.ok)return tooLarge();
     const parsed=checkoutRequestSchema.pick({lines:true,promoCode:true,delivery:true}).safeParse(body.value);
@@ -424,6 +453,7 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
         idempotencyKey: request.headers.get("idempotency-key"),
         idempotencyPrincipal: principal,
         ...(parsed.data.promoCode ? { promoCode: parsed.data.promoCode } : {}),
+        ...(parsed.data.shippingQuoteId ? { shippingQuoteId: parsed.data.shippingQuoteId } : {}),
         ...(customerProof ? { customerProof } : {}),
         ...(guest.existing ? { possessedGuestPrincipal: checkoutPrincipalKey({ guestToken: guest.token })! } : {}),
       }, { tx: ctx.tx, provider: ctx.paymentProvider, clock: ctx.clock, ids: ctx.ids });
@@ -469,6 +499,15 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     }catch{return json({ok:false,code:"RECOVERY_UNAVAILABLE"},{status:503,headers:{"cache-control":"no-store"}});}
   }
 
+  const checkoutShipmentMatch = url.pathname.match(/^\/v1\/checkouts\/([^/]+)\/shipment$/);
+  if (request.method === "GET" && checkoutShipmentMatch?.[1]) {
+    // Public, token-scoped, PII-free courier tracking (ADR-014 step 9):
+    // current state + waybill only — no addresses, contacts or cost data.
+    if (!ctx.shippingCatalog || !ctx.database) return json({ ok: false, code: "SHIPPING_NOT_CONFIGURED" }, { status: 503, headers: { "cache-control": "no-store" } });
+    const shipment = await new PostgresShipmentRepository(ctx.database!).findPublicByCheckoutToken(decodeURIComponent(checkoutShipmentMatch[1]));
+    if (!shipment) return json({ ok: false, code: "NOT_FOUND" }, { status: 404, headers: { "cache-control": "no-store" } });
+    return json({ ok: true, data: { shipment } }, { headers: { "cache-control": "no-store" } });
+  }
   const checkoutStatusMatch = url.pathname.match(/^\/v1\/checkouts\/([^/]+)$/);
   if (request.method === "GET" && checkoutStatusMatch?.[1]) {
     // Public, token-scoped, PII-free: only opaque-token lookups answer here;
@@ -486,6 +525,47 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     return json({ ok: true, data: result.value });
   }
 
+  if (request.method === "POST" && url.pathname === "/v1/webhooks/biteship") {
+    // ADR-014 step 9: provider-authenticated webhook. Biteship sends a
+    // merchant-configured static secret header (no HMAC — none invented);
+    // the secret compares constant-time and the durable inbox append happens
+    // BEFORE the 2xx so a crash re-receives the event cleanly. Every mode
+    // keeps accepting inbound events; only outbound bookings are gated.
+    const secretHeaderName = (process.env.BITESHIP_WEBHOOK_SECRET_HEADER ?? "").trim() || "x-biteship-secret";
+    const secret = process.env.BITESHIP_WEBHOOK_SECRET ?? "";
+    const raw = await readBoundedText(request, MAX_WEBHOOK_BYTES);
+    if (raw === null) return tooLarge();
+    let parsedJson: unknown = null;
+    try { parsedJson = JSON.parse(raw); } catch { parsedJson = null; }
+    const webhook = parsedJson === null ? null : parseBiteshipWebhook(parsedJson);
+    if (!webhook) return json({ ok: true, result: "ignored" }, { status: 202, headers: { "cache-control": "no-store" } });
+    const receivedSecret = request.headers.get(secretHeaderName) ?? undefined;
+    if (!secret || !verifyBiteshipWebhookSecret(receivedSecret, secret)) {
+      logEvent("api.biteship_webhook_rejected", { requestId, reason: "signature" });
+      return json({ ok: false, code: "INVALID_SIGNATURE" }, { status: 401, headers: { "cache-control": "no-store" } });
+    }
+    if (!ctx.shipmentInbox) {
+      return json({ ok: false, code: "WEBHOOK_NOT_CONFIGURED" }, { status: 503, headers: { "cache-control": "no-store" } });
+    }
+    const payloadHash = createHash("sha256").update(raw).digest("hex");
+    const dedupeKey = `biteship:${webhook.orderId}:${webhook.event}:${webhook.status ?? ""}:${payloadHash.slice(0, 16)}`;
+    try {
+      const outcome = await ctx.shipmentInbox.receive({
+        dedupeKey,
+        event: webhook.event,
+        providerOrderId: webhook.orderId,
+        waybillId: webhook.waybillId ?? null,
+        status: webhook.status ?? null,
+        payload: parsedJson as Record<string, unknown>,
+        payloadHash,
+      });
+      logEvent("api.biteship_webhook_received", { requestId, event: webhook.event, outcome });
+      return json({ ok: true, result: outcome }, { headers: { "cache-control": "no-store" } });
+    } catch {
+      // Storage failure: 503 so the provider redelivers; nothing was applied.
+      return json({ ok: false, code: "WEBHOOK_STORAGE_UNAVAILABLE" }, { status: 503, headers: { "cache-control": "no-store" } });
+    }
+  }
   if (request.method === "POST" && url.pathname === "/v1/webhooks/ipaymu") {
     if (ctx.paymentMode !== "ipaymu" || !ctx.ipaymuVa || !ctx.paymentProvider) {
       return json({ ok: false, code: "WEBHOOK_NOT_CONFIGURED" }, { status: 503 });

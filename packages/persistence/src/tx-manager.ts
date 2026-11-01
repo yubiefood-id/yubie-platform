@@ -1,6 +1,8 @@
 import type { TransactionManager, TransactionalRepositories } from "@yubie/application";
 import type { Database } from "./client.js";
 import { PostgresShippingPolicyRepository } from "./repositories/shipping-policy-repository.js";
+import { PostgresShippingQuoteRepository } from "./repositories/shipping-quote-repository.js";
+import { PostgresShipmentRepository } from "./repositories/shipment-repository.js";
 import { PostgresAuditRepository } from "./repositories/audit-repository.js";
 import { PostgresGrowthRepository } from "./repositories/growth-repository.js";
 import { PostgresIdempotencyRepository } from "./repositories/idempotency-repository.js";
@@ -29,6 +31,8 @@ export class PostgresTransactionManager implements TransactionManager {
       const txDatabase = { db: tx, client: this.database.client } as unknown as Database;
       return work({
         shipping: new PostgresShippingPolicyRepository(txDatabase),
+        shippingQuotes: new PostgresShippingQuoteRepository(txDatabase),
+        shipments: new PostgresShipmentRepository(txDatabase),
         customerIdentity: new PostgresCustomerIdentityRepository(txDatabase),
         customerAddresses: new PostgresCustomerAddressRepository(txDatabase),
         promotions: new PostgresPromotionRepository(txDatabase),

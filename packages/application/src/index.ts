@@ -9,6 +9,7 @@ export * from "./use-cases/resolve-whatsapp-redirect.js";
 export * from "./use-cases/check-listing-health.js";
 export * from "./use-cases/first-party-checkout.js";
 export * from "./use-cases/checkout-quote.js";
+export * from "./use-cases/shipping-quote.js";
 export * from "./use-cases/current-checkout.js";
 export * from "./use-cases/process-payment-notification.js";
 export * from "./use-cases/checkout-intent.js";

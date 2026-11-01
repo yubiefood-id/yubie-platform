@@ -3,7 +3,7 @@ import type { Clock, TransactionManager } from "../ports.js";
 import { authorizeCheckoutPromotion, PromotionAuthorizationError } from "./verified-promotions.js";
 import type { CustomerProof } from "./phone-auth.js";
 
-export function priceCheckoutLines(lines:Array<{productId:string;sizeId:string;quantity:number}>): OrderLineRecord[] {
+export function priceCheckoutLines(lines: ReadonlyArray<{productId:string;sizeId:string;quantity:number}>): OrderLineRecord[] {
   if (!lines.length || lines.some(line=>!Number.isSafeInteger(line.quantity)||line.quantity<1)) throw new RangeError("Invalid checkout quantity");
   return aggregateLineQuantities(lines).map(line=>{
     if (line.quantity>MAX_CART_LINE_QUANTITY) throw new RangeError("Checkout quantity exceeds limit");

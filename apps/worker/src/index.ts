@@ -11,6 +11,8 @@ import { reconcileSupport } from "./reconcile-handler.js";
 import { deliverSupportOutbox, processPendingOutbox } from "./reply-delivery-handler.js";
 import { runPaymentReconcile } from "./payment-reconcile-handler.js";
 import { runPaymentNotifications } from "./payment-notification-handler.js";
+import { runShipmentDispatch } from "./shipment-dispatch-handler.js";
+import { runShipmentNotifications } from "./shipment-notification-handler.js";
 import { runPhoneDelivery } from "./phone-delivery-handler.js";
 
 // Fail closed before any queue starts processing: an invalid runtime
@@ -129,6 +131,24 @@ async function start() {
   });
   await boss.schedule("operations.outbox", "* * * * *", {});
   await boss.send("operations.outbox", {});
+  // ADR-014 shipping execution: dispatch leases + provider notifications.
+  // The dispatch handler self-gates on SHIPPING_EXECUTION_MODE (disabled and
+  // shadow never book; pilot stays inside explicit operator bounds).
+  await boss.createQueue("shipment.dispatch");
+  await boss.work("shipment.dispatch", { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      const jobId = job.id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 48);
+      await runShipmentDispatch(repos.database, `worker_${jobId}`);
+    }
+  });
+  await boss.schedule("shipment.dispatch", "* * * * *", {});
+  await boss.send("shipment.dispatch", {});
+  await boss.createQueue("shipment.notifications");
+  await boss.work("shipment.notifications", { batchSize: 1 }, async () => {
+    await runShipmentNotifications(repos.database, "worker_shipment_notifications");
+  });
+  await boss.schedule("shipment.notifications", "* * * * *", {});
+  await boss.send("shipment.notifications", {});
   await boss.createQueue("identity.delivery");
   await boss.work("identity.delivery", { batchSize: 1 }, async () => {
     await runPhoneDelivery(repos.database);
