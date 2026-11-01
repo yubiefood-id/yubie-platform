@@ -51,3 +51,14 @@ Verdict values: `PENDING`, `IMPLEMENTED`, `TESTED_MOCK`, `TESTED_PG`,
 | Sandbox acceptance (Delivered+Cancelled) | BLOCKED_EXTERNAL | needs owner Biteship account + sandbox key |
 | Production deploy (mode=disabled) | PENDING | via docs/production/2026-10-26/CONTROLLED_RELEASE.md |
 | Shadow / sandbox / pilot / enabled | BLOCKED_EXTERNAL | gated in order; owner activation steps in the manual |
+
+## Release ced42f3 (Issue #73 hardening) — 2026-11-02
+
+| Step | Verdict | Evidence |
+|---|---|---|
+| PR #76 merged to main (5/5 checks) | DONE | merge ced42f3; main CI run 41342967439 success |
+| RC artifact published | DONE | run 41344076800 (approved as designated reviewer, bot-dispatched); artifact commerce-release-ced42f3..., zip digest 147aa65f...ae675 |
+| Artifact verified + staged on VPS | DONE | /home/yubie-deploy/yubie-release-ced42f3; SHA256SUMS all OK; api image sha256:83ecff9d... worker sha256:35d8fd44...; migrations 0001–0028 |
+| Root bootstrap (OWNER_SETUP) | BLOCKED_OPERATOR | owner root session required to install /usr/local/sbin/yubie-release-ced42f3... (sudoers boundary) |
+| Deploy + authorization.json | BLOCKED_OPERATOR | owner-only per CONTROLLED_RELEASE.md; ships with SHIPPING_EXECUTION_MODE=disabled (inert) |
+| Live backend (pre-deploy) | UNCHANGED | d8a660d, db connected, ipaymu — verified read-only 2026-11-02 |
