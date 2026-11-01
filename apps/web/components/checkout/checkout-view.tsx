@@ -10,7 +10,7 @@ import { trackEvent } from "@/lib/analytics";
 import { formatRupiah } from "@/lib/format";
 import { CHECKOUT_ATTEMPT_STORAGE_KEY, rememberRecoveredCheckout, storedAttemptForRequest, classifyCheckoutResponse, type HeldAttempt } from "@/lib/proxy-headers";
 
-import {prepareCheckoutSession,withCheckoutLock,type CheckoutSessionReadiness} from "@/lib/checkout-session";
+import {prepareCheckoutSession,timeoutSignal,withCheckoutLock,type CheckoutSessionReadiness} from "@/lib/checkout-session";
 import { customerRequest } from "@/lib/customer-api";
 import type { DeliveryMapPoint } from "@yubie/integrations/google-maps/browser";
 type CheckoutPhase = "form" | "creating" | "redirecting" | "pending" | "unknown" | "exception" | "unavailable" | "stock_unavailable" | "error";
@@ -75,7 +75,7 @@ export function CheckoutView() {
   const recover=useCallback(async()=>{
     let attemptKey:string|null=null;
     try{const held=JSON.parse(localStorage.getItem(CHECKOUT_ATTEMPT_STORAGE_KEY)??"null");if(typeof held?.key==="string")attemptKey=held.key;}catch{/* Server-owned current attempt is still recoverable. */}
-    const response=await fetch("/api/checkout/current",{headers:attemptKey?{"idempotency-key":attemptKey}:{},cache:"no-store",signal:AbortSignal.timeout(10000)});const body=await response.json();
+    const response=await fetch("/api/checkout/current",{headers:attemptKey?{"idempotency-key":attemptKey}:{},cache:"no-store",signal:timeoutSignal(10000)});const body=await response.json();
     if(!response.ok||!body.ok)throw new Error("Recovery unavailable");
     if(body.data?.checkoutToken){
       try{rememberRecoveredCheckout(localStorage,body.data.checkoutToken);}catch{/* Storage access must not block authoritative recovery. */}
@@ -140,9 +140,15 @@ export function CheckoutView() {
       if(!active)return;
       setAdmission(ready.ready?ready.admission:"unavailable");
       if(!ready.ready)return;
-      if(await recover())return;
-      const held=localStorage.getItem(CHECKOUT_ATTEMPT_STORAGE_KEY)??sessionStorage.getItem(CHECKOUT_ATTEMPT_STORAGE_KEY);
-      if(held){if(!localStorage.getItem(CHECKOUT_ATTEMPT_STORAGE_KEY))localStorage.setItem(CHECKOUT_ATTEMPT_STORAGE_KEY,held);setPhase("unknown");}
+      // Recovery and the held-attempt inspection are best-effort: a transient
+      // /current failure or blocked storage (iOS "Block All Cookie") must
+      // never flip an already-resolved admission back to unavailable — the
+      // form stays fillable and the pay button keeps its own honest gate.
+      try{
+        if(await recover())return;
+        const held=localStorage.getItem(CHECKOUT_ATTEMPT_STORAGE_KEY)??sessionStorage.getItem(CHECKOUT_ATTEMPT_STORAGE_KEY);
+        if(held){if(!localStorage.getItem(CHECKOUT_ATTEMPT_STORAGE_KEY))localStorage.setItem(CHECKOUT_ATTEMPT_STORAGE_KEY,held);setPhase("unknown");}
+      }catch{/* Automatic recovery is optional; manual checkout continues. */}
     }).catch(()=>{if(active)setAdmission("unavailable");});
     return()=>{active=false;};
   }, [recover]);
@@ -204,7 +210,7 @@ export function CheckoutView() {
         if(localStorage.getItem(CHECKOUT_ATTEMPT_STORAGE_KEY)){setPhase("unknown");return;}
         const attempt=await storedAttemptForRequest(localStorage,requestBody,crypto.randomUUID());attemptRef.current=attempt;
         submitted=true;
-        const response=await fetch("/api/checkout",{method:"POST",headers:{"content-type":"application/json","idempotency-key":attempt.key},body:JSON.stringify({...JSON.parse(requestBody),...(selectedQuoteId?{shippingQuoteId:selectedQuoteId}:{})}),cache:"no-store",signal:AbortSignal.timeout(20000)});
+        const response=await fetch("/api/checkout",{method:"POST",headers:{"content-type":"application/json","idempotency-key":attempt.key},body:JSON.stringify({...JSON.parse(requestBody),...(selectedQuoteId?{shippingQuoteId:selectedQuoteId}:{})}),cache:"no-store",signal:timeoutSignal(20000)});
         const payload=await response.json().catch(()=>null);const outcome=classifyCheckoutResponse(response.status,payload);
         if(outcome==="redirect"){
           if(typeof payload.data.checkoutToken==="string")localStorage.setItem(CHECKOUT_ATTEMPT_STORAGE_KEY,JSON.stringify({...attempt,checkoutToken:payload.data.checkoutToken}));
@@ -251,19 +257,23 @@ export function CheckoutView() {
           <PurchaseOptions productSlug="yubie-flour" productId="flour" placement="checkout" />
         </div>}
         {mode !== "live" && !["pending","unknown","exception"].includes(phase) && <form className="checkout-form" onSubmit={submit} noValidate>
-          <fieldset disabled={admission!=="enabled"||busy}>
+          {/* Typing is never gated on admission: on browsers where the session
+              probe fails (no Web Locks/AbortSignal.timeout on iOS <16.4, blocked
+              storage, flaky mobile network) the customer can still fill the
+              form; only the pay button below carries the admission gate. */}
+          <fieldset disabled={busy}>
             <legend>1 · Kontak</legend>
             <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} autoComplete="email" required aria-invalid={!form.email.includes("@")} />{phase !== "creating" && form.email.length > 3 && !form.email.includes("@") && <small>Masukkan email yang valid.</small>}</label>
             <p className="checkout-note">Sudah punya akun? <Link href="/login?next=/checkout">Lanjut dengan Google</Link> — atau lanjut sebagai tamu.</p>
           </fieldset>
-          <fieldset disabled={admission!=="enabled"||busy}>
+          <fieldset disabled={busy}>
             <legend>2 · Pengiriman</legend>
             {coveredCities.length>0&&<div className="coverage-chips" role="group" aria-label="Pilihan kota gratis ongkir">
               {coveredCities.map(city=><button key={city} type="button" className="chip" onClick={()=>setForm(form=>({...form,city}))}>🚚 Gratis ongkir — {city}</button>)}
             </div>}
             <label>Nama penerima<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} autoComplete="name" /></label>
             <label>No. WhatsApp<input type="tel" inputMode="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} autoComplete="tel" required /></label>
-            <button type="button" className="button warm location-activate" onClick={()=>void activateLocation()} disabled={locating||admission!=="enabled"||busy}>{locating?"Mendeteksi lokasi…":"📍 Aktifkan lokasi saya"}</button>
+            <button type="button" className="button warm location-activate" onClick={()=>void activateLocation()} disabled={locating||busy}>{locating?"Mendeteksi lokasi…":"📍 Aktifkan lokasi saya"}</button>
             {locationNote&&<p className="checkout-note" role="status">{locationNote}</p>}
             {mapPoint&&<DeliveryMap point={mapPoint} onChange={(point)=>void moveMapPin(point)} />}
             <label className="wide">Alamat lengkap<textarea rows={3} value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} autoComplete="street-address" required /></label>
@@ -281,7 +291,7 @@ export function CheckoutView() {
             </div>}
             {deliveryOptions!==null&&deliveryOptions.length===0&&deliveryNote&&<p className="checkout-note" role="status">{deliveryNote}</p>}
           </fieldset>
-          <fieldset disabled={admission!=="enabled"||busy}>
+          <fieldset disabled={busy}>
             <legend>3 · Pembayaran</legend>
             <p className="checkout-note">Anda akan diarahkan ke halaman pembayaran aman milik penyedia pembayaran untuk menyelesaikan transaksi.</p>
             <p className="checkout-note">Dengan melanjutkan pemesanan, Anda menyetujui <Link href="/terms">Syarat &amp; Ketentuan Yubie</Link> dan telah membaca <Link href="/privacy">Kebijakan Privasi</Link> serta <Link href="/refund-policy">Kebijakan Pengembalian Dana</Link>.</p>

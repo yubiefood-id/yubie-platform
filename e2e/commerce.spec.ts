@@ -86,7 +86,7 @@ test("login fails safely when staff has not configured Google locally", async ({
   await expect(page.getByRole("link", { name: /Lanjut belanja/ })).toBeVisible();
 });
 
-test("guest bootstrap failure blocks checkout before any order submission", async ({ page }) => {
+test("guest bootstrap failure blocks payment, not form entry", async ({ page }) => {
   let submissions = 0;
   await page.route("**/api/checkout/session", (route) => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ ok: false }) }));
   await page.route("**/api/checkout", (route) => {
@@ -97,7 +97,13 @@ test("guest bootstrap failure blocks checkout before any order submission", asyn
   await page.getByRole("button",{name:"Tambah",exact:true}).first().click();
   await page.goto("/checkout");
   await expect(page.getByText("Checkout belum tersedia.",{exact:true})).toBeVisible();
-  await expect(page.getByLabel("Email")).toBeDisabled();
+  // Typing is never gated on admission (production incident 2026-10-31: a
+  // failed session probe froze the whole form on mobile); the pay button
+  // carries the gate, and no order may be submitted.
+  await expect(page.getByLabel("Email")).toBeEnabled();
+  await page.getByLabel("Email").fill("blocked-bootstrap@example.invalid");
+  await expect(page.getByLabel("Email")).toHaveValue("blocked-bootstrap@example.invalid");
+  await expect(page.getByRole("button", { name: /^Bayar|Pembayaran belum tersedia/ })).toBeDisabled();
   expect(submissions).toBe(0);
 });
 

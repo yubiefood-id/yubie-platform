@@ -371,7 +371,9 @@ h1, h2, h3, p { margin-top: 0; }
 .checkout-form legend { padding: 0 .5rem; font-weight: 800; font-size: .78rem; letter-spacing: .1em; text-transform: uppercase; }
 .checkout-form label { display: grid; gap: .4rem; font-size: .75rem; font-weight: 800; }
 .checkout-form label.wide { grid-column: 1 / -1; }
-.checkout-form input, .checkout-form textarea { border: 1px solid var(--line); padding: .8rem; background: white; width: 100%; }
+.checkout-form input, .checkout-form textarea { border: 1px solid var(--line); padding: .8rem; background: white; width: 100%; font-size: 1rem; font-weight: 500; /* ≥16px stops iOS Safari from auto-zooming on focus */ }
+.checkout-form fieldset:disabled { opacity: .65; }
+.checkout-form fieldset:disabled, .checkout-form fieldset:disabled input, .checkout-form fieldset:disabled textarea, .checkout-form fieldset:disabled button { cursor: progress; }
 .checkout-form small { color: #a32626; }
 .checkout-note { font-size: .78rem; line-height: 1.6; opacity: .7; }
 .checkout-error { color: #a32626; font-size: .85rem; font-weight: 700; }
