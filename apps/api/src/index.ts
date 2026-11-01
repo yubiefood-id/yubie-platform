@@ -28,6 +28,7 @@ import { paymentStatusFromProviderSession } from "@yubie/domain";
 import { parseIpaymuCallbackBody, verifyIpaymuCallback } from "@yubie/integrations";
 import { createDatabase, type Database } from "@yubie/persistence";
 import { tokensMatch, requestShippingRates } from "@yubie/application";
+import { parseBiteshipWebhook, verifyBiteshipWebhookSecret } from "@yubie/integrations";
 import { catalog } from "./catalog.js";
 import { createAppContext, type AppContext } from "./composition/create-app.js";
 import { createRequestId } from "./middleware/request-id.js";
@@ -514,6 +515,47 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     return json({ ok: true, data: result.value });
   }
 
+  if (request.method === "POST" && url.pathname === "/v1/webhooks/biteship") {
+    // ADR-014 step 9: provider-authenticated webhook. Biteship sends a
+    // merchant-configured static secret header (no HMAC — none invented);
+    // the secret compares constant-time and the durable inbox append happens
+    // BEFORE the 2xx so a crash re-receives the event cleanly. Every mode
+    // keeps accepting inbound events; only outbound bookings are gated.
+    const secretHeaderName = (process.env.BITESHIP_WEBHOOK_SECRET_HEADER ?? "").trim() || "x-biteship-secret";
+    const secret = process.env.BITESHIP_WEBHOOK_SECRET ?? "";
+    const raw = await readBoundedText(request, MAX_WEBHOOK_BYTES);
+    if (raw === null) return tooLarge();
+    let parsedJson: unknown = null;
+    try { parsedJson = JSON.parse(raw); } catch { parsedJson = null; }
+    const webhook = parsedJson === null ? null : parseBiteshipWebhook(parsedJson);
+    if (!webhook) return json({ ok: true, result: "ignored" }, { status: 202, headers: { "cache-control": "no-store" } });
+    const receivedSecret = request.headers.get(secretHeaderName) ?? undefined;
+    if (!secret || !verifyBiteshipWebhookSecret(receivedSecret, secret)) {
+      logEvent("api.biteship_webhook_rejected", { requestId, reason: "signature" });
+      return json({ ok: false, code: "INVALID_SIGNATURE" }, { status: 401, headers: { "cache-control": "no-store" } });
+    }
+    if (!ctx.shipmentInbox) {
+      return json({ ok: false, code: "WEBHOOK_NOT_CONFIGURED" }, { status: 503, headers: { "cache-control": "no-store" } });
+    }
+    const payloadHash = createHash("sha256").update(raw).digest("hex");
+    const dedupeKey = `biteship:${webhook.orderId}:${webhook.event}:${webhook.status ?? ""}:${payloadHash.slice(0, 16)}`;
+    try {
+      const outcome = await ctx.shipmentInbox.receive({
+        dedupeKey,
+        event: webhook.event,
+        providerOrderId: webhook.orderId,
+        waybillId: webhook.waybillId ?? null,
+        status: webhook.status ?? null,
+        payload: parsedJson as Record<string, unknown>,
+        payloadHash,
+      });
+      logEvent("api.biteship_webhook_received", { requestId, event: webhook.event, outcome });
+      return json({ ok: true, result: outcome }, { headers: { "cache-control": "no-store" } });
+    } catch {
+      // Storage failure: 503 so the provider redelivers; nothing was applied.
+      return json({ ok: false, code: "WEBHOOK_STORAGE_UNAVAILABLE" }, { status: 503, headers: { "cache-control": "no-store" } });
+    }
+  }
   if (request.method === "POST" && url.pathname === "/v1/webhooks/ipaymu") {
     if (ctx.paymentMode !== "ipaymu" || !ctx.ipaymuVa || !ctx.paymentProvider) {
       return json({ ok: false, code: "WEBHOOK_NOT_CONFIGURED" }, { status: 503 });

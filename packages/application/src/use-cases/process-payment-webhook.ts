@@ -39,7 +39,7 @@ function requireWrite(result: UseCaseResult<unknown>): void {
  * so state, audit, outbox and inventory effects commit together.
  */
 export async function applyPaymentStatus(
-  deps: { orders: OrderRepository; payments: PaymentRepository; paymentEvents: PaymentEventRepository; audit?: AuditRepository; outbox?: OutboxRepository; inventory?: InventoryRepository; promotions?: PromotionRepository; clock: Clock; ids: IdGenerator; actor?: string },
+  deps: { orders: OrderRepository; payments: PaymentRepository; paymentEvents: PaymentEventRepository; audit?: AuditRepository; outbox?: OutboxRepository; inventory?: InventoryRepository; promotions?: PromotionRepository; shipments?: { ensureForPaidOrder(input: { orderId: string; checkoutRef: string; shipping: import("@yubie/domain").OrderShipping | null; currency: string }, now: string): Promise<"created" | "existing" | "skipped"> }; clock: Clock; ids: IdGenerator; actor?: string },
   payment: PaymentRecord,
   order: OrderRecord,
   status: PaymentStatus,
@@ -76,6 +76,12 @@ export async function applyPaymentStatus(
     } else if (targetOrderStatus === "cancelled") {
       requireWrite(await deps.inventory.releaseForOrder(order.id, `payment_${status}`, now));
     }
+  }
+  // ADR-014 step 5: only the authoritative success makes fulfilment
+  // eligible; shipment creation is idempotent so duplicate paid callbacks can
+  // never open a second dispatch intent.
+  if (status === "succeeded" && deps.shipments) {
+    await deps.shipments.ensureForPaidOrder({ orderId: order.id, checkoutRef: order.checkoutRef, shipping: order.shipping, currency: order.currency }, now);
   }
   await settlePromotionForPayment(deps, order.id, status, now);
   return "applied";

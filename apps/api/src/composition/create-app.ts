@@ -49,6 +49,7 @@ import {
   PostgresHealthProbe,
   PostgresShippingCatalogRepository,
   PostgresShippingQuoteRepository,
+  PostgresShipmentProviderInbox,
   PostgresMarketplaceListingRepository,
   PostgresOrderRepository,
   PostgresOutboundIntentRepository,
@@ -102,6 +103,7 @@ export interface AppContext {
   shippingProvider: ShippingProviderPort | null;
   shippingCatalog?: import("@yubie/application").ShippingOriginReader & import("@yubie/application").SkuShippingProfileReader;
   shippingQuotes?: ShippingQuoteStore;
+  shipmentInbox?: import("@yubie/persistence").PostgresShipmentProviderInbox;
   shippingExecutionMode: "disabled" | "shadow" | "sandbox" | "pilot" | "enabled";
 }
 
@@ -237,6 +239,7 @@ export function createAppContext(): AppContext {
       shippingProvider,
       shippingCatalog: new PostgresShippingCatalogRepository(database),
       shippingQuotes: new PostgresShippingQuoteRepository(database),
+      shipmentInbox: new PostgresShipmentProviderInbox(database),
       shippingExecutionMode,
       ...(phoneAuth ? { phoneAuth } : {}),
       ...(deliveryLocations ? { deliveryLocations } : {}),

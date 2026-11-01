@@ -363,6 +363,8 @@ export interface GrowthRepository {
 export interface TransactionalRepositories {
   shipping?: { authorize(city: string, now: string): Promise<{policy:"free_promotional";amount:number;reason:string}|null>; listCoverage?(now: string): Promise<{policy:"free_promotional";amount:number;cities:string[]}[]> };
   shippingQuotes?: ShippingQuoteStore;
+  /** Idempotent courier-shipment creation on authoritative payment success. */
+  shipments?: { ensureForPaidOrder(input: { orderId: string; checkoutRef: string; shipping: import("@yubie/domain").OrderShipping | null; currency: string }, now: string): Promise<"created" | "existing" | "skipped"> };
   customerIdentity?: import("./ports/customer-identity.js").CustomerIdentityRepository;
   customerAddresses?: import("./ports/customer-address.js").CustomerAddressRepository;
   promotions?: import("./ports/promotions.js").PromotionRepository;

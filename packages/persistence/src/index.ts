@@ -27,6 +27,8 @@ export * from "./repositories/inventory-onboarding.js";
 export * from "./repositories/payment-notification-inbox.js";
 export * from "./repositories/shipping-quote-repository.js";
 export * from "./repositories/shipping-catalog-repository.js";
+export * from "./repositories/shipment-repository.js";
+export * from "./repositories/shipment-inbox-repository.js";
 export * from "./repositories/growth-repository.js";
 export * from "./repositories/identity-repository.js";
 export * from "./repositories/customer-identity-repository.js";

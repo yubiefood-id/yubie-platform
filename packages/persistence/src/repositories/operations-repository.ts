@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
+import { sql } from "drizzle-orm";
 import type { TransactionSql } from "postgres";
 import { canOperate, assertOperationsApproval, validateVerifiedInventoryIntake, assertFulfillmentTransition, assertFullRefund, productFamilies, initialStaffApprovalMatches, type InitialStaffApproval, type StaffRole, type OperationsPermission, type OperationsKind, type FulfillmentStage, type VerifiedInventoryIntake } from "@yubie/domain";
 import type { OperationsPort, OperationDraft, OperationRecord, VersionedOperation, FulfillmentOperation, ShippingPolicyDraft } from "@yubie/application";
 import { operationsCreateSchema, operationsApprovalSchema, fulfillmentCommandSchema, operationNoteSchema, refundExecutionSchema, staffGrantSchema } from "@yubie/validation";
 import type { Database } from "../client.js";
 import { PostgresInventoryOnboarding } from "./inventory-onboarding.js";
+import { markShipmentReadyForDispatchTx } from "./shipment-repository.js";
 import { PostgresInventoryRepository } from "./inventory-repository.js";
 
 export class OperationsError extends Error {
@@ -52,6 +54,9 @@ export class PostgresOperations implements OperationsPort {
     return availability.map(row => ({ ...row, id: row.productId+"_"+row.sizeId, sku: productFamilies.find(product=>product.id===row.productId)?.sizes.find(size=>size.id===row.sizeId)?.sku }));
   }
   private async roles(tx: TransactionSql, subject: string): Promise<StaffRole[]> {
+    // Server-authorized provider actors (ADR-014 "system:") hold no staff
+    // grants; business guards inside the work function remain fully enforced.
+    if (subject.startsWith("system:")) return [];
     const rows = await tx<{ role: StaffRole }[]>`SELECT role FROM ops_staff_grants WHERE subject=${subject} AND revoked_at IS NULL ORDER BY role FOR SHARE`;
     need(rows.length > 0, "FORBIDDEN", 403, "Staff permission revoked / izin dicabut");
     return rows.map(row => row.role);
@@ -78,7 +83,10 @@ export class PostgresOperations implements OperationsPort {
         need(operation[0], "NOT_FOUND", 404, "Operation not found");
         permission = (action === "approve" ? approvePermission : applyPermission)[operation[0].kind];
       }
-      need(permission, "FORBIDDEN", 403, "Operation permission required"); this.permit(roles, permission);
+      need(permission, "FORBIDDEN", 403, "Operation permission required");
+      // Server-authorized provider actors (ADR-014 "system:") bypass staff
+      // RBAC here but keep every business guard inside the work function.
+      if (!actor.startsWith("system:")) this.permit(roles, permission);
       await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'ops-command:'+actor+':'+key},0))`;
       const previous = await tx`SELECT request_hash,result_json FROM ops_command_receipts WHERE actor=${actor} AND idempotency_key=${key}`;
       if (previous[0]) { need(previous[0].request_hash === digest, "IDEMPOTENCY_CONFLICT", 409, "Idempotency identity belongs to different input"); return { value: previous[0].result_json as T }; }
@@ -233,12 +241,23 @@ export class PostgresOperations implements OperationsPort {
       return { ...rows[0], payments, fulfillment: fulfillment[0] ?? null, delivery: delivery[0] ?? null, piiAccess: delivery.length > 0 };
     });
   }
+  /** Current fulfillment stage row for server-authorized provider transitions (ADR-014). */
+  async fulfillmentStage(orderId: string): Promise<{ stage: string; version: number; carrier: string | null } | null> {
+    const rows = await this.database.db.execute(sql`SELECT stage,version,carrier FROM ops_fulfillments WHERE order_id=${orderId}`);
+    const row = rows[0] as { stage: string; version: number; carrier: string | null } | undefined;
+    return row ? { stage: row.stage, version: Number(row.version), carrier: row.carrier } : null;
+  }
+
   async fulfill(actor: string, key: string, id: string, raw: FulfillmentOperation) {
     const input = fulfillmentCommandSchema.parse(raw);
+    // "system:" actors are server-authorized provider transitions (ADR-014
+    // step 8): they bypass staff RBAC but keep EVERY business guard below —
+    // verified paid payment, no holds, strict stage chain, carrier+tracking.
+    const systemActor = actor.startsWith("system:");
     return this.command(actor, key, "fulfill", { id, ...input }, async (tx, roles) => {
-      this.permit(roles, "fulfillment:write");
+      if (!systemActor) this.permit(roles, "fulfillment:write");
       await tx`SELECT pg_advisory_xact_lock(hashtextextended('inventory-onboarding',0))`;
-      const orders = await tx`SELECT status,fulfillment_hold,grand_total_amount,currency FROM orders WHERE id=${id} FOR UPDATE`; need(orders[0], "NOT_FOUND", 404, "Order not found");
+      const orders = await tx`SELECT status,fulfillment_hold,grand_total_amount,currency,shipping_jsonb FROM orders WHERE id=${id} FOR UPDATE`; need(orders[0], "NOT_FOUND", 404, "Order not found");
       const payments = await tx`SELECT status,amount,currency,reconciliation_state FROM order_payments WHERE order_id=${id} AND status IN ('pending','succeeded','refunded') FOR UPDATE`;
       const previous = await tx`SELECT stage,version,carrier,tracking_number FROM ops_fulfillments WHERE order_id=${id} FOR UPDATE`;
       const row = previous[0]; need((row ? Number(row.version) : 0) === input.expectedVersion, "CONFLICT", 409, "Fulfillment version changed");
@@ -250,7 +269,13 @@ export class PostgresOperations implements OperationsPort {
       await tx`INSERT INTO ops_fulfillments(order_id,stage,version,carrier,tracking_number,updated_by,updated_at) VALUES(${id},${input.stage},${version},${input.carrier ?? row?.carrier ?? null},${input.trackingNumber ?? row?.tracking_number ?? null},${actor},now()) ON CONFLICT(order_id) DO UPDATE SET stage=EXCLUDED.stage,version=EXCLUDED.version,carrier=EXCLUDED.carrier,tracking_number=EXCLUDED.tracking_number,updated_by=EXCLUDED.updated_by,updated_at=EXCLUDED.updated_at`;
       const status = input.stage === "shipped" ? "shipped" : input.stage === "delivered" ? "completed" : "processing";
       await tx`UPDATE orders SET status=${status},updated_at=now() WHERE id=${id}`;
-      await this.audit(tx, actor, "ops.fulfillment_changed", id, { stage: input.stage, version, reason: input.reason });
+      // ADR-014 step 6: staff packing completion flips a courier shipment to
+      // ready and emits its dispatch intent in this same transaction; manual
+      // free-shipping orders are untouched (worker skips non-courier orders).
+      if (input.stage === "packed" && (orders[0].shipping_jsonb as { policy?: string } | null)?.policy === "courier") {
+        await markShipmentReadyForDispatchTx(tx, { orderId: id, weightGrams: null, actor }, new Date().toISOString());
+      }
+      await this.audit(tx, actor, "ops.fulfillment_changed", id, { stage: input.stage, version, reason: input.reason, ...(systemActor ? { systemAuthorized: true } : {}) });
       return { orderId: id, stage: input.stage, version };
     });
   }
