@@ -157,21 +157,23 @@ export function CheckoutView() {
   },[requestBody,formValid,lines.length]);
   // Fetch server courier rates only when the quote says the destination is not
   // free-covered: a paid provider call must never run per keystroke, and the
-  // server reuses stored quotes while they stay valid.
+  // server reuses stored quotes while they stay valid. All state resets ride
+  // the async boundary (no synchronous setState inside the effect).
+  const cartLinesJson=JSON.stringify(lines.map(({line})=>({productId:line.productId,sizeId:line.sizeId,quantity:line.quantity})));
+  const ratesGate=formValid&&lines.length>0&&form.postalCode.trim()!==""&&quote!==null&&!quote.shippingAvailable&&quote.stockAvailable;
+  const ratesKey=`${ratesGate}|${cartLinesJson}|${form.phone.trim()}|${form.address.trim()}|${form.city.trim()}|${form.postalCode.trim()}`;
   useEffect(()=>{
-    setSelectedQuoteId(null);setDeliveryNote(null);
-    if(!formValid||!lines.length||!form.postalCode.trim()||quote===null||quote.shippingAvailable||!quote.stockAvailable){setDeliveryOptions(null);return;}
-    const ratesBody=JSON.stringify({lines:lines.map(({line})=>({productId:line.productId,sizeId:line.sizeId,quantity:line.quantity})),delivery:{phone:form.phone.trim(),address:form.address.trim(),city:form.city.trim(),postalCode:form.postalCode.trim()}});
+    if(!ratesGate)return;
     const abort=new AbortController();
-    const timer=setTimeout(()=>{void fetch("/api/shipping/rates",{method:"POST",headers:{"content-type":"application/json"},body:ratesBody,cache:"no-store",signal:abort.signal}).then(async response=>{
+    const timer=setTimeout(()=>{void fetch("/api/shipping/rates",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({lines:JSON.parse(cartLinesJson),delivery:{phone:form.phone.trim(),address:form.address.trim(),city:form.city.trim(),postalCode:form.postalCode.trim()}}),cache:"no-store",signal:abort.signal}).then(async response=>{
       const result=await response.json();if(abort.signal.aborted)return;
       const shipping=result?.ok?result.data?.shipping:null;
       if(shipping?.mode==="courier"&&Array.isArray(shipping.options)&&shipping.options.length>0){
-        setDeliveryOptions(shipping.options);setSelectedQuoteId(shipping.options[0].quoteId);
-      }else{setDeliveryOptions([]);setDeliveryNote(shipping?.reason==="missing_postal_code"?"Kode pos diperlukan untuk menghitung ongkir.":"Belum ada layanan kurir untuk alamat ini.");}
-    }).catch(()=>{if(!abort.signal.aborted){setDeliveryOptions([]);setDeliveryNote("Opsi pengiriman belum dapat diperoleh.");}});},300);
+        setDeliveryOptions(shipping.options);setSelectedQuoteId(shipping.options[0].quoteId);setDeliveryNote(null);
+      }else{setDeliveryOptions([]);setSelectedQuoteId(null);setDeliveryNote(shipping?.reason==="missing_postal_code"?"Kode pos diperlukan untuk menghitung ongkir.":"Belum ada layanan kurir untuk alamat ini.");}
+    }).catch(()=>{if(!abort.signal.aborted){setDeliveryOptions([]);setSelectedQuoteId(null);setDeliveryNote("Opsi pengiriman belum dapat diperoleh.");}});},300);
     return()=>{abort.abort();clearTimeout(timer);};
-  },[requestBody,form.postalCode,quote,formValid,lines.length,form.phone,form.address,form.city]);
+  },[ratesKey,ratesGate,cartLinesJson,form.phone,form.address,form.city,form.postalCode]);
 
   if (!hydrated) return <div className="checkout-page" aria-busy="true"><p className="cart-loading">Memuat checkout…</p></div>;
 
