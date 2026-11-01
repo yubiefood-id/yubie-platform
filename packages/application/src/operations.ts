@@ -29,6 +29,8 @@ export interface OperationsPort {
   list(subject: string, resource: string, limit: number, cursor: string | null): Promise<{ items: unknown[]; nextCursor: string | null }>;
   orderDetail(subject: string, id: string): Promise<unknown>;
   fulfill(subject: string, key: string, id: string, input: FulfillmentOperation): Promise<unknown>;
+  /** Issue #73 P0-B: release a dispatch-blocked (held) shipment after its cause is fixed. */
+  requeueShipment?(subject: string, key: string, orderId: string, reason: string): Promise<unknown>;
   addNote(subject: string, key: string, id: string, input: { body: string; reason: string }): Promise<unknown>;
   reconcile(subject: string, key: string, paymentId: string, reason: string): Promise<unknown>;
   triage(subject: string, key: string, paymentId: string, input: { expectedVersion: number; state: "investigating" | "escalated" | "resolved"; reason: string }): Promise<unknown>;

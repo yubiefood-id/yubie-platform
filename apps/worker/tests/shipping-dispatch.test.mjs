@@ -62,6 +62,8 @@ async function seedCourierOrder(db, orderId = "ord_ship_1") {
   await db.client`INSERT INTO order_payments (id,order_id,provider,provider_session_id,provider_payment_id,currency,status,amount,created_at,updated_at)
     VALUES (${"pay_" + orderId},${orderId},'ipaymu','TEST_ONLY_SESSION','9001','IDR','succeeded',90000,now(),now())`;
   await db.client`INSERT INTO ops_staff_grants (subject,role,granted_by,approval_ref,granted_at) VALUES ('packer','fulfillment','TEST_ONLY_BOOTSTRAP','TEST_ONLY_APPROVAL',now())`;
+  // Real TX1 consumes quotes and binds them to their order; mirror that.
+  await db.client`UPDATE shipping_quotes SET status='consumed', consumed_at=now(), order_id=${orderId} WHERE id=${"sq_" + orderId}`;
 }
 
 function setEnv(overrides = {}) {

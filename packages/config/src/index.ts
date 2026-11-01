@@ -630,6 +630,13 @@ export interface ShippingRuntimeConfig {
   /** Pilot bounds; required for "pilot", optional otherwise. */
   pilotMaxBookings: number | null;
   pilotBudgetIdr: number | null;
+  /**
+   * Issue #73 P0-C activation lever for merchant-subsidized free shipping:
+   * the maximum approved provider cost Yubie pays per free-covered order.
+   * UNSET keeps today's behavior exactly (free coverage without automatic
+   * courier booking). A positive integer arms the subsidized path.
+   */
+  freeSubsidyMaxIdr: number | null;
 }
 
 export type ShippingRuntimeConfigInspection =
@@ -669,7 +676,7 @@ export function parseBiteshipEnvName(raw: string | undefined): BiteshipEnvName {
   throw new RuntimeConfigError("BITESHIP_ENV must be sandbox or production (explicit selection; production is a reviewed operator gate)");
 }
 
-function parsePositiveInteger(env: RuntimeEnvSource, varName: "SHIPPING_PILOT_MAX_BOOKINGS" | "SHIPPING_PILOT_BUDGET_IDR"): number | null {
+function parsePositiveInteger(env: RuntimeEnvSource, varName: "SHIPPING_PILOT_MAX_BOOKINGS" | "SHIPPING_PILOT_BUDGET_IDR" | "SHIPPING_FREE_SUBSIDY_MAX_IDR"): number | null {
   const raw = env[varName];
   if (raw === undefined || raw === "") return null;
   const value = Number(raw);
@@ -713,6 +720,12 @@ export function parseShippingRuntimeConfig(env: RuntimeEnvSource = process.env):
   let webhookSecretHeader: string | null = null;
   let pilotMaxBookings: number | null = null;
   let pilotBudgetIdr: number | null = null;
+  let freeSubsidyMaxIdr: number | null = null;
+  try {
+    freeSubsidyMaxIdr = parsePositiveInteger(env, "SHIPPING_FREE_SUBSIDY_MAX_IDR");
+  } catch (error) {
+    errors.push(configMessage(error));
+  }
 
   if (provider === "biteship") {
     biteshipApiKeyConfigured = Boolean(env.BITESHIP_API_KEY);
@@ -781,6 +794,7 @@ export function parseShippingRuntimeConfig(env: RuntimeEnvSource = process.env):
     webhookSecretHeader,
     pilotMaxBookings,
     pilotBudgetIdr,
+    freeSubsidyMaxIdr,
   };
 }
 

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { paymentSessionMatches,flagPaymentMismatch,recordPaymentMismatch } from "./payment-session-verification.js";
 import { priceCheckoutLines } from "./checkout-quote.js";
-import { consumeCheckoutShippingQuote, courierOrderShipping, shippingCartHash, shippingDestinationHash } from "./shipping-quote.js";
+import { consumeCheckoutShippingQuote, consumeSubsidizedFreeQuote, courierOrderShipping, shippingCartHash, shippingDestinationHash, subsidizedOrderShipping } from "./shipping-quote.js";
 import {
   MAX_CART_LINE_QUANTITY,
   MAX_CHECKOUT_TOTAL_IDR,
@@ -428,6 +428,23 @@ export async function createFirstPartyCheckout(
         if (approved) {
           shipping = approved;
           draftOrder.shipping = approved;
+          // Issue #73 P0-C: a subsidized server quote upgrades the plain-free
+          // snapshot with courier/subsidy identity under the same lock — the
+          // customer still pays Rp0 shipping; totals never change. Absent or
+          // expired subsidy degrades to plain free (manual fulfillment).
+          if (repos.shippingQuotes && input.delivery) {
+            const subsidized = await consumeSubsidizedFreeQuote(repos, {
+              principalKey: input.idempotencyPrincipal,
+              cartHash: shippingCartHash(input.lines),
+              destinationHash: shippingDestinationHash(input.delivery),
+              orderId,
+              now,
+            });
+            if (subsidized) {
+              shipping = subsidizedOrderShipping(subsidized);
+              draftOrder.shipping = shipping;
+            }
+          }
         } else if (input.shippingQuoteId && repos.shippingQuotes) {
           // ADR-014 courier path: the stored server quote — never a browser
           // amount — prices the order, under the same lock as the draft.

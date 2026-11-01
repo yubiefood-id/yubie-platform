@@ -39,6 +39,10 @@ Verdict values: `PENDING`, `IMPLEMENTED`, `TESTED_MOCK`, `TESTED_PG`,
 | Customer tracking + admin shipment visibility | IMPLEMENTED + TESTED_MOCK | tracking gate 1/1; panel behind confirmed payment (PR #69) |
 | Onboarding manual + operator checklist | DONE | docs/shipping/BITESHIP_ONBOARDING_MANUAL.md (PR #70) |
 | Full implementation merged to main | DONE | main 8634dc5 (PR #65 + consolidated PR #71; 5/5 checks green) 2026-11-01 |
+| Issue #73 P0-A atomic pilot quota | IMPLEMENTED + TESTED_POSTGRES | advisory-lock bounded claim; 5 hardening tests (count/budget/concurrency/ambiguous/GREATEST repricing) apps/worker/tests/shipping-hardening.test.mjs |
+| Issue #73 P0-B strict SKU dispatch | IMPLEMENTED + TESTED_POSTGRES | dispatchBlockers + held/blocked_reason/audit + operator requeue; partial/missing profile never books; exact item payload asserted |
+| Issue #73 P0-C subsidized free shipping | IMPLEMENTED + TESTED_POSTGRES/UNIT | SHIPPING_FREE_SUBSIDY_MAX_IDR lever (unset = old behavior); Rp0 customer charge, merchant_subsidy + provider_booked ledger; TX1 server-side consume; historic orders untouched |
+| Issue #73 P1 instant scope | IMPLEMENTED + TESTED_UNIT | instant never offered/purchasable regression; prerequisites documented in onboarding manual |
 | Browser E2E delivery-options specs | PENDING | mock-tier additions deferred to post-merge hardening |
 | RC artifact publication | BLOCKED_OPERATOR | run 41314287547 waiting on the protected staging-publication approval in GitHub (owner) |
 | Production deploy (mode=disabled) | BLOCKED_OPERATOR | controlled-release root bootstrap (OWNER_SETUP) + authorization.json are owner-only by design; live backend verified still d8a660d, ipaymu, db connected (read-only, 2026-11-01) |

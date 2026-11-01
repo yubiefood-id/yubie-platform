@@ -237,11 +237,26 @@ export class PostgresOperations implements OperationsPort {
       need(rows[0], "NOT_FOUND", 404, "Order not found");
       const payments = canOperate(roles, "payments:read") ? await tx`SELECT id,provider,status,amount,reconciliation_state FROM order_payments WHERE order_id=${id} ORDER BY created_at` : [];
       const fulfillment = await tx`SELECT stage,version,carrier,tracking_number,updated_at FROM ops_fulfillments WHERE order_id=${id}`;
-      const shipment = await tx`SELECT status,courier_company,courier_service,waybill_id,tracking_id,tracking_url,provider_order_id,dispatch_generation,quoted_amount_idr,actual_amount_idr,latest_provider_status,updated_at FROM shipments WHERE order_id=${id}`;
+      const shipment = await tx`SELECT status,courier_company,courier_service,waybill_id,tracking_id,tracking_url,provider_order_id,dispatch_generation,quoted_amount_idr,actual_amount_idr,latest_provider_status,blocked_reason,updated_at FROM shipments WHERE order_id=${id}`;
       const delivery = canOperate(roles, "fulfillment:read") ? await tx`SELECT customer_name,customer_phone,delivery_jsonb,shipping_jsonb FROM orders WHERE id=${id}` : [];
       return { ...rows[0], payments, fulfillment: fulfillment[0] ?? null, shipment: shipment[0] ?? null, delivery: delivery[0] ?? null, piiAccess: delivery.length > 0 };
     });
   }
+  /** Issue #73 P0-B operator requeue: release a dispatch-blocked shipment after its cause is fixed. */
+  async requeueShipment(actor: string, key: string, orderId: string, reason: string) {
+    need(reason.trim().length >= 3 && reason.length <= 300, "VALIDATION", 400, "Reason required");
+    return this.command(actor, key, "fulfill", { orderId, requeue: true, reason }, async (tx, roles) => {
+      this.permit(roles, "fulfillment:write");
+      const rows = await tx`SELECT id,status,blocked_reason FROM shipments WHERE order_id=${orderId} FOR UPDATE`;
+      need(rows[0], "NOT_FOUND", 404, "Shipment not found");
+      need(rows[0].status === "held", "CONFLICT", 409, "Only a held shipment can be requeued");
+      await tx`UPDATE shipments SET status='ready', blocked_reason=NULL, version=version+1, updated_at=now() WHERE id=${rows[0].id}`;
+      await tx`UPDATE shipment_dispatch_intents SET state='pending', last_error_code=NULL, updated_at=now() WHERE shipment_id=${rows[0].id}`;
+      await this.audit(tx, actor, "shipment.dispatch_requeued", orderId, { reason, previousReason: rows[0].blocked_reason });
+      return { orderId, stage: "ready", requeued: true };
+    });
+  }
+
   /** Current fulfillment stage row for server-authorized provider transitions (ADR-014). */
   async fulfillmentStage(orderId: string): Promise<{ stage: string; version: number; carrier: string | null } | null> {
     const rows = await this.database.db.execute(sql`SELECT stage,version,carrier FROM ops_fulfillments WHERE order_id=${orderId}`);
@@ -273,7 +288,9 @@ export class PostgresOperations implements OperationsPort {
       // ADR-014 step 6: staff packing completion flips a courier shipment to
       // ready and emits its dispatch intent in this same transaction; manual
       // free-shipping orders are untouched (worker skips non-courier orders).
-      if (input.stage === "packed" && (orders[0].shipping_jsonb as { policy?: string } | null)?.policy === "courier") {
+      const shippingSnapshot = orders[0].shipping_jsonb as { policy?: string; quoteId?: string } | null;
+      const autoDispatch = shippingSnapshot && (shippingSnapshot.policy === "courier" || (shippingSnapshot.policy === "free_promotional" && typeof shippingSnapshot.quoteId === "string" && shippingSnapshot.quoteId.length > 0));
+      if (input.stage === "packed" && autoDispatch) {
         await markShipmentReadyForDispatchTx(tx, { orderId: id, weightGrams: null, actor }, new Date().toISOString());
       }
       await this.audit(tx, actor, "ops.fulfillment_changed", id, { stage: input.stage, version, reason: input.reason, ...(systemActor ? { systemAuthorized: true } : {}) });

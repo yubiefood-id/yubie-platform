@@ -145,3 +145,15 @@ test("production biteship keys refuse to run outside production", () => {
     /BITESHIP_ENV=production requires YUBIE_ENV=production/,
   );
 });
+
+test("SHIPPING_FREE_SUBSIDY_MAX_IDR is an optional positive-integer activation lever", () => {
+  const base = { ...BITLESS, SHIPPING_EXECUTION_MODE: "shadow" };
+  const unset = parseShippingRuntimeConfig(base);
+  assert.equal(unset.freeSubsidyMaxIdr, null, "unset keeps plain free shipping (no auto-booking)");
+  const armed = parseShippingRuntimeConfig({ ...base, SHIPPING_FREE_SUBSIDY_MAX_IDR: "50000" });
+  assert.equal(armed.freeSubsidyMaxIdr, 50000);
+  assert.throws(
+    () => parseShippingRuntimeConfig({ ...base, SHIPPING_FREE_SUBSIDY_MAX_IDR: "0" }),
+    /SHIPPING_FREE_SUBSIDY_MAX_IDR must be a positive integer/,
+  );
+});
