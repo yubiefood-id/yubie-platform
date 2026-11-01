@@ -597,6 +597,205 @@ export function inspectCommerceRuntimeConfig(env: RuntimeEnvSource = process.env
   }
 }
 
+// --- ADR-014: shipping execution selection (fail-closed) ---
+
+/**
+ * Shipping execution modes. "disabled" (default) means no rate quoting and no
+ * courier booking — it never reverts already-paid orders and inbound provider
+ * webhooks plus reconciliation keep running. "shadow" compares provider rates
+ * server-side without creating any provider order. "sandbox" may only carry a
+ * sandbox key; "pilot"/"enabled" require production credentials and bounded
+ * approvals (ADR-014 rollout gates).
+ */
+export type ShippingExecutionModeName = "disabled" | "shadow" | "sandbox" | "pilot" | "enabled";
+export type ShippingProviderName = "none" | "biteship";
+export type BiteshipEnvName = "sandbox" | "production";
+
+/** Pinned official API origin; the adapter never accepts any other base URL. */
+export const BITESHIP_API_ORIGIN = "https://api.biteship.com";
+export const DEFAULT_BITESHIP_WEBHOOK_SECRET_HEADER = "x-biteship-secret";
+
+const SHIPPING_EXECUTION_MODE_NAMES: readonly ShippingExecutionModeName[] = ["disabled", "shadow", "sandbox", "pilot", "enabled"];
+const SHIPPING_PROVIDER_NAMES: readonly ShippingProviderName[] = ["none", "biteship"];
+
+export interface ShippingRuntimeConfig {
+  provider: ShippingProviderName;
+  mode: ShippingExecutionModeName;
+  biteshipEnv: BiteshipEnvName | null;
+  /** Presence only — the key value never leaves the provider adapter. */
+  biteshipApiKeyConfigured: boolean;
+  biteshipApiOrigin: string | null;
+  webhookSecretConfigured: boolean;
+  webhookSecretHeader: string | null;
+  /** Pilot bounds; required for "pilot", optional otherwise. */
+  pilotMaxBookings: number | null;
+  pilotBudgetIdr: number | null;
+}
+
+export type ShippingRuntimeConfigInspection =
+  | { ok: true; config: ShippingRuntimeConfig }
+  | { ok: false; errors: string[] };
+
+/**
+ * Resolve the shipping execution mode. Default disabled. A typo fails startup
+ * rather than silently enabling courier bookings on a live store.
+ */
+export function parseShippingExecutionModeName(raw: string | undefined): ShippingExecutionModeName {
+  if (raw === undefined || raw === "") return "disabled";
+  const match = SHIPPING_EXECUTION_MODE_NAMES.find((name) => name === raw.toLowerCase());
+  if (!match) {
+    throw new RuntimeConfigError(
+      `SHIPPING_EXECUTION_MODE must be one of: ${SHIPPING_EXECUTION_MODE_NAMES.join(", ")} (received "${raw}")`,
+    );
+  }
+  return match;
+}
+
+/** Resolve the shipping provider. Unset means no provider; unknown values fail. */
+export function parseShippingProviderName(raw: string | undefined): ShippingProviderName {
+  if (raw === undefined || raw === "") return "none";
+  const match = SHIPPING_PROVIDER_NAMES.find((name) => name === raw.toLowerCase());
+  if (!match) {
+    throw new RuntimeConfigError(
+      `SHIPPING_PROVIDER must be one of: ${SHIPPING_PROVIDER_NAMES.join(", ")} (received "${raw}")`,
+    );
+  }
+  return match;
+}
+
+/** Biteship credential environment is always explicit; never inferred. */
+export function parseBiteshipEnvName(raw: string | undefined): BiteshipEnvName {
+  if (raw === "sandbox" || raw === "production") return raw;
+  throw new RuntimeConfigError("BITESHIP_ENV must be sandbox or production (explicit selection; production is a reviewed operator gate)");
+}
+
+function parsePositiveInteger(env: RuntimeEnvSource, varName: "SHIPPING_PILOT_MAX_BOOKINGS" | "SHIPPING_PILOT_BUDGET_IDR"): number | null {
+  const raw = env[varName];
+  if (raw === undefined || raw === "") return null;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new RuntimeConfigError(`${varName} must be a positive integer (received "${raw}")`);
+  }
+  return value;
+}
+
+/**
+ * Validate shipping execution configuration. Any non-disabled mode requires a
+ * fully admitted provider (credentials + webhook verification), sandbox keys
+ * are refused in production, production keys refuse to run outside production,
+ * and the pilot mode demands an explicit bounded budget before any real
+ * courier charge can occur.
+ */
+export function parseShippingRuntimeConfig(env: RuntimeEnvSource = process.env): ShippingRuntimeConfig {
+  const errors: string[] = [];
+
+  let mode: ShippingExecutionModeName = "disabled";
+  try {
+    mode = parseShippingExecutionModeName(env.SHIPPING_EXECUTION_MODE);
+  } catch (error) {
+    errors.push(configMessage(error));
+  }
+
+  let provider: ShippingProviderName = "none";
+  try {
+    provider = parseShippingProviderName(env.SHIPPING_PROVIDER);
+  } catch (error) {
+    errors.push(configMessage(error));
+  }
+
+  if (provider === "none" && mode !== "disabled") {
+    errors.push(`SHIPPING_EXECUTION_MODE=${mode} requires SHIPPING_PROVIDER=biteship (no shipping provider admitted)`);
+  }
+
+  let biteshipEnv: BiteshipEnvName | null = null;
+  let biteshipApiKeyConfigured = false;
+  let webhookSecretConfigured = false;
+  let webhookSecretHeader: string | null = null;
+  let pilotMaxBookings: number | null = null;
+  let pilotBudgetIdr: number | null = null;
+
+  if (provider === "biteship") {
+    biteshipApiKeyConfigured = Boolean(env.BITESHIP_API_KEY);
+    if (!biteshipApiKeyConfigured) {
+      errors.push("SHIPPING_PROVIDER=biteship requires BITESHIP_API_KEY");
+    }
+    try {
+      biteshipEnv = parseBiteshipEnvName(env.BITESHIP_ENV);
+    } catch (error) {
+      errors.push(configMessage(error));
+    }
+    const base = (env.BITESHIP_API_BASE_URL ?? BITESHIP_API_ORIGIN).trim().replace(/\/+$/, "");
+    if (base !== BITESHIP_API_ORIGIN) {
+      // Exact match rejects wrong hosts, ports, http, embedded credentials, paths, queries.
+      errors.push(`BITESHIP_API_BASE_URL must be ${BITESHIP_API_ORIGIN}`);
+    }
+    if (biteshipEnv === "sandbox" && env.YUBIE_ENV === "production") {
+      errors.push("BITESHIP_ENV=sandbox must not be used when YUBIE_ENV=production (test keys never run in production)");
+    }
+    if (biteshipEnv === "production" && parseYubieEnvName(env.YUBIE_ENV) !== "production") {
+      errors.push("BITESHIP_ENV=production requires YUBIE_ENV=production (production courier credentials must never run in development/staging)");
+    }
+  }
+
+  if (mode !== "disabled") {
+    webhookSecretConfigured = Boolean(env.BITESHIP_WEBHOOK_SECRET);
+    if (!webhookSecretConfigured) {
+      errors.push(`SHIPPING_EXECUTION_MODE=${mode} requires BITESHIP_WEBHOOK_SECRET (webhook authenticity must be verifiable before any booking)`);
+    } else {
+      webhookSecretHeader = (env.BITESHIP_WEBHOOK_SECRET_HEADER ?? "").trim() || DEFAULT_BITESHIP_WEBHOOK_SECRET_HEADER;
+    }
+    if (mode === "sandbox" && biteshipEnv !== null && biteshipEnv !== "sandbox") {
+      errors.push("SHIPPING_EXECUTION_MODE=sandbox requires BITESHIP_ENV=sandbox");
+    }
+    if ((mode === "pilot" || mode === "enabled") && biteshipEnv !== null && biteshipEnv !== "production") {
+      errors.push(`SHIPPING_EXECUTION_MODE=${mode} requires BITESHIP_ENV=production (real courier bookings)`);
+    }
+  }
+
+  try {
+    pilotMaxBookings = parsePositiveInteger(env, "SHIPPING_PILOT_MAX_BOOKINGS");
+    pilotBudgetIdr = parsePositiveInteger(env, "SHIPPING_PILOT_BUDGET_IDR");
+  } catch (error) {
+    errors.push(configMessage(error));
+  }
+  if (mode === "pilot") {
+    if (pilotMaxBookings === null) {
+      errors.push("SHIPPING_EXECUTION_MODE=pilot requires SHIPPING_PILOT_MAX_BOOKINGS (bounded booking count)");
+    }
+    if (pilotBudgetIdr === null) {
+      errors.push("SHIPPING_EXECUTION_MODE=pilot requires SHIPPING_PILOT_BUDGET_IDR (bounded wallet exposure)");
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new RuntimeConfigError(errors.join("; "));
+  }
+
+  return {
+    provider,
+    mode,
+    biteshipEnv,
+    biteshipApiKeyConfigured,
+    biteshipApiOrigin: provider === "biteship" ? BITESHIP_API_ORIGIN : null,
+    webhookSecretConfigured,
+    webhookSecretHeader,
+    pilotMaxBookings,
+    pilotBudgetIdr,
+  };
+}
+
+/** Non-throwing variant for readiness endpoints and operator tooling. */
+export function inspectShippingRuntimeConfig(env: RuntimeEnvSource = process.env): ShippingRuntimeConfigInspection {
+  try {
+    return { ok: true, config: parseShippingRuntimeConfig(env) };
+  } catch (error) {
+    if (error instanceof RuntimeConfigError) {
+      return { ok: false, errors: [error.message] };
+    }
+    return { ok: false, errors: [String(error)] };
+  }
+}
+
 // --- Service-scoped runtime configuration (least-privilege secrets) ---
 
 export type ServiceName = "api" | "worker" | "bot";
@@ -607,6 +806,8 @@ export interface ServiceRuntimeConfig {
   supportProvider: SupportProviderName;
   /** Present only for the api service. */
   commerce?: CommerceRuntimeConfig;
+  /** Present for the api and worker services (quotes/routes vs booking jobs). */
+  shipping?: ShippingRuntimeConfig;
 }
 
 export type ServiceRuntimeConfigInspection =
@@ -638,6 +839,7 @@ export function parseServiceRuntimeConfig(env: RuntimeEnvSource = process.env, s
   }
 
   let commerce: CommerceRuntimeConfig | undefined;
+  let shipping: ShippingRuntimeConfig | undefined;
   if (service === "api" || service === "worker") {
     try {
       commerce = parseCommerceRuntimeConfig(env);
@@ -646,6 +848,11 @@ export function parseServiceRuntimeConfig(env: RuntimeEnvSource = process.env, s
     }
     try { parseIdentityRuntimeConfig(env, service); } catch (error) { errors.push(configMessage(error)); }
     if (service === "api") { try { parseDeliveryMapsConfig(env); } catch (error) { errors.push(configMessage(error)); } }
+    try {
+      shipping = parseShippingRuntimeConfig(env);
+    } catch (error) {
+      errors.push(configMessage(error));
+    }
   }
 
   if (service === "api" && deployment && !env.API_PROXY_TOKEN) {
@@ -691,7 +898,7 @@ export function parseServiceRuntimeConfig(env: RuntimeEnvSource = process.env, s
     throw new RuntimeConfigError(errors.join("; "));
   }
 
-  return { service, env: yubieEnv, supportProvider, ...(commerce ? { commerce } : {}) };
+  return { service, env: yubieEnv, supportProvider, ...(commerce ? { commerce } : {}), ...(shipping ? { shipping } : {}) };
 }
 
 /** Non-throwing variant for readiness endpoints and operator tooling. */
