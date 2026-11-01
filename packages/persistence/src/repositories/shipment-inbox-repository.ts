@@ -19,7 +19,7 @@ export class PostgresShipmentProviderInbox {
 
   async claim(limit: number, now: string): Promise<Array<{ id: string; event: string; providerOrderId: string | null; waybillId: string | null; trackingId: string | null; status: string | null; payload: Record<string, unknown>; attemptCount: number }>> {
     const rows = await this.database.db.execute(sql`WITH due AS (
-        SELECT id FROM shipment_provider_inbox WHERE processed_at IS NULL AND retry_after<=${now}::timestamptz ORDER BY received_at LIMIT ${limit} FOR UPDATE SKIP LOCKED)
+        SELECT id FROM shipment_provider_inbox WHERE processed_at IS NULL AND retry_after<=${now}::timestamptz + interval '5 seconds' ORDER BY received_at LIMIT ${limit} FOR UPDATE SKIP LOCKED)
       UPDATE shipment_provider_inbox i SET attempt_count=i.attempt_count+1, retry_after=${new Date(Date.parse(now) + 60_000).toISOString()}::timestamptz FROM due WHERE i.id=due.id RETURNING i.*`);
     return rows.map((row) => {
       const r = row as Record<string, unknown>;

@@ -20,6 +20,7 @@ export async function runShipmentNotifications(database: Database, correlationId
   const now = new Date().toISOString();
 
   const events = await inbox.claim(10, now);
+  if (events.length === 0) return;
   for (const event of events) {
     try {
       if (event.event === "order.price") {
