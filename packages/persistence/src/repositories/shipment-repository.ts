@@ -128,6 +128,28 @@ export class PostgresShipmentRepository {
     return true;
   }
 
+  /** PII-free tracking view for the checkout-token holder (ADR-014 step 9 display). */
+  async findPublicByCheckoutToken(token: string): Promise<{
+    status: string; courierCompany: string | null; courierService: string | null;
+    waybillId: string | null; trackingId: string | null; trackingUrl: string | null;
+    latestProviderStatus: string | null; updatedAt: string;
+  } | null> {
+    const rows = await this.database.db.execute(sql`SELECT s.status, s.courier_company, s.courier_service, s.waybill_id, s.tracking_id, s.tracking_url, s.latest_provider_status, s.updated_at
+      FROM shipments s JOIN orders o ON o.id=s.order_id WHERE o.checkout_public_token=${token} LIMIT 1`);
+    const row = rows[0] as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      status: String(row.status),
+      courierCompany: row.courier_company ? String(row.courier_company) : null,
+      courierService: row.courier_service ? String(row.courier_service) : null,
+      waybillId: row.waybill_id ? String(row.waybill_id) : null,
+      trackingId: row.tracking_id ? String(row.tracking_id) : null,
+      trackingUrl: row.tracking_url ? String(row.tracking_url) : null,
+      latestProviderStatus: row.latest_provider_status ? String(row.latest_provider_status) : null,
+      updatedAt: new Date(row.updated_at as string).toISOString(),
+    };
+  }
+
   async findByProviderOrderId(providerOrderId: string): Promise<{ id: string; orderId: string; status: string; waybillId: string | null; courierCompany: string | null } | null> {
     const rows = await this.database.db.execute(sql`SELECT id,order_id,status,waybill_id,courier_company FROM shipments WHERE provider_order_id=${providerOrderId}`);
     const row = rows[0] as { id: string; order_id: string; status: string; waybill_id: string | null; courier_company: string | null } | undefined;

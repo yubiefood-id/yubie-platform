@@ -29,6 +29,7 @@ import { parseIpaymuCallbackBody, verifyIpaymuCallback } from "@yubie/integratio
 import { createDatabase, type Database } from "@yubie/persistence";
 import { tokensMatch, requestShippingRates } from "@yubie/application";
 import { parseBiteshipWebhook, verifyBiteshipWebhookSecret } from "@yubie/integrations";
+import { PostgresShipmentRepository } from "@yubie/persistence";
 import { catalog } from "./catalog.js";
 import { createAppContext, type AppContext } from "./composition/create-app.js";
 import { createRequestId } from "./middleware/request-id.js";
@@ -498,6 +499,15 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     }catch{return json({ok:false,code:"RECOVERY_UNAVAILABLE"},{status:503,headers:{"cache-control":"no-store"}});}
   }
 
+  const checkoutShipmentMatch = url.pathname.match(/^\/v1\/checkouts\/([^/]+)\/shipment$/);
+  if (request.method === "GET" && checkoutShipmentMatch?.[1]) {
+    // Public, token-scoped, PII-free courier tracking (ADR-014 step 9):
+    // current state + waybill only — no addresses, contacts or cost data.
+    if (!ctx.shippingCatalog || !ctx.database) return json({ ok: false, code: "SHIPPING_NOT_CONFIGURED" }, { status: 503, headers: { "cache-control": "no-store" } });
+    const shipment = await new PostgresShipmentRepository(ctx.database!).findPublicByCheckoutToken(decodeURIComponent(checkoutShipmentMatch[1]));
+    if (!shipment) return json({ ok: false, code: "NOT_FOUND" }, { status: 404, headers: { "cache-control": "no-store" } });
+    return json({ ok: true, data: { shipment } }, { headers: { "cache-control": "no-store" } });
+  }
   const checkoutStatusMatch = url.pathname.match(/^\/v1\/checkouts\/([^/]+)$/);
   if (request.method === "GET" && checkoutStatusMatch?.[1]) {
     // Public, token-scoped, PII-free: only opaque-token lookups answer here;

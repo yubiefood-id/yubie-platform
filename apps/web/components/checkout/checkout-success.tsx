@@ -20,6 +20,15 @@ interface CheckoutStatus {
 }
 
 type SuccessPhase = "verifying" | "confirmed" | "pending" | "failed" | "expired" | "cancelled" | "unknown" | "exception" | "not_found";
+/** PII-free courier tracking served by the checkout-token-scoped API route. */
+interface ShipmentTracking { status: string; courierCompany: string | null; courierService: string | null; waybillId: string | null; trackingId: string | null; trackingUrl: string | null; latestProviderStatus: string | null; updatedAt: string }
+
+const SHIPMENT_STATUS_LABELS: Record<string, string> = {
+  not_ready: "Menunggu pengepakan", ready: "Sudah dikemas", booking_pending: "Memesan kurir",
+  booking_unknown: "Sedang dikonfirmasi", booked: "Kurir dipesan", pickup_pending: "Menunggu penjemputan",
+  picked: "Paket diambil kurir", in_transit: "Dalam perjalanan", delivered: "Terkirim",
+  cancelled: "Dibatalkan", failed: "Gagal dikirim", returned: "Dikembalikan", held: "Ditahan untuk peninjauan",
+};
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLLS = 15;
@@ -37,6 +46,20 @@ export function CheckoutSuccess() {
   const [status, setStatus] = useState<CheckoutStatus | null>(null);
   const pollCount = useRef(0);
   const purchaseTracked = useRef(false);
+  const [tracking, setTracking] = useState<ShipmentTracking | null>(null);
+
+  useEffect(() => {
+    // Only once the order is confirmed paid do we surface courier tracking;
+    // the endpoint itself is token-scoped and exposes no address or cost.
+    if (phase !== "confirmed" || !checkoutId) return;
+    let active = true;
+    const load = () => { void fetch(`/api/checkout/${encodeURIComponent(checkoutId)}/shipment`, { cache: "no-store", signal: AbortSignal.timeout(8000) })
+      .then(async (response) => { if (!active || !response.ok) return; const payload = await response.json().catch(() => null); if (payload?.ok && payload.data?.shipment) setTracking(payload.data.shipment as ShipmentTracking); })
+      .catch(() => {/* Tracking stays hidden when unavailable; the order status above remains authoritative. */}); };
+    load();
+    const interval = setInterval(load, 15000);
+    return () => { active = false; clearInterval(interval); };
+  }, [phase, checkoutId]);
 
   const poll = useCallback(async () => {
     if (!checkoutId) return;
@@ -93,6 +116,12 @@ export function CheckoutSuccess() {
         <div className="total"><span>Total dibayar</span><span>{formatRupiah(status.totalAmount)}</span></div>
       </div>
       {status.fulfillmentHold&&<p role="status">Pesanan perlu ditinjau oleh tim sebelum pengiriman.</p>}
+      {tracking&&<div className="shipment-tracking" role="status">
+        <span className="eyebrow">STATUS PENGIRIMAN</span>
+        <p><strong>{SHIPMENT_STATUS_LABELS[tracking.status] ?? tracking.status.replace(/_/g, " ")}</strong>{tracking.courierCompany?` · ${tracking.courierCompany}${tracking.courierService?` ${tracking.courierService}`:""}`:""}</p>
+        {tracking.waybillId&&<p className="checkout-note">Nomor resi <strong>{tracking.waybillId}</strong></p>}
+        {tracking.trackingUrl&&<a className="button warm" href={tracking.trackingUrl} rel="noreferrer noopener" target="_blank">Lacak paket <span>→</span></a>}
+      </div>}
       <div className="success-actions"><Link className="button primary" href="/account/orders">Lihat pesanan saya <span>→</span></Link><Link className="button warm" href="/products">Lanjut menjelajah</Link></div>
     </div>}
     {phase === "failed" && <div className="success-panel failed" role="alert">

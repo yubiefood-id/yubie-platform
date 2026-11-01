@@ -237,8 +237,9 @@ export class PostgresOperations implements OperationsPort {
       need(rows[0], "NOT_FOUND", 404, "Order not found");
       const payments = canOperate(roles, "payments:read") ? await tx`SELECT id,provider,status,amount,reconciliation_state FROM order_payments WHERE order_id=${id} ORDER BY created_at` : [];
       const fulfillment = await tx`SELECT stage,version,carrier,tracking_number,updated_at FROM ops_fulfillments WHERE order_id=${id}`;
+      const shipment = await tx`SELECT status,courier_company,courier_service,waybill_id,tracking_id,tracking_url,provider_order_id,dispatch_generation,quoted_amount_idr,actual_amount_idr,latest_provider_status,updated_at FROM shipments WHERE order_id=${id}`;
       const delivery = canOperate(roles, "fulfillment:read") ? await tx`SELECT customer_name,customer_phone,delivery_jsonb,shipping_jsonb FROM orders WHERE id=${id}` : [];
-      return { ...rows[0], payments, fulfillment: fulfillment[0] ?? null, delivery: delivery[0] ?? null, piiAccess: delivery.length > 0 };
+      return { ...rows[0], payments, fulfillment: fulfillment[0] ?? null, shipment: shipment[0] ?? null, delivery: delivery[0] ?? null, piiAccess: delivery.length > 0 };
     });
   }
   /** Current fulfillment stage row for server-authorized provider transitions (ADR-014). */
