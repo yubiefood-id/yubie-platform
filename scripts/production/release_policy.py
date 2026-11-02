@@ -87,7 +87,10 @@ def validate_authorization(auth, digest, now):
 
 def validate_migration_baseline(actual, expected):
     # Explicit reviewed release boundaries only; never resume a partial 0023/24 upgrade.
-    require(actual in (expected[:22], expected[:25], expected), "UNREVIEWED_SCHEMA_BASELINE")
+    # [:22] / [:25]: pre-0023 and pre-0026 states (historical upgrade boundaries).
+    # [:26]: the deployed d8a660d production state (through 0026_operations_workflows),
+    #        the reviewed starting point for the 0027/0028 shipping migrations.
+    require(actual in (expected[:22], expected[:25], expected[:26], expected), "UNREVIEWED_SCHEMA_BASELINE")
 
 
 def validate_schema(expected, actual, checks):
