@@ -2,6 +2,15 @@
 
 This file is binding guidance for coding agents and human contributors.
 
+
+## Agent quick start
+
+1. Read [SOUL.md](SOUL.md) for mission and [INSTRUCTION.md](INSTRUCTION.md) for the delivery loop.
+2. Follow **this AGENTS.md** for binding engineering and safety rules; use accepted ADRs for decisions and code/tests for actual behavior.
+3. Check product truth before touching customer-facing copy, catalog, payment, support, or fulfillment. Research proposals are not commercial approvals.
+4. Keep diffs small; open a PR; preserve the five required CI gates before merging to `main`.
+
+
 ## 1. Product truth
 
 Yubie is an Indonesian food brand and food-tech startup. It is **not** a medical product or supplement platform.
