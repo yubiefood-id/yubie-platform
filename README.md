@@ -15,8 +15,8 @@ Discovery / SEO / Campaign
     +-----+-----------------------+
     |                             |
     v                             v
-Marketplace / gated checkout     WhatsApp
-marketplace checkout              |
+Approved marketplaces           WhatsApp
+or gated direct checkout          |
                                   v
                                Zammad
                                   |
@@ -28,7 +28,7 @@ marketplace checkout              |
                                  CRM
 ~~~
 
-Yubie does not currently need to own customer payment or first-party D2C checkout. See `docs/production/ADR-004_MARKETPLACE_WHATSAPP_FIRST.md`.
+The historical marketplace-first direction in ADR-004 was extended by ADR-013: production first-party D2C can use **iPaymu hosted Redirect Payment** behind independent release/admission gates. Xendit remains implemented but inactive, and marketplaces remain an approved purchase/rollback route. Do not infer live payment status from documentation; verify the latest release receipt and runtime gate.
 
 ## Workspace
 
