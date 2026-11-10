@@ -4,7 +4,9 @@ import {
   withAssistantTransaction,
   PostgresAIUsageRepository,
   PostgresAssistantOutboxRepository,
+  PostgresB2bCrmRepository,
   PostgresConversationModeRepository,
+  PostgresGrowthOutbox,
   PostgresPrioritySupportTaskRepository,
   PostgresRuntimeConfigRepository,
   type Database,
@@ -42,6 +44,8 @@ async function handleOpsWhatsAppLocked(request: Request, database: Database): Pr
     const priority: Record<string, number> = {};
     for (const row of tasks.ok ? tasks.value.byPriority : []) priority[row.priority] = row.count;
     const aiUsage = await new PostgresAIUsageRepository(database).usageSummary();
+    const crm = await new PostgresB2bCrmRepository(database).summary();
+    const growthPending = await new PostgresGrowthOutbox(database).pendingSummary();
 
     let botEngine = "deterministic";
     try { botEngine = parseBotEngineName(process.env.BOT_ENGINE ?? ""); } catch { /* keep default; startup owns fail-closed */ }
@@ -62,6 +66,7 @@ async function handleOpsWhatsAppLocked(request: Request, database: Database): Pr
         oldestUnacknowledgedAgeSeconds: tasks.ok ? tasks.value.oldestUnacknowledgedAgeSeconds : 0,
       },
       ai: aiUsage,
+      crm: { ...crm, pendingLeadEvents: growthPending.count, oldestPendingLeadAgeSeconds: growthPending.oldestAgeSeconds },
       queue: { queueLag, deadLetters },
       releaseSha: process.env.RELEASE_SHA ?? "dev",
     });

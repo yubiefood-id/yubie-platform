@@ -403,6 +403,64 @@ export const aiUsagePeriods = pgTable("ai_usage_periods", {
   uniqueIndex("ai_usage_periods_subject").on(table.subjectHash, table.periodKey, table.scope),
 ]);
 
+// WA-04: B2B CRM projection (exactly-once per lead; classification fields +
+// contact coordinates only, never free-text need/message).
+export const b2bAccounts = pgTable("b2b_accounts", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  normalizedName: text("normalized_name").notNull(),
+  city: text("city"),
+  businessType: text("business_type"),
+  source: text("source"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("b2b_accounts_normalized_name").on(table.normalizedName),
+]);
+
+export const b2bContacts = pgTable("b2b_contacts", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull().references(() => b2bAccounts.id),
+  name: text("name"),
+  email: text("email"),
+  whatsapp: text("whatsapp"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("b2b_contacts_email").on(table.email).where(sql`${table.email} IS NOT NULL`),
+  uniqueIndex("b2b_contacts_whatsapp").on(table.whatsapp).where(sql`${table.whatsapp} IS NOT NULL`),
+]);
+
+export const b2bOpportunities = pgTable("b2b_opportunities", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull().references(() => b2bAccounts.id),
+  leadId: text("lead_id").notNull(),
+  stage: text("stage").notNull().default("new"),
+  owner: text("owner").notNull().default("unassigned"),
+  interest: text("interest"),
+  intent: text("intent"),
+  city: text("city"),
+  source: text("source"),
+  nextActionAt: timestamp("next_action_at", { withTimezone: true, mode: "string" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("b2b_opportunities_lead").on(table.leadId),
+  index("b2b_opportunities_stage").on(table.stage, table.nextActionAt),
+]);
+
+export const b2bTasks = pgTable("b2b_tasks", {
+  id: text("id").primaryKey(),
+  opportunityId: text("opportunity_id").notNull().references(() => b2bOpportunities.id),
+  title: text("title").notNull(),
+  dueAt: timestamp("due_at", { withTimezone: true, mode: "string" }).notNull(),
+  status: text("status").notNull().default("open"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  index("b2b_tasks_open").on(table.dueAt).where(sql`${table.status} = 'open'`),
+]);
+
 // WA-02 tri-mode: customer-selected mode per conversation, separate from
 // human-control ownership in conversation_sessions (Zammad stays authority).
 export const conversationModeState = pgTable("conversation_mode_state", {

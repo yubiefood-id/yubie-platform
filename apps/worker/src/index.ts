@@ -4,6 +4,7 @@ import { checkListingHealth, SystemClock, purgePhoneChallenges, purgeAddressPins
 import { createSupportProvider, HttpLinkHealthChecker } from "@yubie/integrations";
 import { closeDatabase, createWorkerRepositories, PostgresAssistantWorkRepository, PostgresTransactionManager, PostgresOperationsOutbox } from "@yubie/persistence";
 import { processOperationsOutbox } from "./operations-outbox-handler.js";
+import { processGrowthCrm } from "./growth-crm-handler.js";
 import { runOperationsPaymentReconcile } from "./operations-reconcile-handler.js";
 import { processAssistantJob } from "./assistant-handler.js";
 import { startMetricsServer } from "./metrics-server.js";
@@ -131,6 +132,13 @@ async function start() {
   });
   await boss.schedule("operations.outbox", "* * * * *", {});
   await boss.send("operations.outbox", {});
+  // WA-04: project growth.b2b_lead_created into the CRM exactly once.
+  await boss.createQueue("growth.crm");
+  await boss.work("growth.crm", { batchSize: 1 }, async () => {
+    await processGrowthCrm(repos.database);
+  });
+  await boss.schedule("growth.crm", "* * * * *", {});
+  await boss.send("growth.crm", {});
   // ADR-014 shipping execution: dispatch leases + provider notifications.
   // The dispatch handler self-gates on SHIPPING_EXECUTION_MODE (disabled and
   // shadow never book; pilot stays inside explicit operator bounds).
