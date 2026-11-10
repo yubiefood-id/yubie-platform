@@ -1,5 +1,5 @@
 import { parseBotEngineName } from "@yubie/config";
-import { whatsappAiPolicySchema, whatsappModeResetSchema } from "@yubie/validation";
+import { outboundApproveSchema, outboundDraftCreateSchema, whatsappAiPolicySchema, whatsappModeResetSchema } from "@yubie/validation";
 import {
   withAssistantTransaction,
   PostgresAIUsageRepository,
@@ -7,8 +7,10 @@ import {
   PostgresB2bCrmRepository,
   PostgresConversationModeRepository,
   PostgresGrowthOutbox,
+  PostgresOutboundTemplateRepository,
   PostgresPrioritySupportTaskRepository,
   PostgresRuntimeConfigRepository,
+  OUTBOUND_FOLLOWUP_PURPOSE,
   type Database,
 } from "@yubie/persistence";
 import { authorizeOps } from "./ops-assistant.js";
@@ -46,6 +48,7 @@ async function handleOpsWhatsAppLocked(request: Request, database: Database): Pr
     const aiUsage = await new PostgresAIUsageRepository(database).usageSummary();
     const crm = await new PostgresB2bCrmRepository(database).summary();
     const growthPending = await new PostgresGrowthOutbox(database).pendingSummary();
+    const outbound = await new PostgresOutboundTemplateRepository(database).outboundSummary();
 
     let botEngine = "deterministic";
     try { botEngine = parseBotEngineName(process.env.BOT_ENGINE ?? ""); } catch { /* keep default; startup owns fail-closed */ }
@@ -67,9 +70,44 @@ async function handleOpsWhatsAppLocked(request: Request, database: Database): Pr
       },
       ai: aiUsage,
       crm: { ...crm, pendingLeadEvents: growthPending.count, oldestPendingLeadAgeSeconds: growthPending.oldestAgeSeconds },
+      outboundWhatsapp: { ...outbound, enabled: config.outboundWhatsappEnabled },
       queue: { queueLag, deadLetters },
       releaseSha: process.env.RELEASE_SHA ?? "dev",
     });
+  }
+
+  if (request.method === "POST" && url.pathname === "/ops/whatsapp/outbound/draft") {
+    const parsed = outboundDraftCreateSchema.safeParse(await request.json());
+    if(!parsed.success)return Response.json({error:"invalid_outbound_draft"},{status:400});
+    const body = parsed.data;
+    const repo = new PostgresOutboundTemplateRepository(database);
+    try {
+      const draft = await repo.createDraft({
+        templateId: body.templateId,
+        purpose: body.purpose,
+        contactId: body.contactId,
+        variables: body.variables,
+        createdBy: body.createdBy,
+        ...(body.costCapMicrousd !== undefined ? { costCapMicrousd: body.costCapMicrousd } : {}),
+        ...(body.expiresAt ? { expiresAt: body.expiresAt } : {}),
+      });
+      return Response.json({ ok: true, draftId: draft.id, contentHash: draft.contentHash, requiresApproval: true, implicitSend: false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown";
+      return Response.json({ error: message }, { status: message === "template_not_found" || message === "contact_whatsapp_missing" ? 404 : 400 });
+    }
+  }
+
+  const approveMatch = url.pathname.match(/^\/ops\/whatsapp\/outbound\/([^/]+)\/approve$/);
+  if (request.method === "POST" && approveMatch?.[1]) {
+    const parsed = outboundApproveSchema.safeParse(await request.json());
+    if(!parsed.success)return Response.json({error:"invalid_outbound_approval"},{status:400});
+    const body = parsed.data;
+    const repo = new PostgresOutboundTemplateRepository(database);
+    const at = new Date();
+    const result = await repo.approveDraft(approveMatch[1], body.contentHash, body.changedBy, new Date(at.getTime() + body.expiresInHours * 3600_000).toISOString(), at.toISOString());
+    if(!result.ok)return Response.json({error:result.reason},{status:409});
+    return Response.json({ ok: true, draftId: approveMatch[1], expiresAt: new Date(at.getTime() + body.expiresInHours * 3600_000).toISOString(), implicitSend: false, gatewayEnabled: false });
   }
 
   if (request.method === "POST" && url.pathname === "/ops/whatsapp/ai-policy") {

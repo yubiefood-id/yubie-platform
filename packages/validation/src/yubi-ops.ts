@@ -25,3 +25,19 @@ export const whatsappAiPolicySchema=z.object({
   approvalRef:z.string().min(1).max(128),
   changedBy:actor,
 }).strict();
+// WA-05: outbound template drafts and operator approval. Approval binds to the
+// immutable content hash and always carries an expiry; nothing sends implicitly.
+export const outboundDraftCreateSchema=z.object({
+  templateId:z.string().min(8).max(64),
+  purpose:z.literal("b2b_followup"),
+  contactId:z.string().min(8).max(64),
+  variables:z.record(z.string(),z.string().min(1).max(200)).refine(entries=>Object.keys(entries).length<=10,{message:"too_many_variables"}),
+  createdBy:actor,
+  costCapMicrousd:z.number().int().min(0).max(1_000_000).optional(),
+  expiresAt:z.string().datetime().optional(),
+}).strict();
+export const outboundApproveSchema=z.object({
+  contentHash:z.string().regex(/^[a-f0-9]{64}$/),
+  expiresInHours:z.number().int().min(1).max(168),
+  changedBy:actor,
+}).strict();

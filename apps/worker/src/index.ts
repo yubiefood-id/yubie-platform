@@ -5,6 +5,7 @@ import { createSupportProvider, HttpLinkHealthChecker } from "@yubie/integration
 import { closeDatabase, createWorkerRepositories, PostgresAssistantWorkRepository, PostgresTransactionManager, PostgresOperationsOutbox } from "@yubie/persistence";
 import { processOperationsOutbox } from "./operations-outbox-handler.js";
 import { processGrowthCrm } from "./growth-crm-handler.js";
+import { processOutboundWhatsapp } from "./outbound-whatsapp-handler.js";
 import { runOperationsPaymentReconcile } from "./operations-reconcile-handler.js";
 import { processAssistantJob } from "./assistant-handler.js";
 import { startMetricsServer } from "./metrics-server.js";
@@ -139,6 +140,13 @@ async function start() {
   });
   await boss.schedule("growth.crm", "* * * * *", {});
   await boss.send("growth.crm", {});
+  // WA-05: approved outbound template gateway (no-ops while disabled).
+  await boss.createQueue("outbound.whatsapp");
+  await boss.work("outbound.whatsapp", { batchSize: 1 }, async () => {
+    await processOutboundWhatsapp(repos.database);
+  });
+  await boss.schedule("outbound.whatsapp", "* * * * *", {});
+  await boss.send("outbound.whatsapp", {});
   // ADR-014 shipping execution: dispatch leases + provider notifications.
   // The dispatch handler self-gates on SHIPPING_EXECUTION_MODE (disabled and
   // shadow never book; pilot stays inside explicit operator bounds).

@@ -19,6 +19,7 @@ export * from "./repositories/priority-support-task-repository.js";
 export * from "./repositories/ai-usage-repository.js";
 export * from "./repositories/b2b-crm-repository.js";
 export * from "./repositories/growth-outbox.js";
+export * from "./repositories/outbound-template-repository.js";
 export * from "./repositories/assistant-run-repository.js";
 export type { AssistantRunRecord } from "./repositories/assistant-run-repository.js";
 export * from "./repositories/assistant-outbox-repository.js";

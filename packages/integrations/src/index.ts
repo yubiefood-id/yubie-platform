@@ -19,3 +19,4 @@ export * from "./biteship/sandbox-probe.js";
 export * from "./erpnext/shadow-client.js";
 export * from "./erpnext/stock-reader.js";
 export * from "./google/google-id-token-verifier.js";
+export * from "./outbound/outbound-template-transports.js";

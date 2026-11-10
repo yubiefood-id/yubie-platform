@@ -461,6 +461,59 @@ export const b2bTasks = pgTable("b2b_tasks", {
   index("b2b_tasks_open").on(table.dueAt).where(sql`${table.status} = 'open'`),
 ]);
 
+// WA-05: approved outbound template gateway. Dispatch is disabled by default;
+// every attempt rechecks consent, approval, template status, expiry and caps.
+export const outboundTemplates = pgTable("outbound_templates", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  version: text("version").notNull(),
+  language: text("language").notNull().default("id"),
+  bodyText: text("body_text").notNull(),
+  status: text("status").notNull().default("draft"),
+  approvedBy: text("approved_by"),
+  approvedAt: timestamp("approved_at", { withTimezone: true, mode: "string" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("outbound_templates_name_version").on(table.name, table.version),
+]);
+
+export const outboundDrafts = pgTable("outbound_drafts", {
+  id: text("id").primaryKey(),
+  templateId: text("template_id").notNull().references(() => outboundTemplates.id),
+  purpose: text("purpose").notNull(),
+  contactId: text("contact_id").notNull().references(() => b2bContacts.id),
+  variablesJsonb: jsonb("variables_jsonb").notNull().default({}),
+  contentHash: text("content_hash").notNull(),
+  status: text("status").notNull().default("draft"),
+  approvedBy: text("approved_by"),
+  approvedAt: timestamp("approved_at", { withTimezone: true, mode: "string" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }),
+  costCapMicrousd: bigint("cost_cap_microusd", { mode: "number" }).notNull().default(0),
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  index("outbound_drafts_dispatch").on(table.status, table.expiresAt),
+]);
+
+export const outboundSends = pgTable("outbound_sends", {
+  id: text("id").primaryKey(),
+  draftId: text("draft_id").notNull().references(() => outboundDrafts.id),
+  provider: text("provider").notNull().default("meta-cloud-api"),
+  providerMessageId: text("provider_message_id"),
+  state: text("state").notNull().default("pending"),
+  lastError: text("last_error"),
+  costMicrousd: bigint("cost_microusd", { mode: "number" }).notNull().default(0),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: "string" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("outbound_sends_draft").on(table.draftId),
+  index("outbound_sends_reconcile").on(table.state, table.nextAttemptAt),
+]);
+
 // WA-02 tri-mode: customer-selected mode per conversation, separate from
 // human-control ownership in conversation_sessions (Zammad stays authority).
 export const conversationModeState = pgTable("conversation_mode_state", {

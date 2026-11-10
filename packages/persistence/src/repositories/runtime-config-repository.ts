@@ -80,6 +80,9 @@ export interface RuntimeConfigSnapshot {
   // AND an approved live policy with complete limits exists (ADR-015 proposed).
   aiAssistEnabled: boolean;
   aiPolicy: AIAssistPolicy;
+  // WA-05: business-initiated outbound template gateway. Fail-closed default.
+  outboundWhatsappEnabled: boolean;
+  outboundDailyContactCap: number;
 }
 
 const DEFAULT_CONFIG: RuntimeConfigSnapshot = {
@@ -94,6 +97,8 @@ const DEFAULT_CONFIG: RuntimeConfigSnapshot = {
   knowledgeVersion: "seed-v1",
   aiAssistEnabled: false,
   aiPolicy: DEFAULT_AI_ASSIST_POLICY,
+  outboundWhatsappEnabled: false,
+  outboundDailyContactCap: 1,
 };
 
 
@@ -124,6 +129,8 @@ export class PostgresRuntimeConfigRepository {
       knowledgeVersion: parse("knowledge_version", DEFAULT_CONFIG.knowledgeVersion),
       aiAssistEnabled: parse("ai_assist_enabled", DEFAULT_CONFIG.aiAssistEnabled) === true,
       aiPolicy: parseAIPolicy(parse<unknown>("ai_policy", null)),
+      outboundWhatsappEnabled: parse<{ enabled?: boolean }>("outbound_whatsapp", {}).enabled === true,
+      outboundDailyContactCap: (() => { const cap = parse<{ dailyContactCap?: unknown }>("outbound_whatsapp", {}).dailyContactCap; return typeof cap === "number" && Number.isInteger(cap) && cap >= 1 && cap <= 10 ? cap : DEFAULT_CONFIG.outboundDailyContactCap; })(),
     };
     // The master switch alone is never sufficient: a live, complete policy is
     // required for the menu path to treat AI as available (fail closed).
