@@ -1,3 +1,5 @@
+> **Historical design note (2026-11-10):** Verify this document against the accepted Zammad support authority (docs/production/ADR-009_ZAMMAD_SUPPORT_AUTHORITY.md), the latest deployed runtime and [WhatsApp tri-mode program](../production/whatsapp/README.md). Chatwoot is rollback-only in the current accepted design. Proposed bounded-AI and priority-human work is NOT yet a production feature.
+
 # 20 — WhatsApp CRM Chatbot Architecture
 
 ## Stack
