@@ -45,6 +45,7 @@ import {
   PostgresAssistantOutboxRepository,
   PostgresAssistantRunRepository,
   PostgresConversationFlowStateRepository,
+  PostgresConversationModeRepository,
   PostgresConversationSessionRepository,
   PostgresKnowledgeRepository,
   PostgresRuntimeConfigRepository,
@@ -59,6 +60,11 @@ export { createChatwootClient, createSupportProvider };
 function fingerprint(conversationRef: string, actionType: string, payload: string) {
   return createHash("sha256").update(`${conversationRef}:${actionType}:${payload}`).digest("hex");
 }
+
+// WA-02 fail-closed copy for an AI request that cannot be served. Mirrors
+// deterministic/v2-flow ai_unavailable; keep the two in sync.
+const AI_FALLBACK_UNAVAILABLE_COPY =
+  "Mode Tanya AI Yubi belum tersedia untuk layanan ini. Ketik 0 untuk bantuan Customer Service, atau menu untuk pilihan lain.\n\n9. Kembali\n0. Customer Service\nKetik menu untuk menu utama.";
 
 function createContextProvider(support: SupportConversationProvider): ConversationContextProvider {
   if (support.provider === "zammad") {
@@ -147,7 +153,15 @@ async function processAssistantInboxLocked(
     if(closedEvent || observed?.lifecycle==="closed") {
       if(current.ok && !current.value)await sessions.upsert({provider:support.provider,providerThreadId:row.conversationRef,providerCustomerId:row.contactRef??"0",providerInboxOrChannelId:row.inboxRef??"0",inboxId:row.inboxRef??"0",state:"RESOLVED",lastActivityAt:at,createdAt:at,updatedAt:at});
       if(!current.ok || current.value?.state!=="RESOLVED")await sessions.updateState(support.provider,row.conversationRef,"RESOLVED",at);
-    }else if(observed?.humanActive && current.ok && current.value && current.value.state!=="RESOLVED")await sessions.updateState(support.provider,row.conversationRef,"HUMAN_ACTIVE",at);
+    }else if(observed?.humanActive && current.ok && current.value && current.value.state!=="RESOLVED") {
+      await sessions.updateState(support.provider,row.conversationRef,"HUMAN_ACTIVE",at);
+      // WA-02 D12: human ownership kills every queued bot customer effect for
+      // this thread immediately (delivery-time rechecks remain as backstop).
+      await new PostgresAssistantOutboxRepository(database).cancelPendingForConversation(support.provider,row.conversationRef,at);
+      const modeRepo=new PostgresConversationModeRepository(database);
+      const mode=await modeRepo.get(support.provider,row.conversationRef);
+      if(mode.ok && mode.value?.mode==="AI_OPT_IN")await modeRepo.transition(support.provider,row.conversationRef,"DETERMINISTIC","human_takeover",at);
+    }
   }
   const message = await resolveNormalizedMessage(database, row, support);
   if (!message) {
@@ -183,6 +197,12 @@ async function processAssistantInboxLocked(
   const humanState = await support.getCurrentHumanState(threadRef);
   if (humanState.humanActive && conversationState!=="RESOLVED") {
     conversationState = "HUMAN_ACTIVE";
+    // WA-02 D12: same immediate cancellation when ownership is observed at turn
+    // intake; an active AI session also ends deterministically.
+    await new PostgresAssistantOutboxRepository(database).cancelPendingForConversation(provider,message.conversationId,now);
+    const modeRepo=new PostgresConversationModeRepository(database);
+    const mode=await modeRepo.get(provider,message.conversationId);
+    if(mode.ok && mode.value?.mode==="AI_OPT_IN")await modeRepo.transition(provider,message.conversationId,"DETERMINISTIC","human_takeover",now);
   }
   if(conversationState==="RESOLVED" && sessionResult.ok && sessionResult.value?.botReleasedAt && sessionResult.value.resolvedAt && Date.now()-Date.parse(sessionResult.value.resolvedAt)>=BOT_REENTRY_COOLDOWN_MS && !humanState.humanActive && !humanState.automationDisabled && ["menu","start"].includes(message.text.trim().toLowerCase())) {
     conversationState="BOT_ELIGIBLE";
@@ -223,11 +243,15 @@ async function processAssistantInboxLocked(
 
   const supportEvidence = configSnapshot.supportAcceptance as {approvalRef?: string; releaseSha?: string} | null;
   const capabilities = deriveYubiCapabilities(parseLaunchProfile(process.env.YUBIE_LAUNCH_PROFILE),configSnapshot.websiteRelease,process.env.YUBIE_ENV ?? "development",!!supportEvidence?.approvalRef && supportEvidence.releaseSha === process.env.RELEASE_SHA);
+  // WA-02: the AI menu entry stays a deterministic dead end until the audited
+  // ai_assist_enabled flag is on (defaults false; ADR-015 not yet accepted).
+  const aiAssistAvailable = configSnapshot.aiAssistEnabled===true && configSnapshot.flowVersion==="deterministic-v2" && !automationOff;
   const router = createConversationEngineRouter({
     knowledge,
     flowVersion: safety ? "deterministic-v2" : configSnapshot.flowVersion,
     capabilities,
     resolveProduct: resolveYubiProduct,
+    ...(aiAssistAvailable?{aiPolicy:{available:true as const}}:{}),
     legacyProcessor: async (input) => {
       const envConfig = loadAssistantConfig();
       const mode = configSnapshot.mode as "shadow" | "suggestion" | "auto";
@@ -337,6 +361,19 @@ async function processAssistantInboxLocked(
     return result.value.id;
   };
   const canSend=configSnapshot.assistantEnabled && configSnapshot.mode === "auto";
+  // WA-02: persist menu-driven tri-mode transitions in the same locked
+  // transaction that records the turn. A REQUEST_AI_ANSWER reaching the
+  // worker before the bounded AI helper exists (WA-03) fails closed to the
+  // deterministic unavailable copy — no model is ever called here.
+  const modeRepo=new PostgresConversationModeRepository(database);
+  for(const effect of engineResult.effects??[]) {
+    if(effect.kind==="ENTER_AI_MODE")await modeRepo.transition(provider,message.conversationId,"AI_OPT_IN","customer_opt_in",now);
+    else if(effect.kind==="EXIT_AI_MODE")await modeRepo.transition(provider,message.conversationId,"DETERMINISTIC","customer_exit",now);
+    else if(effect.kind==="REQUEST_AI_ANSWER") {
+      increment("trimode_ai_fallback_total");
+      if(canSend)await enqueue("reply",{content:AI_FALLBACK_UNAVAILABLE_COPY});
+    }
+  }
   if (engineResult.kind === "handoff") {
     if(conversationState!=="HUMAN_ACTIVE" && conversationState!=="RESOLVED")await sessions.updateState(provider,message.conversationId,"HANDOFF_REQUESTED",now);
     const effect=engineResult.effects?.find(e=>e.kind==="CREATE_HANDOFF");

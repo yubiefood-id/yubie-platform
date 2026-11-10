@@ -1,7 +1,8 @@
 import type { SupportConversationProvider, SupportThreadRef, ProviderSendResult } from "@yubie/application";
 import { buildHandoffCommand } from "@yubie/integrations";
 import { deriveYubiCapabilities, parseLaunchProfile } from "@yubie/config";
-import { assistantOutbox, withAssistantTransaction, PostgresAssistantWorkRepository, PostgresAssistantOutboxRepository, PostgresConversationSessionRepository, PostgresRuntimeConfigRepository, type Database } from "@yubie/persistence";
+import { PRIORITY_NEXT_ACTION_MS, type SupportPriority } from "@yubie/domain";
+import { assistantOutbox, withAssistantTransaction, PostgresAssistantWorkRepository, PostgresAssistantOutboxRepository, PostgresConversationSessionRepository, PostgresPrioritySupportTaskRepository, PostgresRuntimeConfigRepository, type Database } from "@yubie/persistence";
 import { increment, setGauge } from "./metrics.js";
 
 function threadRefFromRow(row: {provider:string;providerThreadId:string|null;conversationRef:string}): SupportThreadRef {
@@ -50,6 +51,23 @@ export async function deliverSupportOutbox(database: Database,support: SupportCo
       if(result.ok) {
         await new PostgresAssistantWorkRepository(database).completeHandoff(row.id,ref.provider,ref.threadId,now);
         increment(payload.intent==="FOOD_SAFETY"?"food_safety_routed_total":"human_handoff_completed_total");
+        // WA-02 G-E: human-first handoffs get a durable internal triage task
+        // with a due time (proposed internal targets, not SLA promises).
+        // Exactly-once per delivered action via source_outbox_id.
+        const priority: SupportPriority | null = payload.intent==="FOOD_SAFETY" ? "P0_FOOD_SAFETY" : payload.intent==="HUMAN_REQUEST" ? "P1_EXPLICIT_HUMAN" : null;
+        if(priority) {
+          await new PostgresPrioritySupportTaskRepository(database).recordHandoff({
+            provider: ref.provider,
+            providerThreadId: ref.threadId,
+            ticketId: ref.threadId,
+            sourceOutboxId: row.id,
+            priority,
+            ...(command.groupId ? {groupId:String(command.groupId)} : {}),
+            reason: typeof payload.handoffReason==="string"?payload.handoffReason:String(payload.intent??"HUMAN_REQUEST"),
+            nextActionAt: new Date(Date.parse(now)+PRIORITY_NEXT_ACTION_MS[priority]).toISOString(),
+            at: now,
+          });
+        }
         return;
       }
     } else {

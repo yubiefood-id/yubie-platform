@@ -35,6 +35,7 @@ export interface DeterministicEngineDeps {
   capabilities?: V2Deps["capabilities"];
   resolveProduct?: V2Deps["resolveProduct"];
   getPurchaseOptions?: (productSlug: string) => Promise<{ options: PurchaseOptionView[] } | null>;
+  aiPolicy?: V2Deps["aiPolicy"];
 }
 
 const B2B_PROMPTS: Record<string, string> = {

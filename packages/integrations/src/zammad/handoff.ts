@@ -87,6 +87,9 @@ export function buildHandoffCommand(
     threadRef: ref,
     labels,
     groupId: cfg.groupIds.customerSupport,
+    // WA-02: an explicit customer request for a human is the P1 triage tier
+    // (GOAL_PLAN §2); it carries the high priority alongside the group move.
+    ...(intent === "HUMAN_REQUEST" && cfg.priorityIds.high ? { priorityId: cfg.priorityIds.high } : {}),
     botModeOff: intent === "HUMAN_REQUEST" || Boolean(handoffReason),
   };
 }

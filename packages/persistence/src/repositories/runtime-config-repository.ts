@@ -15,6 +15,9 @@ export interface RuntimeConfigSnapshot {
   modelVersion: string;
   promptVersion: string;
   knowledgeVersion: string;
+  // WA-02/03: tri-mode AI helper switch. Default false; enabling requires the
+  // audited /ops/whatsapp/ai-policy flow (ADR-015 proposed, not accepted).
+  aiAssistEnabled: boolean;
 }
 
 const DEFAULT_CONFIG: RuntimeConfigSnapshot = {
@@ -27,6 +30,7 @@ const DEFAULT_CONFIG: RuntimeConfigSnapshot = {
   modelVersion: "default",
   promptVersion: "v1",
   knowledgeVersion: "seed-v1",
+  aiAssistEnabled: false,
 };
 
 
@@ -55,6 +59,7 @@ export class PostgresRuntimeConfigRepository {
       modelVersion: parse("model_version", DEFAULT_CONFIG.modelVersion),
       promptVersion: parse("prompt_version", DEFAULT_CONFIG.promptVersion),
       knowledgeVersion: parse("knowledge_version", DEFAULT_CONFIG.knowledgeVersion),
+      aiAssistEnabled: parse("ai_assist_enabled", DEFAULT_CONFIG.aiAssistEnabled) === true,
     };
   }
 

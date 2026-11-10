@@ -6,7 +6,9 @@ export interface V2Node {
 }
 const node = (parent: string, copy: string, choices: Record<string,string> = {}): V2Node => ({parent,copy,choices});
 export const V2_NODES: Record<string,V2Node> = {
-  HOME: node("HOME","home",{"1":"PRODUCT_MENU","2":"ABOUT_MENU","3":"ORDER_MENU","4":"PROMO_MENU","5":"SUPPORT_MENU","6":"B2B_MENU"}),
+  HOME: node("HOME","home",{"1":"PRODUCT_MENU","2":"ABOUT_MENU","3":"ORDER_MENU","4":"PROMO_MENU","5":"SUPPORT_MENU","6":"B2B_MENU","7":"AI_INTRO"}),
+  AI_INTRO: node("HOME","ai_intro",{"1":"AI_ACTIVE","2":"HOME"}),
+  AI_ACTIVE: node("AI_INTRO","ai_active"),
   PRODUCT_MENU: node("HOME","products",{"1":"PRODUCT_DETAIL","2":"PRODUCT_DETAIL","3":"PRODUCT_DETAIL","4":"PRODUCT_DETAIL"}),
   PRODUCT_DETAIL: node("PRODUCT_MENU","product",{"1":"WEBSITE_HANDOFF","2":"PRODUCT_INFO","3":"PRODUCT_MENU"}),
   PRODUCT_INFO: node("PRODUCT_DETAIL","product_info",{"1":"product_description","2":"product_preparation","3":"product_nutrition_allergens","4":"product_certification"}),
@@ -29,7 +31,7 @@ export const V2_NODES: Record<string,V2Node> = {
 };
 
 export const V2_COPY: Record<string,string> = {
-  home: "Halo! 👋 Aku Yubi, asisten virtual Yubie 💜\n\nAku bisa bantu kamu mengenal produk Yubie, melihat website resmi, atau menghubungkanmu ke tim kami.\n\n1. 🛍️ Lihat Produk\n2. 🌱 Tentang Yubie\n3. 📦 Pesanan & Pengiriman\n4. 🎁 Promo & Diskon\n5. 💬 Bantuan & Komplain\n6. 🤝 Bisnis & Partnership\n0. 👩‍💻 Customer Service\n\nKetik angka pilihanmu atau ketik menu kapan saja.",
+  home: "Halo! 👋 Aku Yubi, asisten virtual Yubie 💜\n\nAku bisa bantu kamu mengenal produk Yubie, melihat website resmi, atau menghubungkanmu ke tim kami.\n\n1. 🛍️ Lihat Produk\n2. 🌱 Tentang Yubie\n3. 📦 Pesanan & Pengiriman\n4. 🎁 Promo & Diskon\n5. 💬 Bantuan & Komplain\n6. 🤝 Bisnis & Partnership\n7. ✨ Tanya AI Yubi\n0. 👩‍💻 Customer Service\n\nKetik angka pilihanmu atau ketik menu kapan saja.",
   products: "Mau lihat produk Yubie yang mana? 💜\n\n1. Yubie Flour\n2. Yubie Shake\n3. Yubie Ppang\n4. Yubie Mie",
   about: "Kenalan dengan Yubie 🌱\n\n1. Cerita Yubie\n2. Ubi ungu\n3. Produk dan penggunaannya\n4. Petunjuk penyiapan\n5. Nutrisi & alergen\n6. Sertifikasi",
   orders: "Mau dibantu soal pesananmu? 📦\n\n1. Lihat Status Pesanan\n2. Alamat Pengiriman\n3. Bantuan Pembayaran\n4. Retur atau Refund\n5. Masalah Pesanan",
@@ -55,6 +57,9 @@ export const V2_COPY: Record<string,string> = {
   unknown: "Aku belum mengenali pilihanmu. Pilih angka yang tersedia, ketik menu, atau ketik 0 untuk Customer Service.",
   unknown_again: "Biar lebih mudah, ketik menu untuk pilihan utama atau 0 agar tim Customer Service membantu.",
   unsupported: "Aku belum bisa membaca gambar atau pesan suara di chat ini. Ketik 0 untuk bantuan Customer Service.",
+  ai_intro: "Tanya AI Yubi ✨\n\nMode tanya-jawab dengan bantuan AI. Ketentuan singkat:\n• Ini bukan manusia; jawaban dibatasi pada informasi produk Yubie yang sudah disetujui.\n• Kuota tanya-jawab terbatas.\n• Kamu bisa keluar kapan saja (ketik keluar atau menu).\n• Untuk pesanan, keluhan, atau hal penting, lebih baik pilih Customer Service (0).\n\n1. Lanjut tanya AI Yubi\n2. Kembali ke menu",
+  ai_active: "Oke, silakan ketik pertanyaanmu seputar produk Yubie 💜\n\nKetik keluar atau menu untuk kembali, atau 0 untuk Customer Service.",
+  ai_unavailable: "Mode Tanya AI Yubi belum tersedia untuk layanan ini. Ketik 0 untuk bantuan Customer Service, atau menu untuk pilihan lain.",
 };
 
 export const B2B_FIELDS = ["company","need","product","city","volume"] as const;

@@ -361,6 +361,58 @@ export const conversationFlowEvents = pgTable("conversation_flow_events", {
   index("conversation_flow_events_thread_created").on(table.provider, table.providerThreadId, table.createdAt),
 ]);
 
+// WA-02 tri-mode: customer-selected mode per conversation, separate from
+// human-control ownership in conversation_sessions (Zammad stays authority).
+export const conversationModeState = pgTable("conversation_mode_state", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull(),
+  providerThreadId: text("provider_thread_id").notNull(),
+  mode: text("mode").notNull().default("DETERMINISTIC"),
+  policyVersion: text("policy_version").notNull().default("trimode-1"),
+  selectedBy: text("selected_by").notNull().default("customer"),
+  selectedAt: timestamp("selected_at", { withTimezone: true, mode: "string" }).notNull(),
+  lastCustomerAt: timestamp("last_customer_at", { withTimezone: true, mode: "string" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("conversation_mode_state_provider_thread").on(table.provider, table.providerThreadId),
+]);
+
+export const conversationModeEvents = pgTable("conversation_mode_events", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull(),
+  providerThreadId: text("provider_thread_id").notNull(),
+  fromMode: text("from_mode"),
+  toMode: text("to_mode").notNull(),
+  triggerKind: text("trigger_kind").notNull(),
+  detail: text("detail"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  index("conversation_mode_events_thread_created").on(table.provider, table.providerThreadId, table.createdAt),
+]);
+
+// WA-02: internal triage projection for human-first handoffs. Assignment/owner
+// truth stays in Zammad; this row carries priority, due time and ack evidence.
+export const prioritySupportTasks = pgTable("priority_support_tasks", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull().default("zammad"),
+  providerThreadId: text("provider_thread_id").notNull(),
+  ticketId: text("ticket_id").notNull(),
+  sourceOutboxId: text("source_outbox_id").notNull(),
+  priority: text("priority").notNull(),
+  groupId: text("group_id"),
+  reason: text("reason").notNull(),
+  nextActionAt: timestamp("next_action_at", { withTimezone: true, mode: "string" }).notNull(),
+  ackAt: timestamp("ack_at", { withTimezone: true, mode: "string" }),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "string" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("priority_support_tasks_source_outbox").on(table.sourceOutboxId),
+  index("priority_support_tasks_open").on(table.priority, table.createdAt),
+  index("priority_support_tasks_thread").on(table.provider, table.providerThreadId),
+]);
+
 // ADR-012: Google identity + first-party orders/payments (Xendit).
 
 export const users = pgTable("users", {
