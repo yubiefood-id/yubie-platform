@@ -127,3 +127,20 @@ Use `npm run graph:query` for contracts, infrastructure, boundaries, database, s
 - `BOT_ENGINE` defaults to `deterministic` (ADR-011); production hot path uses `deterministic-v1` FSM with zero LLM invocation.
 - Migration `0005_m5_deterministic_concierge.sql` adds `conversation_flow_state` tables separate from human-control session state.
 - Live Zammad/WhatsApp staging validation remains BLOCKED_EXTERNAL until real staging credentials are provisioned.
+
+## 9. WhatsApp tri-mode documentation and agent workflow (2026-11-10)
+
+The approved operational authority remains **Zammad** (ADR-009), and **BOT_ENGINE=deterministic** remains the default. The proposed WhatsApp expansion is documented in:
+
+- [docs/production/whatsapp/README.md](docs/production/whatsapp/README.md) — start here.
+- [docs/production/whatsapp/GOAL_PLAN.md](docs/production/whatsapp/GOAL_PLAN.md) — implementation phases and gates.
+- [docs/production/whatsapp/AGENT_EXECUTION_PROMPT.md](docs/production/whatsapp/AGENT_EXECUTION_PROMPT.md) — executable *instructions* for a future authorized coding-agent task.
+- [docs/production/whatsapp/ARCHITECTURE_AND_CONTRACTS.md](docs/production/whatsapp/ARCHITECTURE_AND_CONTRACTS.md) — proposed mode, quota and transport boundaries.
+- [docs/production/whatsapp/EVALUATION_AND_RELEASE_GATES.md](docs/production/whatsapp/EVALUATION_AND_RELEASE_GATES.md) — real provider tests and release evidence.
+- [docs/production/whatsapp/OPERATIONS_DAILY_SOP.md](docs/production/whatsapp/OPERATIONS_DAILY_SOP.md) — day-to-day CS and sales workflow.
+- [docs/production/whatsapp/ONBOARDING_AND_EMERGENCY_RUNBOOK.md](docs/production/whatsapp/ONBOARDING_AND_EMERGENCY_RUNBOOK.md) — operator onboarding and emergency shutdown.
+- [ADR-015](docs/production/ADR-015_WHATSAPP_TRI_MODE_AND_CHANNEL_AUTHORITY.md) is **PROPOSED, not accepted**; it does not overwrite ADR-009/010/011.
+
+**Mandatory future implementation rules:** (1) preserve deterministic zero-token normal route; (2) add bounded AI only after explicit per-conversation opt-in, with atomic server-side budget reservation and deterministic fallback; (3) Customer Service requests create priority Zammad human-owned tickets, with bot send suppression until audited reentry; (4) food-safety triage outranks everything, including when customer automation is OFF; (5) use Zammad as the sole ticket/support sender, never simultaneous Zammad and BSP/Chatwoot responses; (6) staff replying through the same customer-visible WhatsApp number in Zammad does not establish WhatsApp Business *mobile-app* Coexistence; (7) real Cloud API/BSP staging acceptance, owner approval and a controlled release are mandatory before production activation; (8) B2B outbound requires scoped consent, approved template, human authorization and independent transport; (9) no inferred claim, no raw chat/PII in logs, no access to production secrets in agent context.
+
+**Agent daily workflow:** query Graphify and current SHA; review priority backlog and blockers; select only the next authorized WA-00→WA-07 milestone; implement minimal diff on branch; run npm ci, npm run check and scoped tests; record exact evidence, BLOCKED_EXTERNAL gaps and rollback; raise PR and wait for reviewer/CI gates; never self-authorize production bot activation or phone migration. The new Markdown files are **planning artifacts**: do not claim live WhatsApp, active model spend limits, or functional priority routing until code and real-device acceptance exist.

@@ -69,3 +69,9 @@ Controls that remain universally valid:
 - backup/restore;
 - observable failure;
 - rollback/incident response.
+
+## WhatsApp / Yubi tri-mode program (documentation-only)
+
+Read [WhatsApp README](whatsapp/README.md), [phased goal plan](whatsapp/GOAL_PLAN.md), [agent execution prompt](whatsapp/AGENT_EXECUTION_PROMPT.md), [architecture and contracts](whatsapp/ARCHITECTURE_AND_CONTRACTS.md), [test gates](whatsapp/EVALUATION_AND_RELEASE_GATES.md), [daily SOP](whatsapp/OPERATIONS_DAILY_SOP.md), [operator runbook](whatsapp/ONBOARDING_AND_EMERGENCY_RUNBOOK.md), and [proposed ADR-015](ADR-015_WHATSAPP_TRI_MODE_AND_CHANNEL_AUTHORITY.md).
+
+**Scope:** deterministic customer chatbot + explicitly opted-in quota-limited AI + priority human customer support through Zammad's one WhatsApp channel, B2B qualification and controlled outbound. **No production activation, WhatsApp app coexistence promise or model execution is implied.** Current production-deferred record: [2026-10-24/WHATSAPP_DEFERRED.md](2026-10-24/WHATSAPP_DEFERRED.md).
