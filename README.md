@@ -4,7 +4,7 @@ Production-oriented monorepo for **Yubie — Nourish Naturally**, an Indonesian 
 
 ## Current business model
 
-Yubie's current digital operating model is **marketplace-first for D2C** and **WhatsApp-first for assisted B2C and B2B**.
+Yubie's channel model is **WhatsApp-first for assisted B2C and B2B**; D2C can use approved marketplaces or the gated first-party iPaymu hosted-payment flow under ADR-013. Verify live checkout admission from release receipts, not from this README.
 
 ~~~text
 Discovery / SEO / Campaign
@@ -15,10 +15,10 @@ Discovery / SEO / Campaign
     +-----+-----------------------+
     |                             |
     v                             v
-Shopee / Tokopedia & Shop      WhatsApp
-marketplace checkout              |
+Approved marketplaces           WhatsApp
+or gated direct checkout          |
                                   v
-                               Chatwoot
+                               Zammad
                                   |
                            Bot <-> Human
                                   |
@@ -28,7 +28,7 @@ marketplace checkout              |
                                  CRM
 ~~~
 
-Yubie does not currently need to own customer payment or first-party D2C checkout. See `docs/production/ADR-004_MARKETPLACE_WHATSAPP_FIRST.md`.
+The historical marketplace-first direction in ADR-004 was extended by ADR-013: production first-party D2C can use **iPaymu hosted Redirect Payment** behind independent release/admission gates. Xendit remains implemented but inactive, and marketplaces remain an approved purchase/rollback route. Do not infer live payment status from documentation; verify the latest release receipt and runtime gate.
 
 ## Workspace
 
@@ -41,7 +41,7 @@ Yubie does not currently need to own customer payment or first-party D2C checkou
 | `packages/validation` | Zod schemas at untrusted boundaries |
 | `packages/application` | **Target** use cases and inward-facing ports |
 | `packages/persistence` | **Target** PostgreSQL repositories and migrations |
-| `packages/integrations` | **Target** Chatwoot, CRM, marketplace and messaging adapters |
+| `packages/integrations` | Zammad support adapter; Chatwoot rollback; commerce, shipping and future messaging adapters |
 | `packages/assistant` | **Target** chatbot policy, knowledge/tool contracts and evaluations |
 | `packages/commerce` | Current preview commerce compatibility boundary; not production payment authority |
 | `packages/ui` | Shared design tokens and primitives |
@@ -94,3 +94,13 @@ Read in order:
 8. `docs/production/vps/README.md`
 
 The current delivery sequence is M0–M8: channel/product-truth correction, marketplace routing, WhatsApp/Chatwoot, safe assistant, B2B CRM, marketplace intelligence, optional marketplace APIs, problem-triggered ERP, and only then a new decision on first-party commerce.
+
+## WhatsApp tri-mode, AI budget and priority customer support (proposed)
+
+The **current source implements a deterministic Yubi assistant and Zammad support integration**, but the 2026-10-24 owner record explicitly deferred production WhatsApp bot activation. A shipping production release is not proof that live Meta messaging works. Confirm actual runtime and staging receipts first.
+
+The proposed customer experience uses the **same customer-visible WhatsApp number** with deterministic product menus (zero model tokens), explicit opt-in bounded AI answers, and a **priority Zammad human support queue**. Staff reply in the Zammad inbox; using the WhatsApp Business mobile app concurrently depends on independent Coexistence qualification and is **not guaranteed** by Zammad's standard Cloud API setup. Outbound B2B drafts require approved templates and separate consent/approval checks.
+
+**Start here:** [WhatsApp program README](docs/production/whatsapp/README.md) · [Goal plan](docs/production/whatsapp/GOAL_PLAN.md) · [Engineering agent prompt](docs/production/whatsapp/AGENT_EXECUTION_PROMPT.md) · [Daily CS SOP](docs/production/whatsapp/OPERATIONS_DAILY_SOP.md) · [Proposed ADR-015](docs/production/ADR-015_WHATSAPP_TRI_MODE_AND_CHANNEL_AUTHORITY.md).
+
+**Documentation only:** no production toggles, Meta onboarding, customer send, database migration or AI model dispatch is authorized by these files.
