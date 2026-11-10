@@ -61,11 +61,6 @@ function fingerprint(conversationRef: string, actionType: string, payload: strin
   return createHash("sha256").update(`${conversationRef}:${actionType}:${payload}`).digest("hex");
 }
 
-// WA-02 fail-closed copy for an AI request that cannot be served. Mirrors
-// deterministic/v2-flow ai_unavailable; keep the two in sync.
-const AI_FALLBACK_UNAVAILABLE_COPY =
-  "Mode Tanya AI Yubi belum tersedia untuk layanan ini. Ketik 0 untuk bantuan Customer Service, atau menu untuk pilihan lain.\n\n9. Kembali\n0. Customer Service\nKetik menu untuk menu utama.";
-
 function createContextProvider(support: SupportConversationProvider): ConversationContextProvider {
   if (support.provider === "zammad") {
     return new ZammadConversationContextProvider(createZammadClient());
@@ -370,8 +365,10 @@ async function processAssistantInboxLocked(
     if(effect.kind==="ENTER_AI_MODE")await modeRepo.transition(provider,message.conversationId,"AI_OPT_IN","customer_opt_in",now);
     else if(effect.kind==="EXIT_AI_MODE")await modeRepo.transition(provider,message.conversationId,"DETERMINISTIC","customer_exit",now);
     else if(effect.kind==="REQUEST_AI_ANSWER") {
-      increment("trimode_ai_fallback_total");
-      if(canSend)await enqueue("reply",{content:AI_FALLBACK_UNAVAILABLE_COPY});
+      // WA-03: the durable ai_answer action carries the question; reservation,
+      // generation, validation and the send decision happen at delivery time
+      // under fresh policy/human/window checks (never inside the turn lock).
+      if(canSend)await enqueue("ai_answer",{question:effect.question,contactId:message.contactId,threadId:message.conversationId});
     }
   }
   if (engineResult.kind === "handoff") {

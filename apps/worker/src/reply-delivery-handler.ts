@@ -1,14 +1,162 @@
 import type { SupportConversationProvider, SupportThreadRef, ProviderSendResult } from "@yubie/application";
 import { buildHandoffCommand } from "@yubie/integrations";
+import {
+  createAIAssistProviderFromEnv,
+  estimateInputTokens,
+  validateAIAnswerText,
+  type AIAssistContextTurn,
+  type AIAssistProvider,
+  type AIAssistRequest,
+} from "@yubie/assistant";
 import { deriveYubiCapabilities, parseLaunchProfile } from "@yubie/config";
 import { PRIORITY_NEXT_ACTION_MS, type SupportPriority } from "@yubie/domain";
-import { assistantOutbox, withAssistantTransaction, PostgresAssistantWorkRepository, PostgresAssistantOutboxRepository, PostgresConversationSessionRepository, PostgresPrioritySupportTaskRepository, PostgresRuntimeConfigRepository, type Database } from "@yubie/persistence";
+import {
+  assistantOutbox, withAssistantTransaction,
+  PostgresAIUsageRepository, PostgresAssistantWorkRepository, PostgresAssistantOutboxRepository,
+  PostgresConversationSessionRepository, PostgresKnowledgeRepository, PostgresPrioritySupportTaskRepository,
+  PostgresRuntimeConfigRepository, contactHashFor, type Database,
+} from "@yubie/persistence";
 import { increment, setGauge } from "./metrics.js";
+import { AI_QUOTA_EXHAUSTED_COPY, AI_UNAVAILABLE_COPY } from "./trimode-copy.js";
 
 function threadRefFromRow(row: {provider:string;providerThreadId:string|null;conversationRef:string}): SupportThreadRef {
   return {provider:row.provider as SupportThreadRef["provider"],threadId:row.providerThreadId??row.conversationRef};
 }
 const RETRY_DELAYS=[30_000,120_000,600_000,1_800_000];
+
+// WA-03: bounded AI answer pipeline. Runs at delivery time (never inside the
+// conversation turn lock), after the shared reply prechecks: reserve atomically
+// BEFORE any model call, single generation attempt, validate the output against
+// the hard claim rules, reconcile usage exactly once, then send through the
+// normal idempotent reply path. Denial/failure always resolves to a
+// deterministic fallback reply — never silence, never a model retry.
+async function runAIAnswerPipeline(args: {
+  database: Database;
+  support: SupportConversationProvider;
+  aiAssist: AIAssistProvider;
+  row: typeof assistantOutbox.$inferSelect;
+  payload: Record<string,unknown>;
+  ref: SupportThreadRef;
+  runtime: import("@yubie/persistence").RuntimeConfigSnapshot;
+  authorizeDispatch: () => Promise<boolean>;
+}): Promise<{ kind: "fallback" } | { kind: "sent"; result: ProviderSendResult }> {
+  const { database, support, aiAssist, row, payload, ref, runtime, authorizeDispatch } = args;
+  const repo = new PostgresAssistantOutboxRepository(database);
+  const now = new Date();
+  const at = now.toISOString();
+  const fallbackReply = async (copy: string, code: string) => {
+    await withAssistantTransaction(database, async bound => {
+      await new PostgresAssistantOutboxRepository(bound).enqueue({
+        provider: row.provider,
+        providerThreadId: row.providerThreadId ?? row.conversationRef,
+        conversationRef: row.conversationRef,
+        actionType: "reply",
+        payloadFingerprint: `${row.payloadFingerprint}:fallback`,
+        payloadJson: JSON.stringify({ content: copy, customerReceivedAt: payload.customerReceivedAt, requires: payload.requires }),
+        createdAt: at,
+      });
+    });
+    await repo.updateStatus(row.id, "cancelled", { lastError: code }, at);
+    increment("trimode_ai_fallback_total");
+    return { kind: "fallback" as const };
+  };
+
+  if (!runtime.aiAssistEnabled || runtime.aiPolicy.mode !== "live") {
+    return fallbackReply(AI_UNAVAILABLE_COPY, "ai_policy_disabled");
+  }
+  const policy = runtime.aiPolicy;
+
+  // Approved knowledge only: the prompt is grounded in vetted facts.
+  const knowledge = new PostgresKnowledgeRepository(database);
+  const facts: string[] = [];
+  for (const category of ["story", "applications", "root_education"]) {
+    const fact = await knowledge.getEffectivePublicKnowledge(category, "brand:yubie");
+    const data = fact?.data;
+    const text = typeof data === "string" ? data : data && typeof data === "object" && "summary" in data && typeof (data as { summary?: unknown }).summary === "string" ? (data as { summary: string }).summary : "";
+    if (text) facts.push(text.slice(0, 1200));
+  }
+  const recent = await support.getRecentMessages(ref, { limit: policy.limits.contextTurns * 2 });
+  let contextTurns: AIAssistContextTurn[] = recent
+    .filter((m) => !m.internal && m.text.trim().length > 0)
+    .slice(-policy.limits.contextTurns)
+    .map((m) => ({ role: m.role === "customer" ? "customer" as const : "assistant" as const, text: m.text.slice(0, 400) }));
+
+  const question = String(payload.question ?? "").slice(0, 2000);
+  let approvedFacts = (facts.length ? facts.join("\n\n") : "Informasi resmi Yubie belum tersedia untuk pertanyaan ini.").slice(0, policy.limits.maxInputTokens * 2);
+  let request: AIAssistRequest = {
+    question,
+    contextTurns,
+    approvedFacts,
+    maxInputTokens: policy.limits.maxInputTokens,
+    maxOutputTokens: policy.limits.maxOutputTokens,
+    timeoutMs: policy.limits.timeoutMs,
+  };
+  // Keep the estimated prompt inside the input bound: drop context first,
+  // then trim facts. If the question alone still exceeds the cap, denial.
+  while (estimateInputTokens(request) > policy.limits.maxInputTokens && request.contextTurns.length > 0) {
+    contextTurns = contextTurns.slice(1);
+    request = { ...request, contextTurns };
+  }
+  if (estimateInputTokens(request) > policy.limits.maxInputTokens) {
+    approvedFacts = approvedFacts.slice(0, Math.max(200, policy.limits.maxInputTokens * 2 - question.length));
+    request = { ...request, approvedFacts };
+  }
+
+  const usage = new PostgresAIUsageRepository(database);
+  await usage.expireStale(now);
+  const contactHash = contactHashFor(ref.provider, String(payload.contactId ?? ref.threadId));
+  const reservation = await usage.reserve({
+    requestId: row.payloadFingerprint,
+    contactHash,
+    providerThreadId: ref.threadId,
+    model: aiAssist.name,
+    priceVersion: policy.limits.priceVersion,
+    estimatedInputTokens: estimateInputTokens(request),
+    limits: policy.limits,
+    at: now,
+  });
+  if (!reservation.ok || !reservation.reserved) {
+    const reason = reservation.ok && !reservation.reserved ? reservation.reason : "policy_incomplete";
+    increment(`trimode_ai_denied_${reason}_total`);
+    if (reason === "policy_incomplete" || reason === "input_tokens_over_limit") {
+      return fallbackReply(AI_UNAVAILABLE_COPY, `ai_${reason}`);
+    }
+    return fallbackReply(AI_QUOTA_EXHAUSTED_COPY, `ai_${reason}`);
+  }
+
+  let generation: Awaited<ReturnType<AIAssistProvider["generate"]>>;
+  try {
+    generation = await aiAssist.generate(request);
+  } catch (error) {
+    await usage.fail(row.payloadFingerprint, `provider_threw:${error instanceof Error ? error.message.slice(0, 80) : "unknown"}`, now);
+    return fallbackReply(AI_UNAVAILABLE_COPY, "ai_provider_error");
+  }
+  if (!generation.ok) {
+    await usage.fail(row.payloadFingerprint, `provider_${generation.code}`, now);
+    return fallbackReply(AI_UNAVAILABLE_COPY, `ai_provider_${generation.code}`);
+  }
+  const validation = validateAIAnswerText(generation.text, policy.limits.maxOutputTokens);
+  if (!validation.valid) {
+    await usage.fail(row.payloadFingerprint, `validation_${validation.reason}`, now);
+    return fallbackReply(AI_UNAVAILABLE_COPY, "ai_output_rejected");
+  }
+  await usage.complete({
+    requestId: row.payloadFingerprint,
+    actualInputTokens: generation.usage.inputTokens,
+    actualOutputTokens: generation.usage.outputTokens,
+    priceMicrousdPerToken: policy.limits.priceMicrousdPerToken,
+    at: now,
+  });
+  increment("trimode_ai_answer_total");
+
+  const result = await support.sendReply({
+    threadRef: ref,
+    content: generation.text.slice(0, 4096),
+    idempotencyKey: row.payloadFingerprint,
+    authorizeDispatch,
+  });
+  return { kind: "sent", result };
+}
 
 async function mediaFallback(database: Database,row: typeof assistantOutbox.$inferSelect,payload: Record<string,unknown>) {
   if(typeof payload.fallbackText!=="string")return;
@@ -21,7 +169,7 @@ async function mediaFallback(database: Database,row: typeof assistantOutbox.$inf
   console.log(JSON.stringify({event:"product_media_failed",correlationId:row.id,errorCode:"MEDIA_REJECTED"}));
 }
 
-export async function deliverSupportOutbox(database: Database,support: SupportConversationProvider,outboxId: string,alreadyClaimed=false) {
+export async function deliverSupportOutbox(database: Database,support: SupportConversationProvider,outboxId: string,alreadyClaimed=false,aiAssist?: AIAssistProvider) {
   const repo=new PostgresAssistantOutboxRepository(database);
   const rows=alreadyClaimed?[await repo.get(outboxId)]:await repo.claimPending(1,outboxId);
   const row=rows[0];if(!row || row.status!=="delivering")return;
@@ -96,6 +244,10 @@ export async function deliverSupportOutbox(database: Database,support: SupportCo
       if(row.actionType==="product_media") {
         result=support.sendProductMedia?await support.sendProductMedia({threadRef:ref,productId:String(payload.productId),assetId:String(payload.assetId),caption:String(payload.caption),websiteUrl:String(payload.websiteUrl),idempotencyKey:row.payloadFingerprint,correlationId:row.id,authorizeDispatch}):{ok:false,code:"VALIDATION_ERROR"};
         if(!result.ok && result.code==="VALIDATION_ERROR"){await mediaFallback(database,row,payload);return;}
+      } else if(row.actionType==="ai_answer" && typeof payload.question==="string" && payload.question.length>0) {
+        const outcome=await runAIAnswerPipeline({database,support,aiAssist:aiAssist??createAIAssistProviderFromEnv(),row,payload,ref,runtime,authorizeDispatch});
+        if(outcome.kind==="fallback")return;
+        result=outcome.result;
       } else if(row.actionType==="reply" && typeof payload.content==="string" && payload.content.length>0 && payload.content.length<=4096) {
         result=await support.sendReply({threadRef:ref,content:payload.content,idempotencyKey:row.payloadFingerprint,authorizeDispatch,handoffReceipt:payload.handoffReceipt===true});
       } else {await terminal("failed","invalid_action");return;}
@@ -158,15 +310,18 @@ async function refreshOutboxGauges(database: Database) {
   setGauge("assistant_outbox_failed", failed);
 }
 
-export async function processPendingOutbox(database: Database, support: SupportConversationProvider) {
+export async function processPendingOutbox(database: Database, support: SupportConversationProvider, aiAssist?: AIAssistProvider) {
   const outboxRepo = new PostgresAssistantOutboxRepository(database);
   await outboxRepo.recoverExpiredClaims();
+  // Bounded-expiry housekeeping so a crashed generation never permanently
+  // blocks the per-contact concurrency slot.
+  await new PostgresAIUsageRepository(database).expireStale(new Date());
   await reconcileOutbound(database,support);
   for(let i=0;i<20;i++) {
     // A lease starts at dispatch, never while waiting behind a batch of network calls.
     const [row]=await outboxRepo.claimPending(1,undefined,support.provider);
     if(!row)break;
-    await deliverSupportOutbox(database,support,row.id,true);
+    await deliverSupportOutbox(database,support,row.id,true,aiAssist);
   }
   await refreshOutboxGauges(database);
 }

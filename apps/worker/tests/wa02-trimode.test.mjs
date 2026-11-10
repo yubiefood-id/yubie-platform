@@ -24,6 +24,13 @@ before(async()=>{
   await config.set('deterministic_flow_version','deterministic-v2','test',new Date().toISOString());
   await config.set('mode','auto','test',new Date().toISOString());
   await config.set('ai_assist_enabled',true,'test',new Date().toISOString());
+  // WA-03 made the effective switch require a complete live policy: the menu
+  // gate reads snapshot.aiAssistEnabled which is fail-closed without this.
+  await config.set('ai_policy',{mode:'live',limits:{
+    maxCallsPerConversation:3,maxCallsPerContactDay:5,maxInputTokens:1500,maxOutputTokens:250,
+    timeoutMs:8000,contextTurns:4,globalDayTokens:100000,globalMonthCostMicrousd:10_000_000,
+    priceMicrousdPerToken:1,priceVersion:'test-v1',
+  }},'test',new Date().toISOString());
   for(const key of ['ZAMMAD_PRIORITY_HIGH']){savedEnv[key]=process.env[key];process.env[key]=key==='ZAMMAD_PRIORITY_HIGH'?'3':process.env[key];}
 });
 after(async()=>{
@@ -43,7 +50,7 @@ function seedArticle(client,thread,id,text) {
 async function turn(provider,thread,text) {
   const id=9000+Number(thread)*10+seedCounter++;
   seedArticle(provider.client,thread,id,text);
-  const r=await new PostgresWebhookInboxRepository(db).insert({provider:'zammad',deliveryId:`wa02-${id}-${randomUUID().slice(0,8)}`,payloadHash:`wa02-${id}`,eventType:'article_created',conversationRef:String(thread),messageRef:String(id),receivedAt:new Date().toISOString()});
+  const r=await new PostgresWebhookInboxRepository(db).insert({provider:'zammad',deliveryId:`wa02-${id}-${randomUUID().slice(0,8)}`,payloadHash:`wa02-${id}`,eventType:'article_created',conversationRef:String(thread),messageRef:String(id),contactRef:'5',receivedAt:new Date().toISOString()});
   await processAssistantInbox(db,r.value.id,provider);
 }
 let seedCounter=0;
@@ -68,15 +75,17 @@ test('explicit consent persists AI_OPT_IN mode with audit; menu exits back to DE
   assert.equal(events[1].trigger_kind,'customer_exit');
 });
 
-test('an AI question fails closed to the deterministic unavailable reply while WA-03 is unwired',{skip:!enabled},async()=>{
+test('an AI question becomes a durable ai_answer action for the delivery pipeline',{skip:!enabled},async()=>{
   const client=new FakeZammadClient(),provider=new ZammadSupportProvider(client,'whatsapp message'),thread=51;
   seedThread(client,thread);
   await turn(provider,thread,'7');
   await turn(provider,thread,'1');
   await turn(provider,thread,'apa itu ubi ungu?');
-  const replies=await db.client`SELECT payload_json FROM assistant_outbox WHERE conversation_ref=${String(thread)} AND action_type='reply' ORDER BY created_at,id`;
-  const last=JSON.parse(replies[replies.length-1].payload_json);
-  assert.match(last.content,/belum tersedia/i);
+  const [action]=await db.client`SELECT payload_json FROM assistant_outbox WHERE conversation_ref=${String(thread)} AND action_type='ai_answer'`;
+  assert.ok(action,'ai_answer action enqueued');
+  const payload=JSON.parse(action.payload_json);
+  assert.equal(payload.question,'apa itu ubi ungu?');
+  assert.equal(payload.contactId,'5');
 });
 
 test('explicit human request creates a P1 priority task with due time; replay never duplicates',{skip:!enabled},async()=>{

@@ -16,6 +16,7 @@ export * from "./repositories/conversation-session-repository.js";
 export * from "./repositories/conversation-flow-state-repository.js";
 export * from "./repositories/conversation-mode-repository.js";
 export * from "./repositories/priority-support-task-repository.js";
+export * from "./repositories/ai-usage-repository.js";
 export * from "./repositories/assistant-run-repository.js";
 export type { AssistantRunRecord } from "./repositories/assistant-run-repository.js";
 export * from "./repositories/assistant-outbox-repository.js";

@@ -50,3 +50,43 @@ test('/ops/whatsapp status and mode reset: bearer-gated, PII-free, audited',{ski
     await closeDatabase(db);await admin.client.unsafe(`DROP DATABASE "${name}" WITH (FORCE)`);await closeDatabase(admin);
   }
 });
+
+test('ai-policy endpoint enables only with complete limits and stays audited/fail-closed',{skip:!process.env.DATABASE_URL},async()=>{
+  const name='yubi_wa_ai_'+randomUUID().replaceAll('-',''),admin=createDatabase(process.env.DATABASE_URL);
+  await admin.client.unsafe(`CREATE DATABASE "${name}"`);
+  const url=new URL(process.env.DATABASE_URL);url.pathname='/'+name;const db=createDatabase(url.toString());
+  const old={YUBIE_ENV:process.env.YUBIE_ENV,OPS_API_TOKEN:process.env.OPS_API_TOKEN};
+  try {
+    const dir=new URL('../../../packages/persistence/migrations/',import.meta.url);
+    for(const file of (await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())await db.client.begin(async sql=>{await sql.unsafe(await readFile(new URL(file,dir),'utf8'));});
+    process.env.YUBIE_ENV='test';process.env.OPS_API_TOKEN='synthetic-wa-ops';
+    const headers={authorization:'Bearer synthetic-wa-ops','content-type':'application/json'};
+    const post=(path,body)=>handleOpsWhatsApp(new Request('http://local/ops/whatsapp/'+path,{method:'POST',headers,body:JSON.stringify(body)}),db);
+    const get=()=>handleOpsWhatsApp(new Request('http://local/ops/whatsapp/status',{headers}),db);
+
+    // Incomplete limits (no global day budget) are rejected at config time.
+    const incomplete={mode:'live',limits:{maxCallsPerConversation:3,maxCallsPerContactDay:5,maxInputTokens:1500,maxOutputTokens:250,timeoutMs:8000,contextTurns:4,globalDayTokens:0,globalMonthCostMicrousd:0,priceMicrousdPerToken:0,priceVersion:'v-test'},approvalRef:'QA-TEST',changedBy:'qa-operator'};
+    assert.equal((await post('ai-policy',incomplete)).status,400);
+
+    const valid={...incomplete,limits:{...incomplete.limits,globalDayTokens:100000}};
+    const enabled=await post('ai-policy',valid);
+    assert.equal(enabled.status,200);
+    assert.deepEqual(await enabled.json(),{ok:true,mode:'live',effectiveAiAssistEnabled:true,cannotEnableGlobalAuto:true});
+    let status=await (await get()).json();
+    assert.equal(status.runtime.aiAssistEnabled,true);
+    assert.equal(status.runtime.aiPolicyMode,'live');
+    assert.ok(status.ai && typeof status.ai.todayReservedTokens==='number');
+
+    // Disabling flips the effective switch off even though the raw key stays.
+    assert.equal((await post('ai-policy',{...valid,mode:'off'})).status,200);
+    status=await (await get()).json();
+    assert.equal(status.runtime.aiAssistEnabled,false);
+    assert.equal(status.runtime.aiPolicyMode,'off');
+    // Every policy change is in the config audit trail.
+    const audits=await db.client`SELECT count(*)::int AS n FROM assistant_runtime_config_audit WHERE key='ai_policy'`;
+    assert.equal(audits[0].n,2);
+  } finally {
+    for(const [key,value] of Object.entries(old)){if(value===undefined)delete process.env[key];else process.env[key]=value;}
+    await closeDatabase(db);await admin.client.unsafe(`DROP DATABASE "${name}" WITH (FORCE)`);await closeDatabase(admin);
+  }
+});

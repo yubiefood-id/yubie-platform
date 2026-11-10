@@ -1,4 +1,4 @@
-import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb, boolean, foreignKey, check, primaryKey } from "drizzle-orm/pg-core";
+import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb, boolean, foreignKey, check, primaryKey, bigint } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { PhoneChallenge, AuthIdentity, AddressDetails, DeliveryPin, PromotionCampaign, PromotionRedemption } from "@yubie/domain";
 
@@ -359,6 +359,48 @@ export const conversationFlowEvents = pgTable("conversation_flow_events", {
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
 }, (table) => [
   index("conversation_flow_events_thread_created").on(table.provider, table.providerThreadId, table.createdAt),
+]);
+
+// WA-03: bounded AI usage accounting. Reservation rows are idempotent by
+// request_id; period counters move in the same locked transaction.
+export const aiUsageReservations = pgTable("ai_usage_reservations", {
+  id: text("id").primaryKey(),
+  requestId: text("request_id").notNull(),
+  contactHash: text("contact_hash").notNull(),
+  providerThreadId: text("provider_thread_id").notNull(),
+  dayKey: text("day_key").notNull(),
+  monthKey: text("month_key").notNull(),
+  reservedInputTokens: integer("reserved_input_tokens").notNull(),
+  reservedOutputTokens: integer("reserved_output_tokens").notNull(),
+  actualInputTokens: integer("actual_input_tokens"),
+  actualOutputTokens: integer("actual_output_tokens"),
+  model: text("model").notNull(),
+  priceVersion: text("price_version").notNull(),
+  estimatedCostMicrousd: bigint("estimated_cost_microusd", { mode: "number" }).notNull().default(0),
+  actualCostMicrousd: bigint("actual_cost_microusd", { mode: "number" }),
+  state: text("state").notNull().default("reserved"),
+  failureReason: text("failure_reason"),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("ai_usage_reservations_request").on(table.requestId),
+  index("ai_usage_reservations_contact").on(table.contactHash, table.createdAt),
+]);
+
+export const aiUsagePeriods = pgTable("ai_usage_periods", {
+  id: text("id").primaryKey(),
+  subjectHash: text("subject_hash").notNull(),
+  periodKey: text("period_key").notNull(),
+  scope: text("scope").notNull(),
+  requestCount: integer("request_count").notNull().default(0),
+  reservedTokens: integer("reserved_tokens").notNull().default(0),
+  actualTokens: integer("actual_tokens").notNull().default(0),
+  costMicrousd: bigint("cost_microusd", { mode: "number" }).notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("ai_usage_periods_subject").on(table.subjectHash, table.periodKey, table.scope),
 ]);
 
 // WA-02 tri-mode: customer-selected mode per conversation, separate from

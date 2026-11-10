@@ -1,7 +1,8 @@
 import { parseBotEngineName } from "@yubie/config";
-import { whatsappModeResetSchema } from "@yubie/validation";
+import { whatsappAiPolicySchema, whatsappModeResetSchema } from "@yubie/validation";
 import {
   withAssistantTransaction,
+  PostgresAIUsageRepository,
   PostgresAssistantOutboxRepository,
   PostgresConversationModeRepository,
   PostgresPrioritySupportTaskRepository,
@@ -40,6 +41,7 @@ async function handleOpsWhatsAppLocked(request: Request, database: Database): Pr
     const tasks = await new PostgresPrioritySupportTaskRepository(database).openSummary();
     const priority: Record<string, number> = {};
     for (const row of tasks.ok ? tasks.value.byPriority : []) priority[row.priority] = row.count;
+    const aiUsage = await new PostgresAIUsageRepository(database).usageSummary();
 
     let botEngine = "deterministic";
     try { botEngine = parseBotEngineName(process.env.BOT_ENGINE ?? ""); } catch { /* keep default; startup owns fail-closed */ }
@@ -51,6 +53,7 @@ async function handleOpsWhatsAppLocked(request: Request, database: Database): Pr
         assistantEnabled: config.assistantEnabled,
         flowVersion: config.flowVersion,
         aiAssistEnabled: config.aiAssistEnabled,
+        aiPolicyMode: config.aiPolicy.mode,
       },
       conversationModes: modes,
       priorityTasks: {
@@ -58,9 +61,24 @@ async function handleOpsWhatsAppLocked(request: Request, database: Database): Pr
         unacknowledged: tasks.ok ? tasks.value.unacknowledged : 0,
         oldestUnacknowledgedAgeSeconds: tasks.ok ? tasks.value.oldestUnacknowledgedAgeSeconds : 0,
       },
+      ai: aiUsage,
       queue: { queueLag, deadLetters },
       releaseSha: process.env.RELEASE_SHA ?? "dev",
     });
+  }
+
+  if (request.method === "POST" && url.pathname === "/ops/whatsapp/ai-policy") {
+    const parsed = whatsappAiPolicySchema.safeParse(await request.json());
+    if(!parsed.success)return Response.json({error:"invalid_ai_policy"},{status:400});
+    const body = parsed.data;
+    const now = new Date().toISOString();
+    const runtime = new PostgresRuntimeConfigRepository(database);
+    await runtime.setMany([
+      { key: "ai_policy", value: { mode: body.mode, limits: body.limits, approvalRef: body.approvalRef, changedBy: body.changedBy } },
+      { key: "ai_assist_enabled", value: body.mode === "live" },
+    ], body.changedBy, now);
+    const snapshot = await runtime.getSnapshot();
+    return Response.json({ ok: true, mode: body.mode, effectiveAiAssistEnabled: snapshot.aiAssistEnabled, cannotEnableGlobalAuto: true });
   }
 
   if (request.method === "POST" && url.pathname === "/ops/whatsapp/conversation-mode/reset") {
