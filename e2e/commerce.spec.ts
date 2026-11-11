@@ -27,7 +27,7 @@ test.beforeEach(async ({ page,context }) => {
   // its own behaviour is pinned in e2e/mock/verified-promotion.spec.ts.
   await page.addInitScript(() => sessionStorage.setItem("yubie.promo.dismissed.v1", "1"));
   await page.route("**/api/promotions/welcome", route => route.fulfill({json:{ok:true,data:{available:false}}}));
-  await page.route("**/api/checkout/session", async (route) => {
+  await context.route("**/api/checkout/session", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { ready: true,admission:"enabled" } }) });
   });
   await context.route("**/api/auth/session", async (route) => {
