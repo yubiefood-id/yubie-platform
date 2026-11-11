@@ -113,6 +113,10 @@ test("homepage preserves hero and follows required semantic section order", asyn
   const html = await response.text();
   assert.match(html, /ROOTED HERE[\s\S]*MADE FOR NOW/);
   assert.match(html, /Four ways to enjoy/);
+  assert.match(html, /href="https:\/\/wa\.me\/6285282141733\?text=[^"]+"/);
+  assert.match(html, /Chat with us!/);
+  assert.match(html, /Promo, Info &amp; Group Member/);
+  assert.match(html, /href="https:\/\/chat\.whatsapp\.com\/IVpNHQOsn371YeTSdyX6q2"/);
   const order = ["products", "our-roots-story", "five-roots", "why-yubie", "lifestyle", "b2b", "community"].map((section) => html.indexOf(`data-home-section="${section}"`));
   assert.ok(order.every((position) => position >= 0));
   assert.deepEqual(order, [...order].sort((a, b) => a - b));
