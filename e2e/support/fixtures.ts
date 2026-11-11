@@ -19,6 +19,13 @@ export const test = base.extend<{ safety: void }>({
       });
     } else if (environment.tier === "mock") {
       await syntheticCommerceReads(context);
+      // The mock tier bakes a synthetic Maps key; never let the real Google
+      // script load anyway — an auth-failing-but-loaded JsAPI makes
+      // AdvancedMarkerElement crash nondeterministically. Blocking the domain
+      // keeps DeliveryMap on its deterministic "Peta belum dapat dimuat"
+      // fallback in every test.
+      await context.route(/^(https?:\/\/)?([a-z0-9-]+\.)*maps\.googleapis\.com\/.*$/, route => route.abort("blockedbyclient"));
+      await context.route(/^(https?:\/\/)?([a-z0-9-]+\.)*(gstatic|googleapis)\.com\/.*(maps|mapsapi).*/, route => route.abort("blockedbyclient"));
       await context.route("**/api/promotions/welcome", route => route.fulfill({json:{ok:true,data:{available:false}}}));
       await context.route("**/api/auth/session", (route) => route.fulfill({ status: 200, contentType: "application/json", headers: { "cache-control": "no-store" }, body: JSON.stringify({ ok: true, data: { authenticated: false, googleClientId: null } }) }));
       await context.route("**/api/purchase-options/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { options: [] } }) }));

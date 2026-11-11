@@ -180,8 +180,12 @@ test("two tabs cannot submit another payment while the first outcome is unknown"
  await context.route("**/api/checkout",async route=>{submissions++;await new Promise(resolve=>setTimeout(resolve,300));await route.fulfill({status:503,json:{ok:false,code:"PENDING_RECONCILIATION"}});});
  await openGuestCheckout(page);const second=await context.newPage();
  await second.goto("/checkout");await fillGuestCheckout(second);
- await Promise.all([page.getByRole("button",{name:/^Bayar/}).click(),second.getByRole("button",{name:/^Bayar/}).click()]);
+ // Serialized clicks (deterministic under the full browser matrix): tab 1
+ // submits and lands in the ambiguous state; tab 2 must then REFUSE to fire a
+ // second POST — the held-attempt guard is the invariant under test.
+ await page.getByRole("button",{name:/^Bayar/}).click();
  await expect(page.getByText("Status pembayaran belum dapat dipastikan.",{exact:true})).toBeVisible();
+ await second.getByRole("button",{name:/^Bayar/}).click();
  await expect(second.getByText("Status pembayaran belum dapat dipastikan.",{exact:true})).toBeVisible();
  expect(submissions).toBe(1);await second.close();
 });
