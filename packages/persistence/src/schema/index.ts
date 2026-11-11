@@ -514,6 +514,38 @@ export const outboundSends = pgTable("outbound_sends", {
   index("outbound_sends_reconcile").on(table.state, table.nextAttemptAt),
 ]);
 
+// Operator-AI pass: declarative channel bindings + ops-copilot call history.
+export const whatsappChannelBindings = pgTable("whatsapp_channel_bindings", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull().default("meta-cloud-api"),
+  phoneE164: text("phone_e164").notNull(),
+  wabaId: text("waba_id"),
+  zammadChannelId: text("zammad_channel_id"),
+  exclusiveWriter: text("exclusive_writer").notNull().default("zammad"),
+  status: text("status").notNull().default("disabled"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("whatsapp_channel_bindings_phone").on(table.provider, table.phoneE164),
+]);
+
+export const opsAiCalls = pgTable("ops_ai_calls", {
+  id: text("id").primaryKey(),
+  requestId: text("request_id").notNull(),
+  operator: text("operator").notNull(),
+  action: text("action").notNull(),
+  resourceType: text("resource_type").notNull(),
+  resourceId: text("resource_id").notNull(),
+  model: text("model").notNull(),
+  inputTokens: integer("input_tokens").notNull(),
+  outputTokens: integer("output_tokens").notNull(),
+  responseRedacted: text("response_redacted").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  index("ops_ai_calls_operator_time").on(table.operator, table.createdAt),
+]);
+
 // WA-02 tri-mode: customer-selected mode per conversation, separate from
 // human-control ownership in conversation_sessions (Zammad stays authority).
 export const conversationModeState = pgTable("conversation_mode_state", {

@@ -51,6 +51,38 @@ test('/ops/whatsapp status and mode reset: bearer-gated, PII-free, audited',{ski
   }
 });
 
+test('channel registration is declarative-only, unique per number, and audited',{skip:!process.env.DATABASE_URL},async()=>{
+  const name='yubi_wa_ch_'+randomUUID().replaceAll('-',''),admin=createDatabase(process.env.DATABASE_URL);
+  await admin.client.unsafe(`CREATE DATABASE "${name}"`);
+  const url=new URL(process.env.DATABASE_URL);url.pathname='/'+name;const db=createDatabase(url.toString());
+  const old={YUBIE_ENV:process.env.YUBIE_ENV,OPS_API_TOKEN:process.env.OPS_API_TOKEN};
+  try {
+    const dir=new URL('../../../packages/persistence/migrations/',import.meta.url);
+    for(const file of (await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())await db.client.begin(async sql=>{await sql.unsafe(await readFile(new URL(file,dir),'utf8'));});
+    process.env.YUBIE_ENV='test';process.env.OPS_API_TOKEN='synthetic-wa-ops';
+    const headers={authorization:'Bearer synthetic-wa-ops','content-type':'application/json'};
+    const post=(path,body)=>handleOpsWhatsApp(new Request('http://local/ops/whatsapp/'+path,{method:'POST',headers,body:JSON.stringify(body)}),db);
+    const get=()=>handleOpsWhatsApp(new Request('http://local/ops/whatsapp/status',{headers}),db);
+
+    assert.equal((await post('channel/register',{phoneE164:'085282141733',changedBy:'owner'})).status,400,'local-format number rejected');
+    const registered=await post('channel/register',{phoneE164:'+6285282141733',changedBy:'owner',notes:'Nomor bisnis utama'});
+    assert.equal(registered.status,200);
+    const body=await registered.json();
+    assert.equal(body.binding.status,'disabled','registration never activates anything');
+    assert.equal(body.binding.provider,'meta-cloud-api');
+    // Re-registration updates in place (unique per provider+number).
+    assert.equal((await post('channel/register',{phoneE164:'+6285282141733',changedBy:'owner',status:'staged'})).status,200);
+    const status=await (await get()).json();
+    assert.equal(status.channels.length,1);
+    assert.equal(status.channels[0].status,'staged');
+    const audits=await db.client`SELECT count(*)::int AS n FROM audit_events WHERE action='whatsapp.channel_registered'`;
+    assert.equal(audits[0].n,2);
+  } finally {
+    for(const [key,value] of Object.entries(old)){if(value===undefined)delete process.env[key];else process.env[key]=value;}
+    await closeDatabase(db);await admin.client.unsafe(`DROP DATABASE "${name}" WITH (FORCE)`);await closeDatabase(admin);
+  }
+});
+
 test('ai-policy endpoint enables only with complete limits and stays audited/fail-closed',{skip:!process.env.DATABASE_URL},async()=>{
   const name='yubi_wa_ai_'+randomUUID().replaceAll('-',''),admin=createDatabase(process.env.DATABASE_URL);
   await admin.client.unsafe(`CREATE DATABASE "${name}"`);

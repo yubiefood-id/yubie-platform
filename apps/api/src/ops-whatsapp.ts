@@ -1,10 +1,12 @@
 import { parseBotEngineName } from "@yubie/config";
+import { z } from "zod";
 import { outboundApproveSchema, outboundDraftCreateSchema, whatsappAiPolicySchema, whatsappModeResetSchema } from "@yubie/validation";
 import {
   withAssistantTransaction,
   PostgresAIUsageRepository,
   PostgresAssistantOutboxRepository,
   PostgresB2bCrmRepository,
+  PostgresChannelBindingRepository,
   PostgresConversationModeRepository,
   PostgresGrowthOutbox,
   PostgresOutboundTemplateRepository,
@@ -49,6 +51,7 @@ async function handleOpsWhatsAppLocked(request: Request, database: Database): Pr
     const crm = await new PostgresB2bCrmRepository(database).summary();
     const growthPending = await new PostgresGrowthOutbox(database).pendingSummary();
     const outbound = await new PostgresOutboundTemplateRepository(database).outboundSummary();
+    const channels = await new PostgresChannelBindingRepository(database).list();
 
     let botEngine = "deterministic";
     try { botEngine = parseBotEngineName(process.env.BOT_ENGINE ?? ""); } catch { /* keep default; startup owns fail-closed */ }
@@ -63,6 +66,12 @@ async function handleOpsWhatsAppLocked(request: Request, database: Database): Pr
         aiPolicyMode: config.aiPolicy.mode,
       },
       conversationModes: modes,
+      customerAI: {
+        enabled: config.aiAssistEnabled,
+        policyMode: config.aiPolicy.mode,
+        deterministicDefault: true,
+        note: "Customer path stays deterministic; AI is operator-only (POST /ops/ai/assist).",
+      },
       priorityTasks: {
         openByPriority: priority,
         unacknowledged: tasks.ok ? tasks.value.unacknowledged : 0,
@@ -71,6 +80,7 @@ async function handleOpsWhatsAppLocked(request: Request, database: Database): Pr
       ai: aiUsage,
       crm: { ...crm, pendingLeadEvents: growthPending.count, oldestPendingLeadAgeSeconds: growthPending.oldestAgeSeconds },
       outboundWhatsapp: { ...outbound, enabled: config.outboundWhatsappEnabled },
+      channels,
       queue: { queueLag, deadLetters },
       releaseSha: process.env.RELEASE_SHA ?? "dev",
     });
@@ -98,8 +108,7 @@ async function handleOpsWhatsAppLocked(request: Request, database: Database): Pr
     }
   }
 
-  const approveMatch = url.pathname.match(/^\/ops\/whatsapp\/outbound\/([^/]+)\/approve$/);
-  if (request.method === "POST" && approveMatch?.[1]) {
+  const approveMatch = url.pathname.match(/^\/ops\/whatsapp\/outbound\/([^/]+)\/approve$/);  if (request.method === "POST" && approveMatch?.[1]) {
     const parsed = outboundApproveSchema.safeParse(await request.json());
     if(!parsed.success)return Response.json({error:"invalid_outbound_approval"},{status:400});
     const body = parsed.data;
@@ -108,6 +117,37 @@ async function handleOpsWhatsAppLocked(request: Request, database: Database): Pr
     const result = await repo.approveDraft(approveMatch[1], body.contentHash, body.changedBy, new Date(at.getTime() + body.expiresInHours * 3600_000).toISOString(), at.toISOString());
     if(!result.ok)return Response.json({error:result.reason},{status:409});
     return Response.json({ ok: true, draftId: approveMatch[1], expiresAt: new Date(at.getTime() + body.expiresInHours * 3600_000).toISOString(), implicitSend: false, gatewayEnabled: false });
+  }
+
+  if (request.method === "POST" && url.pathname === "/ops/whatsapp/channel/register") {
+    const channelSchema = z.object({
+      phoneE164: z.string().regex(/^\+[1-9]\d{7,14}$/),
+      wabaId: z.string().min(1).max(64).optional(),
+      zammadChannelId: z.string().min(1).max(64).optional(),
+      status: z.enum(["registered", "staged", "disabled"]).optional(),
+      notes: z.string().min(1).max(300).optional(),
+      changedBy: z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/),
+    }).strict();
+    const parsed = channelSchema.safeParse(await request.json());
+    if (!parsed.success) return Response.json({ error: "invalid_channel_registration" }, { status: 400 });
+    const body = parsed.data;
+    const repo = new PostgresChannelBindingRepository(database);
+    const binding = await repo.upsert({
+      phoneE164: body.phoneE164,
+      ...(body.wabaId !== undefined ? { wabaId: body.wabaId } : {}),
+      ...(body.zammadChannelId !== undefined ? { zammadChannelId: body.zammadChannelId } : {}),
+      ...(body.status !== undefined ? { status: body.status } : {}),
+      ...(body.notes !== undefined ? { notes: body.notes } : {}),
+    });
+    const now = new Date().toISOString();
+    await new (await import("@yubie/persistence")).PostgresAuditRepository(database).append({
+      actor: `operator:${body.changedBy}`,
+      action: "whatsapp.channel_registered",
+      resourceType: "whatsapp_channel",
+      resourceId: body.phoneE164,
+      occurredAt: now,
+    });
+    return Response.json({ ok: true, binding, activation: "declarative-only — onboarding + controlled release still required" });
   }
 
   if (request.method === "POST" && url.pathname === "/ops/whatsapp/ai-policy") {
