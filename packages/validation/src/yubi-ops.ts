@@ -41,3 +41,12 @@ export const outboundApproveSchema=z.object({
   expiresInHours:z.number().int().min(1).max(168),
   changedBy:actor,
 }).strict();
+// M2 (operator AI): actions for the ops copilot. Operator-only; the model has
+// no tools and no send capability — every response is a DRAFT for a human.
+export const opsAiAssistSchema=z.discriminatedUnion("action",[
+  z.object({action:z.literal("summarize_thread"),provider:z.enum(["zammad"]),threadId:z.string().regex(/^[1-9]\d{0,19}$/),operator:actor}).strict(),
+  z.object({action:z.literal("draft_reply"),provider:z.enum(["zammad"]),threadId:z.string().regex(/^[1-9]\d{0,19}$/),instruction:z.string().min(1).max(500).optional(),operator:actor}).strict(),
+  z.object({action:z.literal("runbook_qa"),question:z.string().min(3).max(500),operator:actor}).strict(),
+  z.object({action:z.literal("draft_b2b_template"),context:z.string().min(10).max(1000),operator:actor}).strict(),
+]);
+export const opsAiPolicySchema=whatsappAiPolicySchema;
