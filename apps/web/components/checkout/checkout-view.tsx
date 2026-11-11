@@ -34,8 +34,14 @@ interface CheckoutFormState {
 
 const EMPTY_FORM: CheckoutFormState = { email: "", name: "", phone: "", address: "", city: "", postalCode: "" };
 
-/** Select sentinel for a destination outside the current free-shipping coverage. */
-const OTHER_CITY = "__other__";
+/** Saved account address (subset) powering the checkout picker: the account
+ *  side owns CRUD and the exactly-one-default invariant; checkout only reads. */
+interface SavedAddress {
+  id: string;
+  isDefault: boolean;
+  pin: { latitude: number; longitude: number } | null;
+  address: { recipientName: string; recipientPhone: string; fullAddress: string; city: string; postalCode: string };
+}
 
 /**
  * Live checkout state machine: idle → validating → creating checkout →
@@ -78,6 +84,9 @@ export function CheckoutView() {
   const [suggestions,setSuggestions]=useState<{id:string;label:string}[]>([]);
   const [searchUnavailable,setSearchUnavailable]=useState(false);
   const placesSessionRef=useRef<string|null>(null);
+  // Saved account addresses for logged-in customers (null = not loaded/guest).
+  const [savedAddresses,setSavedAddresses]=useState<SavedAddress[]|null>(null);
+  const [selectedAddressId,setSelectedAddressId]=useState<string|null>(null);
   const requestBody=JSON.stringify({lines:lines.map(({line})=>({productId:line.productId,sizeId:line.sizeId,quantity:line.quantity})),customerEmail:form.email.trim(),...(form.name.trim()?{customerName:form.name.trim()}:{}),delivery:{...(form.name.trim()?{name:form.name.trim()}:{}),phone:form.phone.trim(),address:form.address.trim(),city:form.city.trim(),...(form.postalCode.trim()?{postalCode:form.postalCode.trim()}:{})},...(promoCode?{promoCode}:{})});
   const formValid = form.email.includes("@") && form.phone.trim().length >= 8 && form.address.trim().length >= 8 && form.city.trim().length >= 2;
   const quote=quotation?.body===requestBody?quotation.value:null;
@@ -192,8 +201,23 @@ export function CheckoutView() {
     })();},400);
     return()=>{active=false;clearTimeout(timer);};
   },[addressQuery,searchUnavailable]);
-  // Logged-in convenience: prefill recipient name + WhatsApp from the default
-  // saved address — never overwriting anything the customer already typed.
+  /** Explicit saved-address pick: fills every delivery field (and drops the
+   *  saved pin, if any) from one account record — the customer's one-tap full
+   *  fill for logged-in users. Manual edits afterwards stay free-form. */
+  const applySavedAddress=useCallback((row:SavedAddress)=>{
+    setForm(form=>({...form,
+      name:row.address.recipientName?.trim()||form.name,
+      phone:row.address.recipientPhone?.trim()||form.phone,
+      address:row.address.fullAddress?.trim()||form.address,
+      city:canonicalCity(row.address.city)??form.city,
+      postalCode:row.address.postalCode?.trim()||form.postalCode}));
+    if(row.pin&&Number.isFinite(row.pin.latitude)&&Number.isFinite(row.pin.longitude))setMapPoint({latitude:row.pin.latitude,longitude:row.pin.longitude});
+    setSelectedAddressId(row.id);
+    setLocationNote("Alamat tersimpan dipilih. Periksa kembali lalu lanjutkan.");
+  },[canonicalCity]);
+  // Logged-in convenience: load saved addresses once; the DEFAULT address
+  // auto-applies on load (fill-empty-only, so nothing typed is overwritten) —
+  // "the account default is the checkout default until changed".
   useEffect(()=>{
     let active=true;
     void (async()=>{
@@ -203,15 +227,34 @@ export function CheckoutView() {
       const addressesResponse=await fetch("/api/account/addresses",{cache:"no-store"}).catch(()=>null);
       const addressesPayload=await addressesResponse?.json().catch(()=>null);
       if(!active||!addressesResponse?.ok||addressesPayload?.ok!==true||!Array.isArray(addressesPayload.data))return;
-      const rows=addressesPayload.data as {isDefault?:boolean;address?:{recipientName?:string;recipientPhone?:string}}[];
+      const rows=(addressesPayload.data as unknown[]).map((entry):SavedAddress|null=>{
+        if(typeof entry!=="object"||entry===null)return null;
+        const record=entry as Record<string,unknown>;
+        const address=typeof record.address==="object"&&record.address!==null?record.address as Record<string,unknown>:null;
+        const pin=typeof record.pin==="object"&&record.pin!==null?record.pin as Record<string,unknown>:null;
+        const text=(value:unknown)=>typeof value==="string"?value.trim():"";
+        if(typeof record.id!=="string"||!address)return null;
+        const saved:SavedAddress={id:record.id,isDefault:record.isDefault===true,pin:null,
+          address:{recipientName:text(address.recipientName),recipientPhone:text(address.recipientPhone),fullAddress:text(address.fullAddress),city:text(address.city),postalCode:text(address.postalCode)}};
+        const latitude=Number(pin?.latitude),longitude=Number(pin?.longitude);
+        if(Number.isFinite(latitude)&&Number.isFinite(longitude))saved.pin={latitude,longitude};
+        return saved;
+      }).filter((row):row is SavedAddress=>row!==null);
+      if(!active||rows.length===0)return;
+      setSavedAddresses(rows);
       const preferred=rows.find(row=>row.isDefault)??rows[0];
-      const name=preferred?.address?.recipientName?.trim();
-      const phone=preferred?.address?.recipientPhone?.trim();
-      if(!name&&!phone)return;
-      setForm(form=>({...form,...(form.name.trim()===""&&name?{name}:{}),...(form.phone.trim()===""&&phone?{phone}:{})}));
+      if(!preferred)return;
+      setForm(form=>({...form,
+        ...(form.name.trim()===""&&preferred.address.recipientName?{name:preferred.address.recipientName}:{}),
+        ...(form.phone.trim()===""&&preferred.address.recipientPhone?{phone:preferred.address.recipientPhone}:{}),
+        ...(form.address.trim()===""&&preferred.address.fullAddress?{address:preferred.address.fullAddress}:{}),
+        ...(form.city.trim()===""&&preferred.address.city?{city:canonicalCity(preferred.address.city)??preferred.address.city}:{}),
+        ...(form.postalCode.trim()===""&&preferred.address.postalCode?{postalCode:preferred.address.postalCode}:{})}));
+      setSelectedAddressId(preferred.id);
+      if(preferred.pin)setMapPoint({latitude:preferred.pin.latitude,longitude:preferred.pin.longitude});
     })();
     return()=>{active=false;};
-  },[]);
+  },[canonicalCity]);
   useEffect(() => {
     let active=true;
     sessionReadyRef.current=withCheckoutLock(prepareCheckoutSession);
@@ -316,13 +359,10 @@ export function CheckoutView() {
   };
 
   const busy = phase === "creating" || phase === "redirecting";
-  // City selection UX: when the server publishes free-shipping coverage, the
-  // city is a plain choice (one tap on mobile) with the free-ongkir instruction
-  // directly under the field; a text fallback stays available for uncovered or
-  // unknown destinations and whenever the coverage list cannot be loaded.
+  // Maps-first: there is NO manual city field. The city is filled by GPS, the
+  // address search, or a saved account address (canonicalized onto the exact
+  // approved coverage string); the free-ongkir hint below reflects it.
   const coveredCityMatch = coveredCities.find((city) => city.toLowerCase() === form.city.trim().toLowerCase()) ?? null;
-  const citySelectValue = form.city.trim() === "" ? "" : coveredCityMatch ?? OTHER_CITY;
-  const cityIsTextInput = coveredCities.length === 0 || citySelectValue === OTHER_CITY;
 
   return <div className="checkout-page">
     <header><span className="eyebrow">CHECKOUT</span><h1>Checkout</h1></header>
@@ -354,6 +394,17 @@ export function CheckoutView() {
           </fieldset>
           <fieldset disabled={busy}>
             <legend>2 · Pengiriman</legend>
+            {savedAddresses!==null&&savedAddresses.length>0&&<div className="saved-addresses">
+              <span className="checkout-note strong">Alamat tersimpan</span>
+              <ul className="address-list saved-address-list">
+                {savedAddresses.map(row=><li key={row.id} className={selectedAddressId===row.id?"selected":""}>
+                  <button type="button" className="saved-address-option" aria-pressed={selectedAddressId===row.id} onClick={()=>applySavedAddress(row)}>
+                    <span className="saved-address-label">{row.address.fullAddress}<span className="address-default">{row.isDefault?"Utama":null}</span></span>
+                    <span className="saved-address-meta">{row.address.recipientName} · {row.address.city} {row.address.postalCode}</span>
+                  </button>
+                </li>)}
+              </ul>
+            </div>}
             <label>Nama penerima<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} autoComplete="name" /></label>
             <label>No. WhatsApp<input type="tel" inputMode="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} autoComplete="tel" required /></label>
             <button type="button" className="button warm location-activate" onClick={()=>void activateLocation()} disabled={locating||busy}>{locating?"Mendeteksi lokasi…":"📍 Aktifkan lokasi saya"}</button>
@@ -371,29 +422,18 @@ export function CheckoutView() {
               : <p className="checkout-note" role="status">Layanan pencarian alamat belum aktif. Gunakan tombol lokasi di atas atau isi alamat manual.</p>}
             {mapPoint&&<DeliveryMap point={mapPoint} onChange={(point)=>void moveMapPin(point)} />}
             <label className="wide">Alamat lengkap<textarea rows={3} value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} autoComplete="street-address" required /></label>
-            <label>Kota
-              {/* The dropdown stays visible even for an uncovered destination:
-                  "Kota lain…" reveals the text input below instead of silently
-                  replacing the selector, so the free-ongkir choices remain
-                  discoverable. */}
-              {coveredCities.length>0&&<select value={citySelectValue} onChange={(event) => setForm(form=>({...form,city:event.target.value===OTHER_CITY?"":event.target.value}))} autoComplete="address-level2" aria-label="Kota" required>
-                <option value="" disabled>Pilih kota/kabupaten…</option>
-                {coveredCities.map(city=><option key={city} value={city}>{city}</option>)}
-                <option value={OTHER_CITY}>Kota lain…</option>
-              </select>}
-              {cityIsTextInput&&<>
-                <input value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} list="yubie-covered-cities" autoComplete="address-level2" aria-label={coveredCities.length>0?"Kota lain":"Kota"} required />
-                <datalist id="yubie-covered-cities">{coveredCities.map(city=><option key={city} value={city} />)}</datalist>
-              </>}
-              <small className="city-hint" role="status">
-                {coveredCities.length===0
-                  ? "Gratis ongkir berlaku untuk kota tertentu — daftar kota akan dimuat otomatis di sini."
-                  : coveredCityMatch
-                    ? `🚚 Gratis ongkir — pengiriman ke ${coveredCityMatch} gratis (Rp0) dan sudah termasuk dalam total.`
-                    : `🚚 Gratis ongkir (Rp0) saat ini tersedia untuk: ${coveredCities.join(", ")}. Pilih kota Anda di atas — di luar daftar itu, isi lewat "Kota lain…".`}
-              </small>
-            </label>
             <label>Kode pos<input value={form.postalCode} onChange={(event) => setForm({ ...form, postalCode: event.target.value })} inputMode="numeric" autoComplete="postal-code" /></label>
+            {/* No manual city field: the city arrives from GPS, address search,
+                or a saved address; free/courier pricing is derived server-side. */}
+            <small className="city-hint wide" role="status">
+              {form.city.trim()===""
+                ? "Kota pengiriman terisi otomatis dari lokasi, pencarian alamat, atau alamat tersimpan di atas."
+                : coveredCityMatch
+                  ? `🚚 Gratis ongkir — pengiriman ke ${coveredCityMatch} gratis (Rp0) dan sudah termasuk dalam total.`
+                  : coveredCities.length===0
+                    ? "Gratis ongkir berlaku untuk kota tertentu — ketersediaan diverifikasi otomatis dari alamat Anda."
+                    : `Gratis ongkir (Rp0) saat ini tersedia untuk: ${coveredCities.join(", ")}. Di luar area itu, ongkir kurir dihitung otomatis dari alamat lengkap.`}
+            </small>
             {deliveryOptions!==null&&deliveryOptions.length>0&&<div className="courier-options" role="radiogroup" aria-label="Pilihan layanan kurir">
               {deliveryOptions.map(option=><label key={option.quoteId} className="courier-option">
                 <input type="radio" name="yubie-courier" checked={selectedQuoteId===option.quoteId} onChange={()=>setSelectedQuoteId(option.quoteId)} />

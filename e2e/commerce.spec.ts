@@ -6,8 +6,12 @@ import {syntheticCommerceReads} from "./support/synthetic-commerce.js";
 async function fillGuestCheckout(page: Page) {
   await page.getByLabel("Email").fill("browser-test@example.invalid");
   await page.getByLabel("No. WhatsApp").fill("080000000000");
-  await page.getByLabel("Alamat lengkap").fill("Alamat pengujian lokal");
-  await page.getByLabel("Kota").fill("Bogor");
+  // No manual city field anymore: the guest sets the destination through the
+  // address search (stubbed), which fills the address AND the city.
+  const search = page.getByRole("textbox", { name: "Cari alamat pengiriman" });
+  await search.fill("Alamat pengujian");
+  await page.getByRole("option").first().click();
+  await expect(page.getByLabel("Alamat lengkap")).toHaveValue("Alamat pengujian lokal");
 }
 
 async function openGuestCheckout(page: Page) {
@@ -25,6 +29,15 @@ test.beforeEach(async ({ page,context }) => {
   await page.route("**/api/promotions/welcome", route => route.fulfill({json:{ok:true,data:{available:false}}}));
   await page.route("**/api/checkout/session", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { ready: true,admission:"enabled" } }) });
+  });
+  await context.route("**/api/auth/session", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { authenticated: false, csrfToken: "0".repeat(64), mapsAvailable: true } }) });
+  });
+  await context.route("**/api/locations/autocomplete", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: [{ id: "place-1", label: "Alamat pengujian lokal, Bogor" }] }) });
+  });
+  await context.route("**/api/locations/details", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { label: "Alamat pengujian lokal", latitude: -6.4, longitude: 106.8, address: { province: "Jawa Barat", city: "Bogor", district: "Bogor Tengah", postalCode: "" } } }) });
   });
   await page.route("**/api/purchase-options/**", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { options: [] } }) });
@@ -63,7 +76,9 @@ test("cart and guest checkout stay first-party and preview-only", async ({ page 
   await page.getByLabel("Email").fill("browser-test@example.invalid");
   await page.getByLabel("No. WhatsApp").fill("080000000000");
   await page.getByLabel("Alamat lengkap").fill("Alamat pengujian lokal");
-  await page.getByLabel("Kota").fill("Bogor");
+  const search = page.getByRole("textbox", { name: "Cari alamat pengiriman" });
+  await search.fill("Alamat pengujian");
+  await page.getByRole("option").first().click();
   await page.getByRole("button", { name: /^Bayar/ }).click();
 
   await expect(page.getByText("Mode pembayaran demo sedang aktif.")).toBeVisible();
