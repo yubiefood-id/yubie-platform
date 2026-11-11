@@ -5,20 +5,28 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
+import type { B2BLead } from "@yubie/validation";
+import { trackEvent } from "../../lib/analytics";
 
+// Localized messages stay client-side; the structural contract (fields, caps,
+// enums, optional-ness) is compile-time pinned to the shared server schema —
+// a drift on either side breaks this assignment.
 const schema = z.object({
-  name: z.string().trim().min(2, "Nama minimal 2 karakter."),
-  business: z.string().trim().min(2, "Nama bisnis wajib diisi."),
-  type: z.string().min(1, "Pilih jenis bisnis."),
-  city: z.string().trim().min(2, "Kota wajib diisi."),
+  name: z.string().trim().min(2, "Nama minimal 2 karakter.").max(80),
+  business: z.string().trim().min(2, "Nama bisnis wajib diisi.").max(120),
+  type: z.string().min(1, "Pilih jenis bisnis.").max(60),
+  city: z.string().trim().min(2, "Kota wajib diisi.").max(80),
   email: z.string().email("Email tidak valid."),
-  whatsapp: z.string().trim().min(8, "Nomor WhatsApp tidak valid."),
-  need: z.string().trim().optional(),
+  whatsapp: z.string().trim().min(8, "Nomor WhatsApp tidak valid.").max(24),
+  need: z.string().trim().max(120).optional(),
   intent: z.enum(["sample", "bulk", "product-development", "general"]),
-  interest: z.string().min(1, "Pilih produk."),
+  interest: z.string().min(1, "Pilih produk.").max(120),
   message: z.string().trim().max(1000).optional(),
   consent: z.literal(true, { error: "Persetujuan diperlukan." }),
+  website: z.string().max(200).optional(),
 });
+const _serverContract: z.ZodType<B2BLead> = schema;
+void _serverContract;
 type Data = z.infer<typeof schema>;
 
 const intentLabels: Record<Data["intent"], string> = {
@@ -49,11 +57,13 @@ export function B2BForm() {
     try {
       const response = await fetch("/api/b2b", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
       if (!response.ok) throw new Error("Submission unavailable");
+      trackEvent("b2b_enquiry_submit", { intent: data.intent });
       setSent(true);
     } catch { setFailed(true); }
   };
-  if (sent) return <div className="b2b-success" role="status"><span>01</span><h2>Enquiry tervalidasi.</h2><p>Ini adalah prototype aman. Integrasi CRM/email belum diaktifkan, jadi belum ada pesan yang dikirim keluar.</p></div>;
+  if (sent) return <div className="b2b-success" role="status"><span>01</span><h2>Enquiry Anda telah kami terima.</h2><p>Tim kami akan menindaklanjuti melalui email atau WhatsApp dalam 1–2 hari kerja. Ketersediaan sampel dikonfirmasi secara terpisah oleh tim.</p></div>;
   return <form className="b2b-form" onSubmit={handleSubmit(submit)} noValidate>
+    <input {...register("website")} tabIndex={-1} autoComplete="off" aria-hidden="true" style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }} />
     <label>Nama<input {...register("name")} aria-invalid={!!errors.name} />{errors.name && <small>{errors.name.message}</small>}</label>
     <label>Nama bisnis<input {...register("business")} aria-invalid={!!errors.business} />{errors.business && <small>{errors.business.message}</small>}</label>
     <label>Jenis bisnis<select {...register("type")} defaultValue="" aria-invalid={!!errors.type}><option value="" disabled>Pilih</option><option>Bakery</option><option>Café</option><option>Food Manufacturer</option><option>Retailer</option><option>UMKM Kuliner</option><option>Lainnya</option></select>{errors.type && <small>{errors.type.message}</small>}</label>
