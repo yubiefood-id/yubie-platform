@@ -23,10 +23,10 @@
     "@yubie/application": "*",
     "@yubie/config": "*",
     "@yubie/domain": "*",
-    "nodemailer": "7.0.13",
+    "nodemailer": "10.0.6",
     "sharp": "0.35.5"
   },
   "devDependencies": {
-    "@types/nodemailer": "7.0.12"
+    "@types/nodemailer": "8.0.2"
   }
 }
