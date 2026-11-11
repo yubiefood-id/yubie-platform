@@ -49,3 +49,25 @@ test("B2B transport failure keeps the enquiry and consent available for retry", 
   await expect(form.getByLabel("Nama bisnis")).toHaveValue("Synthetic Bakery");
   await expect(form.getByRole("checkbox")).toBeChecked();
 });
+
+test("B2B accepted submission shows the honest delivery confirmation", async ({ page }) => {
+  await page.route("**/api/b2b", (route) => route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ ok: true, data: { outcome: "created" } }) }));
+  await page.goto("/b2b");
+  const form = page.locator(".b2b-form");
+  await expect(form).toHaveCount(1);
+  await form.getByLabel("Nama", { exact: true }).fill("Synthetic QA");
+  await form.getByLabel("Nama bisnis").fill("Synthetic Bakery");
+  await form.getByLabel("Jenis bisnis").selectOption({ label: "Bakery" });
+  await form.getByLabel("Kota").fill("Bogor");
+  await form.getByLabel("Email", { exact: true }).fill("synthetic@example.test");
+  await form.getByLabel("WhatsApp", { exact: true }).fill("080000000000");
+  await form.getByLabel("Produk yang diminati").selectOption({ label: "Yubie Flour" });
+  await form.getByRole("checkbox").check();
+  await form.getByRole("button").click();
+  const confirmation = page.getByRole("status").filter({ hasText: "Enquiry Anda telah kami terima" });
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation).toContainText("1–2 hari kerja");
+  await expect(confirmation).toContainText("Ketersediaan sampel dikonfirmasi");
+  // The retired prototype copy must never come back.
+  await expect(page.getByText("prototype aman")).toHaveCount(0);
+});
