@@ -71,3 +71,30 @@ test("picking the covered city from the dropdown selects free shipping without g
   await expect(page.getByRole("combobox", { name: "Kota", exact: true })).toHaveValue("Kabupaten Bogor");
   await expect(page.getByText(/🚚 Gratis ongkir — pengiriman ke Kabupaten Bogor gratis \(Rp0\)/)).toBeVisible();
 });
+
+test("an uncovered GPS city keeps the dropdown and routes through Kota lain", async ({ page }) => {
+  await page.route("**/api/locations/reverse-geocode", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      ok: true,
+      data: {
+        label: "Jl. Margonda Raya No. 1, Depok, Kota Bogor, Jawa Barat 16423",
+        latitude: -6.4, longitude: 106.8,
+        address: { province: "Jawa Barat", city: "Kota Bogor", district: "Beji", postalCode: "16423" },
+      },
+    }) });
+  });
+  await page.goto("/products");
+  await page.getByRole("button", { name: "Tambah", exact: true }).first().click();
+  await page.goto("/checkout");
+  await page.getByRole("button", { name: "📍 Aktifkan lokasi saya" }).click();
+
+  // The covered-city dropdown stays visible ("Kota lain…" selected) with the
+  // provider's raw city in the revealed text input — the selector never
+  // silently disappears for uncovered destinations.
+  const citySelect = page.getByRole("combobox", { name: "Kota", exact: true });
+  await expect(citySelect).toHaveValue("__other__");
+  await expect(citySelect.locator("option", { hasText: "Kabupaten Bogor" })).toHaveCount(1);
+  await expect(page.getByRole("combobox", { name: "Kota lain", exact: true })).toHaveValue("Kota Bogor");
+  await expect(page.getByRole("textbox", { name: "Alamat lengkap" })).toHaveValue(/Margonda/);
+  await expect(page.getByRole("textbox", { name: "Kode pos" })).toHaveValue("16423");
+});

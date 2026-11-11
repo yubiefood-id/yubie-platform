@@ -71,6 +71,13 @@ export function CheckoutView() {
   const [locating,setLocating]=useState(false);
   const [locationNote,setLocationNote]=useState<string|null>(null);
   const [mapPoint,setMapPoint]=useState<DeliveryMapPoint|null>(null);
+  // Address search (Places autocomplete) is the GPS alternative for customers
+  // who decline the location permission; it degrades honestly when the
+  // location service is not activated server-side.
+  const [addressQuery,setAddressQuery]=useState("");
+  const [suggestions,setSuggestions]=useState<{id:string;label:string}[]>([]);
+  const [searchUnavailable,setSearchUnavailable]=useState(false);
+  const placesSessionRef=useRef<string|null>(null);
   const requestBody=JSON.stringify({lines:lines.map(({line})=>({productId:line.productId,sizeId:line.sizeId,quantity:line.quantity})),customerEmail:form.email.trim(),...(form.name.trim()?{customerName:form.name.trim()}:{}),delivery:{...(form.name.trim()?{name:form.name.trim()}:{}),phone:form.phone.trim(),address:form.address.trim(),city:form.city.trim(),...(form.postalCode.trim()?{postalCode:form.postalCode.trim()}:{})},...(promoCode?{promoCode}:{})});
   const formValid = form.email.includes("@") && form.phone.trim().length >= 8 && form.address.trim().length >= 8 && form.city.trim().length >= 2;
   const quote=quotation?.body===requestBody?quotation.value:null;
@@ -108,13 +115,32 @@ export function CheckoutView() {
     }).catch(()=>{/* Manual entry stays fully available. */});
     return()=>{active=false;};
   },[]);
+  /** Canonicalize a provider city to the exact approved coverage string so the
+   *  dropdown always receives a selectable value; unmatched cities keep the
+   *  provider spelling and surface through the "Kota lain…" path below. */
+  const coveredCitiesRef=useRef<string[]>([]);
+  useEffect(()=>{coveredCitiesRef.current=coveredCities;},[coveredCities]);
+  const canonicalCity=useCallback((city:string|undefined):string|null=>{
+    const trimmed=city?.trim();
+    if(!trimmed)return null;
+    return coveredCitiesRef.current.find((covered)=>covered.toLowerCase()===trimmed.toLowerCase())??trimmed;
+  },[]);
+  /** Shared location fill for GPS, pin moves, and address-search picks: fills
+   *  editable suggestions only (never blanks existing input), shows the pin,
+   *  and reports what was filled. Nothing is ever submitted automatically. */
+  const fillFromLocation=useCallback((preview:LocationPreview,note:string|null)=>{
+    setForm(form=>{
+      const city=canonicalCity(preview.address?.city);
+      return {...form,address:preview.label?.trim()||form.address,...(city?{city}:{}),...(preview.address?.postalCode?.trim()?{postalCode:preview.address.postalCode.trim()}:{})};
+    });
+    setMapPoint({latitude:preview.latitude,longitude:preview.longitude});
+    if(note!==null)setLocationNote(note);
+  },[canonicalCity]);
   /** Geolocation → server reverse-geocode → fill editable address suggestions. */
   const applyLocationPreview=useCallback(async(preview:LocationPreview|null,accuracyMeters?:number)=>{
     if(!preview){setLocationNote("Lokasi belum dapat dikenali. Isi alamat manual tetap bisa.");return;}
-    setForm(form=>({...form,address:preview.label||form.address,city:preview.address?.city?.trim()||form.city,postalCode:preview.address?.postalCode?.trim()||form.postalCode}));
-    setMapPoint({latitude:preview.latitude,longitude:preview.longitude});
-    setLocationNote(`Lokasi terdeteksi${typeof accuracyMeters==="number"&&Number.isFinite(accuracyMeters)?` (±${Math.round(accuracyMeters)} m)`:""}. Periksa dan lengkapi bila perlu.`);
-  },[]);
+    fillFromLocation(preview,`Lokasi terdeteksi${typeof accuracyMeters==="number"&&Number.isFinite(accuracyMeters)?` (±${Math.round(accuracyMeters)} m)`:""}. Alamat, kota, dan kode pos sudah diisi — periksa kembali.`);
+  },[fillFromLocation]);
   const activateLocation=useCallback(async()=>{
     setLocationNote(null);
     if(locating)return;
@@ -133,8 +159,58 @@ export function CheckoutView() {
     setMapPoint(point);
     try{
       const preview=await customerRequest<LocationPreview|null>("/api/locations/reverse-geocode","POST",{latitude:point.latitude,longitude:point.longitude});
-      if(preview)setForm(form=>({...form,address:preview.label||form.address,city:preview.address?.city?.trim()||form.city,postalCode:preview.address?.postalCode?.trim()||form.postalCode}));
+      if(preview)fillFromLocation(preview,null);
     }catch{/* Pin moves keep the last recognized address; manual edit remains. */}
+  },[fillFromLocation]);
+  /** Places autocomplete search: the GPS alternative for customers who decline
+   *  the location permission. One Places session (UUID) spans
+   *  autocomplete→details and is retired after a pick. */
+  const chooseSuggestion=useCallback(async(suggestion:{id:string;label:string})=>{
+    setSuggestions([]);setAddressQuery(suggestion.label);
+    try{
+      const selection=await customerRequest<LocationPreview|null>("/api/locations/details","POST",{placeId:suggestion.id,sessionToken:placesSessionRef.current??crypto.randomUUID()});
+      placesSessionRef.current=null;
+      if(selection)fillFromLocation(selection,"Alamat terpilih dari pencarian. Alamat, kota, dan kode pos sudah diisi — periksa kembali.");
+      else setLocationNote("Detail alamat belum dapat diambil. Isi alamat manual tetap bisa.");
+    }catch{setLocationNote("Detail alamat belum dapat diambil. Isi alamat manual tetap bisa.");}
+  },[fillFromLocation]);
+  useEffect(()=>{
+    if(searchUnavailable)return;
+    const query=addressQuery.trim();
+    // All state resets ride the async boundary (no synchronous setState inside
+    // the effect body), matching the rates-effect pattern.
+    let active=true;
+    const timer=setTimeout(()=>{void (async()=>{
+      if(query.length<3){if(active)setSuggestions([]);return;}
+      try{
+        placesSessionRef.current??=crypto.randomUUID();
+        const result=await customerRequest<{id:string;label:string}[]>("/api/locations/autocomplete","POST",{query,sessionToken:placesSessionRef.current});
+        if(active)setSuggestions(Array.isArray(result)?result.slice(0,5):[]);
+      }catch{
+        if(active){setSuggestions([]);setSearchUnavailable(true);}
+      }
+    })();},400);
+    return()=>{active=false;clearTimeout(timer);};
+  },[addressQuery,searchUnavailable]);
+  // Logged-in convenience: prefill recipient name + WhatsApp from the default
+  // saved address — never overwriting anything the customer already typed.
+  useEffect(()=>{
+    let active=true;
+    void (async()=>{
+      const response=await fetch("/api/auth/session",{cache:"no-store"}).catch(()=>null);
+      const payload=await response?.json().catch(()=>null);
+      if(!active||!response?.ok||payload?.data?.authenticated!==true)return;
+      const addressesResponse=await fetch("/api/account/addresses",{cache:"no-store"}).catch(()=>null);
+      const addressesPayload=await addressesResponse?.json().catch(()=>null);
+      if(!active||!addressesResponse?.ok||addressesPayload?.ok!==true||!Array.isArray(addressesPayload.data))return;
+      const rows=addressesPayload.data as {isDefault?:boolean;address?:{recipientName?:string;recipientPhone?:string}}[];
+      const preferred=rows.find(row=>row.isDefault)??rows[0];
+      const name=preferred?.address?.recipientName?.trim();
+      const phone=preferred?.address?.recipientPhone?.trim();
+      if(!name&&!phone)return;
+      setForm(form=>({...form,...(form.name.trim()===""&&name?{name}:{}),...(form.phone.trim()===""&&phone?{phone}:{})}));
+    })();
+    return()=>{active=false;};
   },[]);
   useEffect(() => {
     let active=true;
@@ -282,23 +358,39 @@ export function CheckoutView() {
             <label>No. WhatsApp<input type="tel" inputMode="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} autoComplete="tel" required /></label>
             <button type="button" className="button warm location-activate" onClick={()=>void activateLocation()} disabled={locating||busy}>{locating?"Mendeteksi lokasi…":"📍 Aktifkan lokasi saya"}</button>
             {locationNote&&<p className="checkout-note" role="status">{locationNote}</p>}
+            {!searchUnavailable
+              ? <div className="address-search">
+                  <input value={addressQuery} onChange={(event)=>setAddressQuery(event.target.value)} placeholder="Cari alamat (mis. Jl. Raya Cibinong)…" aria-label="Cari alamat pengiriman" autoComplete="off" onKeyDown={(event)=>{
+                    if(event.key==="Enter"){event.preventDefault();if(suggestions[0])void chooseSuggestion(suggestions[0]);}
+                    else if(event.key==="Escape"){setSuggestions([]);setAddressQuery("");}
+                  }} />
+                  {suggestions.length>0&&<ul className="address-suggestions" role="listbox" aria-label="Saran alamat">
+                    {suggestions.map(suggestion=><li key={suggestion.id} role="option" aria-selected={false}><button type="button" onClick={()=>void chooseSuggestion(suggestion)}>{suggestion.label}</button></li>)}
+                  </ul>}
+                </div>
+              : <p className="checkout-note" role="status">Layanan pencarian alamat belum aktif. Gunakan tombol lokasi di atas atau isi alamat manual.</p>}
             {mapPoint&&<DeliveryMap point={mapPoint} onChange={(point)=>void moveMapPin(point)} />}
             <label className="wide">Alamat lengkap<textarea rows={3} value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} autoComplete="street-address" required /></label>
             <label>Kota
-              {cityIsTextInput ? <>
-                <input value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} list="yubie-covered-cities" autoComplete="address-level2" aria-label="Kota" required />
-                <datalist id="yubie-covered-cities">{coveredCities.map(city=><option key={city} value={city} />)}</datalist>
-              </> : <select value={citySelectValue} onChange={(event) => setForm(form=>({...form,city:event.target.value===OTHER_CITY?"":event.target.value}))} autoComplete="address-level2" aria-label="Kota" required>
+              {/* The dropdown stays visible even for an uncovered destination:
+                  "Kota lain…" reveals the text input below instead of silently
+                  replacing the selector, so the free-ongkir choices remain
+                  discoverable. */}
+              {coveredCities.length>0&&<select value={citySelectValue} onChange={(event) => setForm(form=>({...form,city:event.target.value===OTHER_CITY?"":event.target.value}))} autoComplete="address-level2" aria-label="Kota" required>
                 <option value="" disabled>Pilih kota/kabupaten…</option>
                 {coveredCities.map(city=><option key={city} value={city}>{city}</option>)}
                 <option value={OTHER_CITY}>Kota lain…</option>
               </select>}
+              {cityIsTextInput&&<>
+                <input value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} list="yubie-covered-cities" autoComplete="address-level2" aria-label={coveredCities.length>0?"Kota lain":"Kota"} required />
+                <datalist id="yubie-covered-cities">{coveredCities.map(city=><option key={city} value={city} />)}</datalist>
+              </>}
               <small className="city-hint" role="status">
                 {coveredCities.length===0
                   ? "Gratis ongkir berlaku untuk kota tertentu — daftar kota akan dimuat otomatis di sini."
                   : coveredCityMatch
                     ? `🚚 Gratis ongkir — pengiriman ke ${coveredCityMatch} gratis (Rp0) dan sudah termasuk dalam total.`
-                    : `🚚 Gratis ongkir (Rp0) saat ini tersedia untuk: ${coveredCities.join(", ")}. Pilih kota Anda di atas.`}
+                    : `🚚 Gratis ongkir (Rp0) saat ini tersedia untuk: ${coveredCities.join(", ")}. Pilih kota Anda di atas — di luar daftar itu, isi lewat "Kota lain…".`}
               </small>
             </label>
             <label>Kode pos<input value={form.postalCode} onChange={(event) => setForm({ ...form, postalCode: event.target.value })} inputMode="numeric" autoComplete="postal-code" /></label>
