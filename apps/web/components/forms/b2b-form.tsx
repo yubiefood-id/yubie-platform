@@ -39,6 +39,10 @@ const intentLabels: Record<Data["intent"], string> = {
 export function B2BForm() {
   const [sent, setSent] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [sending, setSending] = useState(false);
+  // An editable website preview (not a mail-client draft). No server write
+  // occurs until the prospect explicitly confirms the reviewed payload.
+  const [review, setReview] = useState<Data | null>(null);
   const searchParams = useSearchParams();
   const defaultIntent = (searchParams.get("intent") as Data["intent"] | null) ?? "general";
   const defaultInterest = searchParams.get("interest") ?? "";
@@ -53,16 +57,48 @@ export function B2BForm() {
   }, [defaultInterest, setValue]);
 
   const submit = async (data: Data) => {
+    if (sending) return;
+    setSending(true);
     setFailed(false);
     try {
       const response = await fetch("/api/b2b", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
       if (!response.ok) throw new Error("Submission unavailable");
       trackEvent("b2b_enquiry_submit", { intent: data.intent });
       setSent(true);
-    } catch { setFailed(true); }
+    } catch {
+      setFailed(true);
+    } finally {
+      setSending(false);
+    }
   };
   if (sent) return <div className="b2b-success" role="status"><span>01</span><h2>Enquiry Anda telah kami terima.</h2><p>Tim kami akan menindaklanjuti melalui email atau WhatsApp dalam 1–2 hari kerja. Ketersediaan sampel dikonfirmasi secara terpisah oleh tim.</p></div>;
-  return <form className="b2b-form" onSubmit={handleSubmit(submit)} noValidate>
+  if (review) {
+    const previewFields = [
+      ["Nama", review.name],
+      ["Nama bisnis", review.business],
+      ["Jenis bisnis", review.type],
+      ["Kota", review.city],
+      ["Email", review.email],
+      ["WhatsApp", review.whatsapp],
+      ["Estimasi kebutuhan / bulan", review.need || "Belum diisi"],
+      ["Jenis kebutuhan", intentLabels[review.intent]],
+      ["Produk yang diminati", review.interest],
+      ["Pesan", review.message || "Belum diisi"],
+    ];
+    return <section className="b2b-review" aria-labelledby="b2b-review-title">
+      <span className="eyebrow">STEP 02 — REVIEW</span>
+      <h3 id="b2b-review-title">Tinjau enquiry Anda</h3>
+      <p>Ini adalah pratinjau, belum dikirim. Periksa seluruh jawaban sebelum mengirimnya kepada tim Yubie.</p>
+      <dl>{previewFields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+      <p className="b2b-review-consent">Persetujuan pemrosesan data: Disetujui.</p>
+      {failed && <p role="alert">Enquiry belum terkonfirmasi. Silakan coba kirim kembali atau ubah jawaban Anda.</p>}
+      <div className="b2b-review-actions">
+        <button type="button" className="button" disabled={sending} onClick={() => { setFailed(false); setReview(null); }}>Ubah jawaban</button>
+        <button type="button" className="button gold" disabled={sending} onClick={() => void submit(review)}>{sending ? "Mengirim…" : "Kirim enquiry"} <span aria-hidden="true">→</span></button>
+      </div>
+    </section>;
+  }
+  return <form className="b2b-form" onSubmit={handleSubmit((data) => { setFailed(false); setReview(data); })} noValidate>
     <input {...register("website")} tabIndex={-1} autoComplete="off" aria-hidden="true" style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }} />
     <label>Nama<input {...register("name")} aria-invalid={!!errors.name} />{errors.name && <small>{errors.name.message}</small>}</label>
     <label>Nama bisnis<input {...register("business")} aria-invalid={!!errors.business} />{errors.business && <small>{errors.business.message}</small>}</label>
@@ -76,6 +112,6 @@ export function B2BForm() {
     <label className="wide">Pesan<textarea {...register("message")} rows={5} placeholder={intent === "sample" ? "Ceritakan use case sampel yang Anda butuhkan." : intent === "bulk" ? "Ceritakan volume dan jadwal kebutuhan bulk." : "Ceritakan kebutuhan Anda."} /></label>
     <label className="check wide"><input type="checkbox" {...register("consent")} /><span>Saya setuju data ini diproses untuk menindaklanjuti enquiry dan telah membaca <a href="/privacy">Privacy Policy</a>.</span></label>{errors.consent && <small className="wide">{errors.consent.message}</small>}
     {failed && <p className="wide" role="alert">Enquiry belum terkonfirmasi. Data tetap tersimpan di formulir; coba lagi.</p>}
-    <button className="button gold wide" disabled={isSubmitting}>{isSubmitting ? "Validating…" : intentLabels[intent]}<span>→</span></button>
+    <button type="submit" className="button gold wide" disabled={isSubmitting}>{isSubmitting ? "Memeriksa…" : "Tinjau enquiry"}<span aria-hidden="true">→</span></button>
   </form>;
 }
