@@ -307,6 +307,19 @@ h1, h2, h3, p { margin-top: 0; }
 .b2b-form .check input { width: 20px; min-height: 20px; }
 .b2b-form small { color: #a32626; }
 .b2b-form .button { border: 0; cursor: pointer; }
+.b2b-review { border: 1px solid var(--line); background: white; padding: clamp(1.25rem, 3vw, 2rem); min-width: 0; }
+.b2b-review h3 { font-size: clamp(1.5rem, 3vw, 2.2rem); margin: .7rem 0; }
+.b2b-review > p { line-height: 1.6; }
+.b2b-review dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1.25rem; margin: 1.5rem 0; }
+.b2b-review dl > div { min-width: 0; padding: .8rem 0; border-top: 1px solid var(--line); }
+.b2b-review dt { color: var(--muted); font-size: .7rem; font-weight: 800; text-transform: uppercase; }
+.b2b-review dd { margin: .35rem 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.b2b-review-consent { font-size: .78rem; }
+.b2b-review [role="alert"] { color: #a32626; }
+.b2b-review-actions { display: flex; flex-wrap: wrap; gap: .8rem; margin-top: 1rem; }
+.b2b-review-actions .button { flex: 1 1 12rem; justify-content: center; cursor: pointer; }
+.b2b-review-actions .button:disabled { opacity: .6; cursor: wait; }
+@media (max-width: 600px) { .b2b-review dl { grid-template-columns: 1fr; } }
 .b2b-success { background: var(--lilac); padding: 3rem; }
 .b2b-success span { font-family: var(--font-serif); color: var(--purple); font-size: 3rem; }
 
