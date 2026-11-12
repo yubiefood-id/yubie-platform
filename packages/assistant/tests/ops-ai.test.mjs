@@ -14,10 +14,10 @@ test('ops AI factory is fail-closed without explicit provider and key', () => {
     assert.equal(createOpsAIProviderFromEnv().name, 'throwing');
     process.env.ZAI_API_KEY = 'synthetic-key';
     const zai = createOpsAIProviderFromEnv();
-    assert.match(zai.name, /^zai:glm-4\.6$/);
+    assert.match(zai.name, /^zai:glm-5\.3-flash$/);
     assert.equal(ZAI_DEFAULT_BASE_URL, 'https://api.z.ai/api/paas/v4');
-    process.env.OPS_AI_MODEL = 'glm-4.5-air';
-    assert.match(createOpsAIProviderFromEnv().name, /^zai:glm-4\.5-air$/);
+    process.env.OPS_AI_MODEL = 'glm-4.6';
+    assert.match(createOpsAIProviderFromEnv().name, /^zai:glm-4\.6$/);
   } finally {
     Object.assign(process.env, saved);
   }

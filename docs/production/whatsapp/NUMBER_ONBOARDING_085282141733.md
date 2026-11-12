@@ -90,7 +90,7 @@ Setelah semua masuk, minta engineering sesi berikutnya memasangkannya ke compose
 1. Buka https://z.ai → login akun owner → masuk **API / Open Platform** (api.z.ai — INI yang dipakai backend; berbeda dari langganan chat/Coding Plan desktop).
 2. Buat **API key** baru: nama `yubie-ops-copilot`. Salin sekali (simpan tempat aman pribadi).
 3. Isi saldo kecil (mis. USD 5) — pemakaian operator sangat kecil (ringkasan/draf).
-4. Model default yang dipakai kode: `glm-4.6` (bisa diganti `OPS_AI_MODEL=glm-4.5-air` untuk lebih murah).
+4. Model default yang dipakai kode: `glm-5.3-flash` (termurah, cukup untuk ringkasan/draf; bisa dinaikkan `OPS_AI_MODEL=glm-4.6` bila perlu penalaran berat).
 5. Provision ke VPS: baris `ZAI_API_KEY` di TAHAP 5.
 
 **Tanda Selesai:** key aktif di dashboard z.ai + file `ZAI_API_KEY` ada di VPS.

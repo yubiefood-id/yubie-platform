@@ -103,7 +103,10 @@ export class OpenAICompatibleOpsAIProvider implements OpsAIProvider {
 }
 
 export const ZAI_DEFAULT_BASE_URL = "https://api.z.ai/api/paas/v4";
-export const ZAI_DEFAULT_MODEL = "glm-4.6";
+// Owner direction 2026-11-12: prefer the cheap flash tier for operator drafts
+// (glm-5.3-flash ≈ $0.04/1M input, $0.078/1M output). Override per deployment
+// with OPS_AI_MODEL (e.g. glm-4.6 for heavier reasoning).
+export const ZAI_DEFAULT_MODEL = "glm-5.3-flash";
 
 /** Fail-closed: without an explicit provider AND key, nothing can be called. */
 export function createOpsAIProviderFromEnv(env: NodeJS.ProcessEnv = process.env): OpsAIProvider {
