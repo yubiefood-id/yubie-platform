@@ -59,9 +59,9 @@ test("searching an address and picking a suggestion fills every delivery field",
   await page.getByRole("option").first().click();
 
   await expect(page.getByRole("textbox", { name: "Alamat lengkap" })).toHaveValue(/Jl\. Raya Cibinong No\. 1/);
-  await expect(page.getByRole("combobox", { name: "Kota", exact: true })).toHaveValue("Kabupaten Bogor");
   await expect(page.getByRole("textbox", { name: "Kode pos" })).toHaveValue("16911");
   await expect(page.getByText(/Alamat terpilih dari pencarian/)).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Kota", exact: true })).toHaveCount(0);
   await expect(page.getByText(/🚚 Gratis ongkir — pengiriman ke Kabupaten Bogor gratis \(Rp0\)/)).toBeVisible();
 });
 
@@ -107,14 +107,23 @@ test("a logged-in customer gets name and WhatsApp prefilled from the default sav
   });
   await page.route("**/api/account/addresses", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: [
-      { id: "a2", isDefault: false, address: { recipientName: "Bukan Default", recipientPhone: "+6289999999999" } },
-      { id: "a1", isDefault: true, address: { recipientName: "Penerima Utama", recipientPhone: "+6281234567890" } },
+      { id: "a2", isDefault: false, pin: null, address: { recipientName: "Penerima Kedua", recipientPhone: "+6289999999999", fullAddress: "Jl. Kedua No. 2, Cibinong", city: "Kabupaten Bogor", postalCode: "16915" } },
+      { id: "a1", isDefault: true, pin: null, address: { recipientName: "Penerima Utama", recipientPhone: "+6281234567890", fullAddress: "Jl. Utama No. 1, Cibinong", city: "Kabupaten Bogor", postalCode: "16911" } },
     ] }) });
   });
   await openCheckout(page);
 
   await expect(page.getByLabel("Nama penerima")).toHaveValue("Penerima Utama");
   await expect(page.getByLabel("No. WhatsApp")).toHaveValue("+6281234567890");
+  // The default address now fills EVERY delivery field (the account default is
+  // the checkout default) and the picker shows it selected with the badge.
+  await expect(page.getByLabel("Alamat lengkap")).toHaveValue(/Jl\. Utama No\. 1/);
+  await expect(page.getByRole("textbox", { name: "Kode pos" })).toHaveValue("16911");
+  await expect(page.getByText(/🚚 Gratis ongkir — pengiriman ke Kabupaten Bogor gratis \(Rp0\)/)).toBeVisible();
+  const picker = page.locator(".saved-addresses");
+  await expect(picker).toBeVisible();
+  await expect(picker.locator(".address-default", { hasText: "Utama" })).toBeVisible();
+  await expect(picker.locator("li.selected")).toContainText("Jl. Utama No. 1");
 });
 
 test("the account prefill never overwrites what the customer already typed", async ({ page }) => {
@@ -126,7 +135,7 @@ test("the account prefill never overwrites what the customer already typed", asy
   await page.route("**/api/account/addresses", async (route) => {
     await gate;
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: [
-      { id: "a1", isDefault: true, address: { recipientName: "Penerima Utama", recipientPhone: "+6281234567890" } },
+      { id: "a1", isDefault: true, pin: null, address: { recipientName: "Penerima Utama", recipientPhone: "+6281234567890", fullAddress: "Jl. Utama No. 1, Cibinong", city: "Kabupaten Bogor", postalCode: "16911" } },
     ] }) });
   });
   await openCheckout(page);
@@ -135,4 +144,27 @@ test("the account prefill never overwrites what the customer already typed", asy
 
   await expect(page.getByLabel("No. WhatsApp")).toHaveValue("+6281234567890");
   await expect(page.getByLabel("Nama penerima")).toHaveValue("Nama Saya Sendiri");
+  await expect(page.getByLabel("Alamat lengkap")).toHaveValue("Jl. Utama No. 1, Cibinong");
+});
+
+test("picking another saved address switches every field", async ({ page }) => {
+  await page.route("**/api/auth/session", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { authenticated: true, csrfToken: "0".repeat(64), mapsAvailable: true } }) });
+  });
+  await page.route("**/api/account/addresses", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: [
+      { id: "a2", isDefault: false, pin: null, address: { recipientName: "Penerima Kedua", recipientPhone: "+6289999999999", fullAddress: "Jl. Kedua No. 2, Cibinong", city: "Kabupaten Bogor", postalCode: "16915" } },
+      { id: "a1", isDefault: true, pin: null, address: { recipientName: "Penerima Utama", recipientPhone: "+6281234567890", fullAddress: "Jl. Utama No. 1, Cibinong", city: "Kabupaten Bogor", postalCode: "16911" } },
+    ] }) });
+  });
+  await openCheckout(page);
+  await expect(page.getByLabel("Nama penerima")).toHaveValue("Penerima Utama");
+
+  await page.locator(".saved-address-option").filter({ hasText: "Jl. Kedua No. 2" }).click();
+
+  await expect(page.getByLabel("Nama penerima")).toHaveValue("Penerima Kedua");
+  await expect(page.getByLabel("No. WhatsApp")).toHaveValue("+6289999999999");
+  await expect(page.getByLabel("Alamat lengkap")).toHaveValue("Jl. Kedua No. 2, Cibinong");
+  await expect(page.getByRole("textbox", { name: "Kode pos" })).toHaveValue("16915");
+  await expect(page.locator(".saved-addresses li.selected")).toContainText("Jl. Kedua No. 2");
 });
