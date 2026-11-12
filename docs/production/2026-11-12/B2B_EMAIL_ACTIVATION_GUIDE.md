@@ -11,7 +11,7 @@ Setelah aktivasi: setiap submit form `/b2b` otomatis mengirim **(1)** email noti
 1. Login ke Namecheap → menu **Private Email** (atau https://privateemail.namecheap.com/ ) dengan akun admin domain.
 2. Periksa kuota mailbox dalam subscription terlebih dahulu. Mailbox tambahan **mungkin berbayar**; alias bukan mailbox terisolasi dengan autentikasi sendiri. Buat mailbox khusus mesin (setup → **Mail** → create mailbox):
    - Email: **`enquiry@yubiefood.com`**
-   - Password: buat password kuat. Di mailbox **Settings → Connect third-party apps**, aktifkan akses SMTP dan buat **application password** apabila diminta oleh Namecheap. Simpan application password secara privat sebagai `SMTP_PASSWORD` (jangan tempel ke chat, GitHub, atau log).
+   - Password: buat password master yang kuat untuk mailbox, lalu login ke https://privateemail.com/ → **Settings → Launch Security Center → App passwords → Create new password**. Beri label misalnya `yubie-production-worker`; simpan password aplikasi sekali tampil sebagai `SMTP_PASSWORD` (jangan tempel ke chat, GitHub, atau log). Di pengaturan **Connect third-party apps**, pastikan SMTP aktif.
 3. (Disarankan) Di pengaturan mailbox, aktifkan **DKIM** untuk domain (Email → Authentication/DKIM → enable, lalu pastikan record DNS yang diminta sudah ada di Cloudflare DNS). Ini meningkatkan kepercayaan inbox untuk email tanda terima ke pelanggan. Tidak memblokir aktivasi jika dilewati.
 4. Cek kuota pengiriman mailbox (Private Email punya limit per jam per mailbox). Volume enquiry B2B sangat kecil; batas bawaan cukup.
 5. Simpan nilai-nilai berikut untuk Bagian B:
