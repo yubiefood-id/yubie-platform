@@ -83,6 +83,19 @@ export class PostgresAssistantOutboxRepository {
     await this.database.db.update(assistantOutbox).set({status:"cancelled",lastError:"automation_off",updatedAt:at}).where(and(inArray(assistantOutbox.status,["pending","retry"]),sql`NOT (action_type='handoff' AND payload_json::jsonb->>'intent'='FOOD_SAFETY')`));
   }
 
+  // WA-02 D12: when a human takes over a conversation, every pending bot
+  // customer effect for that thread dies immediately. Internal handoff routing
+  // (incl. food safety) is not a customer effect and stays untouched.
+  async cancelPendingForConversation(provider: string, conversationRef: string, at: string) {
+    const rows = await this.database.db.update(assistantOutbox).set({status:"cancelled",lastError:"human_takeover",updatedAt:at}).where(and(
+      eq(assistantOutbox.provider,provider),
+      eq(assistantOutbox.conversationRef,conversationRef),
+      inArray(assistantOutbox.status,["pending","retry"]),
+      inArray(assistantOutbox.actionType,["reply","product_media"]),
+    )).returning({id:assistantOutbox.id});
+    return rows.length;
+  }
+
   async claimPending(limit = 10, id?: string, provider?: string) {
     return this.database.db.transaction(async tx=>{
       const rows=await tx.select().from(assistantOutbox).where(and(

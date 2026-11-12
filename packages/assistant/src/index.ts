@@ -1,4 +1,6 @@
 export * from "./ports.js";
+export * from "./ai-assist.js";
+export * from "./ops-ai.js";
 export * from "./intent-classifier.js";
 export * from "./risk-policy.js";
 export { POLICY_VERSION } from "./risk-policy.js";

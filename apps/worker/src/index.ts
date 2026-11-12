@@ -4,6 +4,8 @@ import { checkListingHealth, SystemClock, purgePhoneChallenges, purgeAddressPins
 import { createSupportProvider, HttpLinkHealthChecker, SmtpEmailSender } from "@yubie/integrations";
 import { closeDatabase, createWorkerRepositories, PostgresAssistantWorkRepository, PostgresTransactionManager, PostgresOperationsOutbox, PostgresGrowthRepository, PostgresAuditRepository } from "@yubie/persistence";
 import { processOperationsOutbox } from "./operations-outbox-handler.js";
+import { processGrowthCrm } from "./growth-crm-handler.js";
+import { processOutboundWhatsapp } from "./outbound-whatsapp-handler.js";
 import { runOperationsPaymentReconcile } from "./operations-reconcile-handler.js";
 import { processAssistantJob } from "./assistant-handler.js";
 import { startMetricsServer } from "./metrics-server.js";
@@ -136,6 +138,20 @@ async function start() {
   });
   await boss.schedule("operations.outbox", "* * * * *", {});
   await boss.send("operations.outbox", {});
+  // WA-04: project growth.b2b_lead_created into the CRM exactly once.
+  await boss.createQueue("growth.crm");
+  await boss.work("growth.crm", { batchSize: 1 }, async () => {
+    await processGrowthCrm(repos.database);
+  });
+  await boss.schedule("growth.crm", "* * * * *", {});
+  await boss.send("growth.crm", {});
+  // WA-05: approved outbound template gateway (no-ops while disabled).
+  await boss.createQueue("outbound.whatsapp");
+  await boss.work("outbound.whatsapp", { batchSize: 1 }, async () => {
+    await processOutboundWhatsapp(repos.database);
+  });
+  await boss.schedule("outbound.whatsapp", "* * * * *", {});
+  await boss.send("outbound.whatsapp", {});
   // ADR-016: B2B enquiry email drain. Created only when the SMTP config is
   // enabled, so the feature stays fully inert until the owner activates it.
   if (b2bEmailConfig) {

@@ -20,11 +20,19 @@ export type V2Effect =
   | {kind: "SEND_WEBSITE_LINK"; text: string; url: string; messageId: string}
   | {kind: "SEND_PRODUCT_MEDIA"; productId: string; assetId: string; caption: string; websiteUrl: string; catalogVersion: string; fallbackText: string}
   | {kind: "CREATE_HANDOFF"; destination: HandoffDestination; reason: string; intent: AssistantIntent; summary?: Record<string,unknown>}
+  // WA-02/03 tri-mode: the engine only ever REQUESTS an AI answer — it never
+  // calls a model and never sends. The deterministic worker owns reservation,
+  // generation, validation and enqueue decisions (ADR-015 proposed).
+  | {kind: "REQUEST_AI_ANSWER"; question: string; messageId: string}
+  | {kind: "ENTER_AI_MODE" | "EXIT_AI_MODE"; reason: string}
   | {kind: "SUPPRESS_REPLY" | "RESET_NAVIGATION"; reason: string};
 export interface V2Deps {
   knowledge: KnowledgeLookup;
   capabilities?: WebsiteCapabilities | undefined;
   resolveProduct?: ((id: string) => DiscoveryView | null) | undefined;
+  /** WA-02: when omitted or unavailable, the AI menu entry answers with a
+   * deterministic "not available" copy and no model is ever requested. */
+  aiPolicy?: {available: boolean} | undefined;
 }
 export function validWebsiteUrl(raw: string): boolean {
   try {const u=new URL(raw);return u.origin==="https://yubiefood.com" && !u.username && !u.password && !u.search && !u.hash && /^\/(?:products(?:\/yubie-(?:flour|shake|ppang|mie))?|account\/orders)$/.test(u.pathname);}catch{return false;}
@@ -34,6 +42,7 @@ export function validateV2Effects(effects: V2Effect[]): void {
     if("text" in e && (!e.text || e.text.length>4096)) throw new Error("invalid_effect_text");
     if(e.kind==="SEND_WEBSITE_LINK" && !validWebsiteUrl(e.url)) throw new Error("invalid_website_url");
     if(e.kind==="SEND_PRODUCT_MEDIA" && (!/^(flour|shake|ppang|mie)$/.test(e.productId) || !/^[a-zA-Z0-9_-]{1,96}$/.test(e.assetId) || e.caption.length>1024 || !validWebsiteUrl(e.websiteUrl))) throw new Error("invalid_media_effect");
+    if(e.kind==="REQUEST_AI_ANSWER" && (!e.question || e.question.length>2000)) throw new Error("invalid_ai_question");
   }
 }
 
@@ -46,6 +55,9 @@ export async function processV2(input: DeterministicTurnInput, deps: V2Deps): Pr
   const owned=["HUMAN_ACTIVE","HANDOFF_REQUESTED","QUEUED","RESOLVED"].includes(input.conversationState);
   const finish=(action: DeterministicAction): DeterministicTurnResult => {validateV2Effects(effects);return {action,nextState:s,metrics,effects};};
   const handoff=(destination: HandoffDestination,reason: string,intent: AssistantIntent): DeterministicTurnResult => {
+    // A handoff always ends an active AI session; the worker records the mode
+    // transition (human ownership itself lives in Zammad + conversation_sessions).
+    if(s.context.aiActive===true)effects.push({kind:"EXIT_AI_MODE",reason:"handoff"});
     effects.push({kind:"CREATE_HANDOFF",destination,reason,intent,...(destination==="SALES_PARTNERSHIP" && s.context.consent===true ? {summary:{...s.context}}:{})});
     let text=owned?"":V2_COPY[destination==="FOOD_SAFETY"?"safety":destination==="SALES_PARTNERSHIP"?"sales":"handoff"]!;
     if(text) {
@@ -61,12 +73,24 @@ export async function processV2(input: DeterministicTurnInput, deps: V2Deps): Pr
   if(matchesHealthEscalation(n)) return handoff("CUSTOMER_SUPPORT","health_escalation","ALLERGEN_OR_HEALTH");
   const supportEscalation=matchSupportEscalation(n);
   if(supportEscalation)return handoff("CUSTOMER_SUPPORT",supportEscalation.reason,supportEscalation.intent);
+  // WA-02: the AI entry exists in the menu but stays a deterministic dead end
+  // while the AI policy is not enabled. Zero model involvement either way.
+  if(s.nodeId==="HOME" && n==="7" && !deps.aiPolicy?.available) {
+    const text=V2_COPY.ai_unavailable!+navigationFooter;
+    effects.push({kind:"REPLY_TEXT",text,messageId:"v2.ai.unavailable"});
+    metrics.push("trimode_ai_unavailable_total");
+    return finish({kind:"reply",text,nodeId:"HOME",intent:"OTHER",risk:"GREEN"});
+  }
   let prefix="";
   let target: string|undefined;
   if(s.flowVersion!==V2_VERSION || !V2_NODES[s.nodeId]) {
     s={nodeId:"HOME",flowVersion:V2_VERSION,context:{},fallbackCount:0};
     effects.push({kind:"RESET_NAVIGATION",reason:"flow_version"});prefix=V2_COPY.migration+"\n\n";target="HOME";
-  } else if(V2_ALIASES[n]) target=V2_ALIASES[n];
+  } else if(s.nodeId==="AI_ACTIVE" && (V2_ALIASES[n]==="HOME" || ["9","kembali","back","keluar","exit","stop"].includes(n))) {
+    // Inside an AI session, navigation aliases that leave the session (and
+    // explicit exit words) still work; other aliases stay questions.
+    target="HOME";
+  } else if(s.nodeId!=="AI_ACTIVE" && V2_ALIASES[n]) target=V2_ALIASES[n];
   else if(["9","kembali","back"].includes(n)) target=V2_NODES[s.nodeId]!.parent;
   else if(s.nodeId==="B2B_COLLECT") {
     const index=Number(s.context.collectIndex??0);
@@ -77,6 +101,23 @@ export async function processV2(input: DeterministicTurnInput, deps: V2Deps): Pr
     }
   } else target=V2_NODES[s.nodeId]?.choices[n];
   if(!target) {
+    // In an AI session every non-navigation free text is a question for the
+    // bounded AI helper — the engine emits a REQUEST only; the deterministic
+    // worker owns budget reservation, generation and validation.
+    if(s.nodeId==="AI_ACTIVE" && n) {
+      if(deps.aiPolicy?.available) {
+        effects.push({kind:"REQUEST_AI_ANSWER",question:input.text.trim().slice(0,2000),messageId:"v2.ai.request"});
+        metrics.push("trimode_ai_request_total");
+        return finish({kind:"reply",text:"",nodeId:s.nodeId,intent:"OTHER",risk:"GREEN"});
+      }
+      // Fail closed: AI unreachable → deterministic exit, never a stuck customer.
+      effects.push({kind:"EXIT_AI_MODE",reason:"ai_unavailable"});
+      s={...s,nodeId:"HOME",context:{},fallbackCount:0};
+      const text=V2_COPY.ai_unavailable!+navigationFooter;
+      effects.push({kind:"REPLY_TEXT",text,messageId:"v2.ai.unavailable"});
+      metrics.push("trimode_ai_unavailable_total");
+      return finish({kind:"reply",text,nodeId:"HOME",intent:"OTHER",risk:"GREEN"});
+    }
     const match=n.match(/^(?:beli|harga|info|mau|produk) (?:yubie )?(tepung|flour|shake|ppang|mie)$/);
     if(match) {s.context.productId=match[1]==="tepung"?"flour":match[1];target="PRODUCT_DETAIL";}
   }
@@ -90,6 +131,18 @@ export async function processV2(input: DeterministicTurnInput, deps: V2Deps): Pr
   if(s.nodeId==="PRODUCT_MENU" && target==="PRODUCT_DETAIL" && /^[1-4]$/.test(n))s.context.productId=["flour","shake","ppang","mie"][Number(n)-1];
   if(s.nodeId==="B2B_MENU" && target==="B2B_CONSENT")s.context={category:["bulk","reseller","sample-development","partnership"][Number(n)-1]};
   if(s.nodeId==="B2B_CONSENT" && target==="B2B_COLLECT")s.context={...s.context,consent:true,collectIndex:0};
+  // WA-02: explicit customer consent opens the AI session (worker persists the
+  // mode transition); leaving to HOME closes it. The HOME/B2B context reset
+  // below clears the aiActive flag alongside this audit effect.
+  if(s.nodeId==="AI_INTRO" && target==="AI_ACTIVE") {
+    s.context={...s.context,aiActive:true};
+    effects.push({kind:"ENTER_AI_MODE",reason:"customer_opt_in"});
+    metrics.push("trimode_ai_enter_total");
+  }
+  if(s.context.aiActive===true && target==="HOME") {
+    effects.push({kind:"EXIT_AI_MODE",reason:"customer_exit"});
+    metrics.push("trimode_ai_exit_total");
+  }
   if(target==="HOME" || target==="B2B_MENU")s.context={};
   if(target==="FOOD_SAFETY_HANDOFF")return handoff("FOOD_SAFETY","food_safety","FOOD_SAFETY");
   if(target==="HUMAN_HANDOFF")return handoff("CUSTOMER_SUPPORT","support_request","HUMAN_REQUEST");

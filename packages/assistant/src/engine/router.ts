@@ -44,6 +44,7 @@ export function createConversationEngineRouter(deps: DeterministicEngineDeps & {
   if (deps.capabilities) routerDeps.capabilities = deps.capabilities;
   if (deps.resolveProduct) routerDeps.resolveProduct = deps.resolveProduct;
   if (deps.getPurchaseOptions) routerDeps.getPurchaseOptions = deps.getPurchaseOptions;
+  if (deps.aiPolicy) routerDeps.aiPolicy = deps.aiPolicy;
   if (deps.legacyProcessor) routerDeps.legacyProcessor = deps.legacyProcessor;
   return new ConversationEngineRouter(routerDeps);
 }

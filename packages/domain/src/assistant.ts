@@ -8,6 +8,21 @@ export type ConversationState =
 
 export const BOT_REENTRY_COOLDOWN_MS = 30 * 60 * 1000;
 
+// WA-02 tri-mode: the customer-selected conversation mode, kept separate from
+// human-control ownership (conversation_sessions.state + Zammad ticket).
+export type CustomerConversationMode = "DETERMINISTIC" | "AI_OPT_IN";
+
+export type SupportPriority = "P0_FOOD_SAFETY" | "P1_EXPLICIT_HUMAN" | "P2_B2B" | "P3_GENERAL";
+
+// Proposed internal triage targets (GOAL_PLAN §3). NOT approved SLA promises:
+// never surface these to customers as response-time commitments.
+export const PRIORITY_NEXT_ACTION_MS: Record<SupportPriority, number> = {
+  P0_FOOD_SAFETY: 15 * 60 * 1000,
+  P1_EXPLICIT_HUMAN: 60 * 60 * 1000,
+  P2_B2B: 24 * 60 * 60 * 1000,
+  P3_GENERAL: 24 * 60 * 60 * 1000,
+};
+
 export type AssistantIntent =
   | "PRODUCT_INFO"
   | "PRODUCT_DISCOVERY"

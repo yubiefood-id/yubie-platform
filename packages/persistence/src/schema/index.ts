@@ -1,4 +1,4 @@
-import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb, boolean, foreignKey, check, primaryKey } from "drizzle-orm/pg-core";
+import { date, index, pgEnum, pgTable, text, timestamp, uniqueIndex, integer, jsonb, boolean, foreignKey, check, primaryKey, bigint } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { PhoneChallenge, AuthIdentity, AddressDetails, DeliveryPin, PromotionCampaign, PromotionRedemption } from "@yubie/domain";
 
@@ -359,6 +359,243 @@ export const conversationFlowEvents = pgTable("conversation_flow_events", {
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
 }, (table) => [
   index("conversation_flow_events_thread_created").on(table.provider, table.providerThreadId, table.createdAt),
+]);
+
+// WA-03: bounded AI usage accounting. Reservation rows are idempotent by
+// request_id; period counters move in the same locked transaction.
+export const aiUsageReservations = pgTable("ai_usage_reservations", {
+  id: text("id").primaryKey(),
+  requestId: text("request_id").notNull(),
+  contactHash: text("contact_hash").notNull(),
+  providerThreadId: text("provider_thread_id").notNull(),
+  dayKey: text("day_key").notNull(),
+  monthKey: text("month_key").notNull(),
+  reservedInputTokens: integer("reserved_input_tokens").notNull(),
+  reservedOutputTokens: integer("reserved_output_tokens").notNull(),
+  actualInputTokens: integer("actual_input_tokens"),
+  actualOutputTokens: integer("actual_output_tokens"),
+  model: text("model").notNull(),
+  priceVersion: text("price_version").notNull(),
+  estimatedCostMicrousd: bigint("estimated_cost_microusd", { mode: "number" }).notNull().default(0),
+  actualCostMicrousd: bigint("actual_cost_microusd", { mode: "number" }),
+  state: text("state").notNull().default("reserved"),
+  failureReason: text("failure_reason"),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("ai_usage_reservations_request").on(table.requestId),
+  index("ai_usage_reservations_contact").on(table.contactHash, table.createdAt),
+]);
+
+export const aiUsagePeriods = pgTable("ai_usage_periods", {
+  id: text("id").primaryKey(),
+  subjectHash: text("subject_hash").notNull(),
+  periodKey: text("period_key").notNull(),
+  scope: text("scope").notNull(),
+  requestCount: integer("request_count").notNull().default(0),
+  reservedTokens: integer("reserved_tokens").notNull().default(0),
+  actualTokens: integer("actual_tokens").notNull().default(0),
+  costMicrousd: bigint("cost_microusd", { mode: "number" }).notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("ai_usage_periods_subject").on(table.subjectHash, table.periodKey, table.scope),
+]);
+
+// WA-04: B2B CRM projection (exactly-once per lead; classification fields +
+// contact coordinates only, never free-text need/message).
+export const b2bAccounts = pgTable("b2b_accounts", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  normalizedName: text("normalized_name").notNull(),
+  city: text("city"),
+  businessType: text("business_type"),
+  source: text("source"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("b2b_accounts_normalized_name").on(table.normalizedName),
+]);
+
+export const b2bContacts = pgTable("b2b_contacts", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull().references(() => b2bAccounts.id),
+  name: text("name"),
+  email: text("email"),
+  whatsapp: text("whatsapp"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("b2b_contacts_email").on(table.email).where(sql`${table.email} IS NOT NULL`),
+  uniqueIndex("b2b_contacts_whatsapp").on(table.whatsapp).where(sql`${table.whatsapp} IS NOT NULL`),
+]);
+
+export const b2bOpportunities = pgTable("b2b_opportunities", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull().references(() => b2bAccounts.id),
+  leadId: text("lead_id").notNull(),
+  stage: text("stage").notNull().default("new"),
+  owner: text("owner").notNull().default("unassigned"),
+  interest: text("interest"),
+  intent: text("intent"),
+  city: text("city"),
+  source: text("source"),
+  nextActionAt: timestamp("next_action_at", { withTimezone: true, mode: "string" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("b2b_opportunities_lead").on(table.leadId),
+  index("b2b_opportunities_stage").on(table.stage, table.nextActionAt),
+]);
+
+export const b2bTasks = pgTable("b2b_tasks", {
+  id: text("id").primaryKey(),
+  opportunityId: text("opportunity_id").notNull().references(() => b2bOpportunities.id),
+  title: text("title").notNull(),
+  dueAt: timestamp("due_at", { withTimezone: true, mode: "string" }).notNull(),
+  status: text("status").notNull().default("open"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  index("b2b_tasks_open").on(table.dueAt).where(sql`${table.status} = 'open'`),
+]);
+
+// WA-05: approved outbound template gateway. Dispatch is disabled by default;
+// every attempt rechecks consent, approval, template status, expiry and caps.
+export const outboundTemplates = pgTable("outbound_templates", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  version: text("version").notNull(),
+  language: text("language").notNull().default("id"),
+  bodyText: text("body_text").notNull(),
+  status: text("status").notNull().default("draft"),
+  approvedBy: text("approved_by"),
+  approvedAt: timestamp("approved_at", { withTimezone: true, mode: "string" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("outbound_templates_name_version").on(table.name, table.version),
+]);
+
+export const outboundDrafts = pgTable("outbound_drafts", {
+  id: text("id").primaryKey(),
+  templateId: text("template_id").notNull().references(() => outboundTemplates.id),
+  purpose: text("purpose").notNull(),
+  contactId: text("contact_id").notNull().references(() => b2bContacts.id),
+  variablesJsonb: jsonb("variables_jsonb").notNull().default({}),
+  contentHash: text("content_hash").notNull(),
+  status: text("status").notNull().default("draft"),
+  approvedBy: text("approved_by"),
+  approvedAt: timestamp("approved_at", { withTimezone: true, mode: "string" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }),
+  costCapMicrousd: bigint("cost_cap_microusd", { mode: "number" }).notNull().default(0),
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  index("outbound_drafts_dispatch").on(table.status, table.expiresAt),
+]);
+
+export const outboundSends = pgTable("outbound_sends", {
+  id: text("id").primaryKey(),
+  draftId: text("draft_id").notNull().references(() => outboundDrafts.id),
+  provider: text("provider").notNull().default("meta-cloud-api"),
+  providerMessageId: text("provider_message_id"),
+  state: text("state").notNull().default("pending"),
+  lastError: text("last_error"),
+  costMicrousd: bigint("cost_microusd", { mode: "number" }).notNull().default(0),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: "string" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("outbound_sends_draft").on(table.draftId),
+  index("outbound_sends_reconcile").on(table.state, table.nextAttemptAt),
+]);
+
+// Operator-AI pass: declarative channel bindings + ops-copilot call history.
+export const whatsappChannelBindings = pgTable("whatsapp_channel_bindings", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull().default("meta-cloud-api"),
+  phoneE164: text("phone_e164").notNull(),
+  wabaId: text("waba_id"),
+  zammadChannelId: text("zammad_channel_id"),
+  exclusiveWriter: text("exclusive_writer").notNull().default("zammad"),
+  status: text("status").notNull().default("disabled"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("whatsapp_channel_bindings_phone").on(table.provider, table.phoneE164),
+]);
+
+export const opsAiCalls = pgTable("ops_ai_calls", {
+  id: text("id").primaryKey(),
+  requestId: text("request_id").notNull(),
+  operator: text("operator").notNull(),
+  action: text("action").notNull(),
+  resourceType: text("resource_type").notNull(),
+  resourceId: text("resource_id").notNull(),
+  model: text("model").notNull(),
+  inputTokens: integer("input_tokens").notNull(),
+  outputTokens: integer("output_tokens").notNull(),
+  responseRedacted: text("response_redacted").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  index("ops_ai_calls_operator_time").on(table.operator, table.createdAt),
+]);
+
+// WA-02 tri-mode: customer-selected mode per conversation, separate from
+// human-control ownership in conversation_sessions (Zammad stays authority).
+export const conversationModeState = pgTable("conversation_mode_state", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull(),
+  providerThreadId: text("provider_thread_id").notNull(),
+  mode: text("mode").notNull().default("DETERMINISTIC"),
+  policyVersion: text("policy_version").notNull().default("trimode-1"),
+  selectedBy: text("selected_by").notNull().default("customer"),
+  selectedAt: timestamp("selected_at", { withTimezone: true, mode: "string" }).notNull(),
+  lastCustomerAt: timestamp("last_customer_at", { withTimezone: true, mode: "string" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("conversation_mode_state_provider_thread").on(table.provider, table.providerThreadId),
+]);
+
+export const conversationModeEvents = pgTable("conversation_mode_events", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull(),
+  providerThreadId: text("provider_thread_id").notNull(),
+  fromMode: text("from_mode"),
+  toMode: text("to_mode").notNull(),
+  triggerKind: text("trigger_kind").notNull(),
+  detail: text("detail"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  index("conversation_mode_events_thread_created").on(table.provider, table.providerThreadId, table.createdAt),
+]);
+
+// WA-02: internal triage projection for human-first handoffs. Assignment/owner
+// truth stays in Zammad; this row carries priority, due time and ack evidence.
+export const prioritySupportTasks = pgTable("priority_support_tasks", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull().default("zammad"),
+  providerThreadId: text("provider_thread_id").notNull(),
+  ticketId: text("ticket_id").notNull(),
+  sourceOutboxId: text("source_outbox_id").notNull(),
+  priority: text("priority").notNull(),
+  groupId: text("group_id"),
+  reason: text("reason").notNull(),
+  nextActionAt: timestamp("next_action_at", { withTimezone: true, mode: "string" }).notNull(),
+  ackAt: timestamp("ack_at", { withTimezone: true, mode: "string" }),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "string" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("priority_support_tasks_source_outbox").on(table.sourceOutboxId),
+  index("priority_support_tasks_open").on(table.priority, table.createdAt),
+  index("priority_support_tasks_thread").on(table.provider, table.providerThreadId),
 ]);
 
 // ADR-012: Google identity + first-party orders/payments (Xendit).

@@ -234,6 +234,18 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     if (opsResponse) return opsResponse;
   }
 
+  if (url.pathname.startsWith("/ops/whatsapp") && process.env.DATABASE_URL) {
+    const { handleOpsWhatsApp } = await import("./ops-whatsapp.js");
+    const opsResponse = await handleOpsWhatsApp(request, getOperationsDatabase());
+    if (opsResponse) return opsResponse;
+  }
+
+  if (url.pathname.startsWith("/ops/ai") && process.env.DATABASE_URL) {
+    const { handleOpsAI } = await import("./ops-ai.js");
+    const opsResponse = await handleOpsAI(request, getOperationsDatabase());
+    if (opsResponse) return opsResponse;
+  }
+
   if (url.pathname.startsWith("/ops/payments")) {
     const { handleOpsPayments } = await import("./ops-payments.js");
     const opsResponse = await handleOpsPayments(
