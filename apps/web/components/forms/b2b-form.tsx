@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import type { B2BLead } from "@yubie/validation";
@@ -40,6 +40,7 @@ export function B2BForm() {
   const [sent, setSent] = useState(false);
   const [failed, setFailed] = useState(false);
   const [sending, setSending] = useState(false);
+  const sendInFlightRef = useRef(false);
   // An editable website preview (not a mail-client draft). No server write
   // occurs until the prospect explicitly confirms the reviewed payload.
   const [review, setReview] = useState<Data | null>(null);
@@ -57,7 +58,8 @@ export function B2BForm() {
   }, [defaultInterest, setValue]);
 
   const submit = async (data: Data) => {
-    if (sending) return;
+    if (sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
     setSending(true);
     setFailed(false);
     try {
@@ -68,6 +70,7 @@ export function B2BForm() {
     } catch {
       setFailed(true);
     } finally {
+      sendInFlightRef.current = false;
       setSending(false);
     }
   };
