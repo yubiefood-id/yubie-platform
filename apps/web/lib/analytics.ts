@@ -13,6 +13,7 @@ export type YubieAnalyticsEvent =
   | "feedback_form_click"
   | "b2b_sample_click"
   | "b2b_product_development_click"
+  | "b2b_enquiry_submit"
   | "product_waitlist_submit"
   | "hero_cta_click"
   | "add_to_cart"

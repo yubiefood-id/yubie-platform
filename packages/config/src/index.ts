@@ -829,6 +829,8 @@ export interface ServiceRuntimeConfig {
   commerce?: CommerceRuntimeConfig;
   /** Present for the api and worker services (quotes/routes vs booking jobs). */
   shipping?: ShippingRuntimeConfig;
+  /** Present for the worker service when B2B enquiry email delivery is enabled. */
+  email?: import("./email-runtime.js").B2bEmailRuntimeConfig;
 }
 
 export type ServiceRuntimeConfigInspection =
@@ -861,6 +863,7 @@ export function parseServiceRuntimeConfig(env: RuntimeEnvSource = process.env, s
 
   let commerce: CommerceRuntimeConfig | undefined;
   let shipping: ShippingRuntimeConfig | undefined;
+  let email: import("./email-runtime.js").B2bEmailRuntimeConfig | undefined;
   if (service === "api" || service === "worker") {
     try {
       commerce = parseCommerceRuntimeConfig(env);
@@ -869,6 +872,14 @@ export function parseServiceRuntimeConfig(env: RuntimeEnvSource = process.env, s
     }
     try { parseIdentityRuntimeConfig(env, service); } catch (error) { errors.push(configMessage(error)); }
     if (service === "api") { try { parseDeliveryMapsConfig(env); } catch (error) { errors.push(configMessage(error)); } }
+    if (service === "worker") {
+      try {
+        const parsedEmail = parseEmailRuntimeConfig(env, "worker");
+        if (parsedEmail) email = parsedEmail;
+      } catch (error) {
+        errors.push(configMessage(error));
+      }
+    }
     try {
       shipping = parseShippingRuntimeConfig(env);
     } catch (error) {
@@ -919,7 +930,7 @@ export function parseServiceRuntimeConfig(env: RuntimeEnvSource = process.env, s
     throw new RuntimeConfigError(errors.join("; "));
   }
 
-  return { service, env: yubieEnv, supportProvider, ...(commerce ? { commerce } : {}), ...(shipping ? { shipping } : {}) };
+  return { service, env: yubieEnv, supportProvider, ...(commerce ? { commerce } : {}), ...(shipping ? { shipping } : {}), ...(email ? { email } : {}) };
 }
 
 /** Non-throwing variant for readiness endpoints and operator tooling. */
@@ -936,6 +947,8 @@ export function inspectServiceRuntimeConfig(env: RuntimeEnvSource = process.env,
 export * from "./yubi-capabilities.js";
 export * from "./identity-runtime.js";
 export * from "./launch.js";
+export * from "./email-runtime.js";
 import { parseIdentityRuntimeConfig } from "./identity-runtime.js";
+import { parseEmailRuntimeConfig } from "./email-runtime.js";
 export * from "./delivery-maps.js";
 import { parseDeliveryMapsConfig } from "./delivery-maps.js";

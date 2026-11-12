@@ -331,6 +331,27 @@ export interface InventoryRepository {
 
 // --- Growth + consent (newsletter / waitlist / B2B) ---
 
+/** Stored B2B lead, rehydratable by async consumers — outbox payloads stay PII-free. */
+export interface B2bLeadRecord {
+  id: string;
+  name: string;
+  business: string;
+  type: string;
+  city: string;
+  email: string;
+  whatsapp: string;
+  need: string | null;
+  intent: string;
+  interest: string;
+  message: string | null;
+  status: string;
+  source: string;
+  consentVersion: string;
+  consentedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /**
  * Durable growth + consent storage. Every submission commits its business
  * row, a consent-ledger entry and (for B2B) an outbox event in ONE
@@ -357,6 +378,42 @@ export interface GrowthRepository {
     consentedAt: string;
   }): Promise<UseCaseResult<{ outcome: "created" }>>;
   appendConsent(entry: { id: string; subjectType: string; subjectKey: string; purpose: string; action: string; consentVersion: string; source: string; occurredAt: string }): Promise<UseCaseResult<null>>;
+  /** Async consumers (worker email delivery) rehydrate the full lead by id. */
+  getB2bLeadById(id: string): Promise<UseCaseResult<B2bLeadRecord | null>>;
+  /** Rolling-hour submission counts for the outbound-email budget; email omitted = global. */
+  countRecentB2bLeads(since: string, email?: string): Promise<number>;
+}
+
+// --- Outbound email (B2B enquiry notification + customer acknowledgment) ---
+
+export type EmailSendStatus = "accepted" | "failed" | "ambiguous";
+
+export interface EmailSendInput {
+  from: string;
+  to: string[];
+  /** Customer reply routing: notification replies go to the lead, ack replies to the team inbox. */
+  replyTo?: string;
+  subject: string;
+  text: string;
+  html?: string;
+}
+
+export interface EmailSendResult {
+  status: EmailSendStatus;
+  providerMessageId?: string | null;
+  /** Bounded diagnostic code only — never message content or recipient data. */
+  errorCode?: string;
+}
+
+/**
+ * Provider-neutral outbound email boundary. Contract mirrors the support
+ * provider: "accepted" = the transport took the message; "failed" = a
+ * DEFINITIVE provider refusal (permanent SMTP 5xx) — retries cannot help;
+ * "ambiguous" = timeout/transport outcome unknown — a retry may duplicate the
+ * message, which is acceptable for the two internal/first-party recipients.
+ */
+export interface EmailSender {
+  send(input: EmailSendInput): Promise<EmailSendResult>;
 }
 
 /** Repositories sharing one transaction, handed to TransactionManager work. */

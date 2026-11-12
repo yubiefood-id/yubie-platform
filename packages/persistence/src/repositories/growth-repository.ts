@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { ok, type UseCaseResult } from "@yubie/domain";
-import type { GrowthRepository } from "@yubie/application";
+import type { B2bLeadRecord, GrowthRepository } from "@yubie/application";
 import type { Database } from "../client.js";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { b2bLeads, consentLedger, newsletterSubscriptions, productWaitlistEntries } from "../schema/index.js";
 
 /**
@@ -100,5 +101,39 @@ export class PostgresGrowthRepository implements GrowthRepository {
       occurredAt: entry.occurredAt,
     });
     return ok(null);
+  }
+
+  async getB2bLeadById(id: string): Promise<UseCaseResult<B2bLeadRecord | null>> {
+    const rows = await this.database.db.select().from(b2bLeads).where(eq(b2bLeads.id, id)).limit(1);
+    const row = rows[0];
+    if (!row) return ok(null);
+    return ok({
+      id: row.id,
+      name: row.name,
+      business: row.business,
+      type: row.type,
+      city: row.city,
+      email: row.email,
+      whatsapp: row.whatsapp,
+      need: row.need,
+      intent: row.intent,
+      interest: row.interest,
+      message: row.message,
+      status: row.status,
+      source: row.source,
+      consentVersion: row.consentVersion,
+      consentedAt: row.consentedAt,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    });
+  }
+
+  /** Case-insensitive rolling-hour count; email omitted counts globally. */
+  async countRecentB2bLeads(since: string, email?: string): Promise<number> {
+    const condition = email
+      ? and(gte(b2bLeads.createdAt, since), sql`lower(${b2bLeads.email}) = ${email.toLowerCase()}`)
+      : gte(b2bLeads.createdAt, since);
+    const rows = await this.database.db.select({ total: sql<number>`count(*)::int` }).from(b2bLeads).where(condition);
+    return rows[0]?.total ?? 0;
   }
 }

@@ -151,6 +151,26 @@ export async function submitB2bLead(
       payloadJson: JSON.stringify({ leadId, business: input.business, intent: input.intent, city: input.city, type: input.type }),
       availableAt: now,
     });
+    // Email delivery rides its own event types (not growth.b2b_lead_created)
+    // so the future CRM projection consumer never competes for the same
+    // outbox rows. Payloads carry the lead id only; the worker rehydrates the
+    // full lead from storage.
+    await repos.outbox.enqueue({
+      eventType: "growth.b2b_enquiry_email_requested",
+      aggregateType: "b2b_lead",
+      aggregateId: leadId,
+      dedupeKey: `b2b_enquiry_email:${leadId}`,
+      payloadJson: JSON.stringify({ leadId }),
+      availableAt: now,
+    });
+    await repos.outbox.enqueue({
+      eventType: "growth.b2b_enquiry_ack_requested",
+      aggregateType: "b2b_lead",
+      aggregateId: leadId,
+      dedupeKey: `b2b_enquiry_ack:${leadId}`,
+      payloadJson: JSON.stringify({ leadId }),
+      availableAt: now,
+    });
     await repos.audit.append({ action: "b2b.lead_created", resourceType: "b2b_lead", resourceId: leadId, actor: "web", occurredAt: now });
     return result;
   });
