@@ -25,6 +25,8 @@ export const b2bLeadSchema = z.object({
   interest: z.string().trim().min(1).max(120),
   message: z.string().trim().max(1000).optional(),
   consent: z.literal(true),
+  /** Honeypot: absent from the rendered form contract; a filled value is a bot. */
+  website: z.string().max(200).optional(),
 });
 
 export const checkoutLineSchema = z.object({

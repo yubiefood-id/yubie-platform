@@ -50,24 +50,38 @@ test("activate location autofills the address and free-shipping city from the se
   await page.getByLabel("Email").fill("browser-test@example.invalid");
   await page.getByLabel("No. WhatsApp").fill("080000000000");
 
-  // The city is a dropdown of the server's covered cities, with the free-ongkir
-  // instruction rendered directly under the field.
-  await expect(page.getByRole("combobox", { name: "Kota", exact: true })).toContainText("Kabupaten Bogor");
-  await expect(page.getByText(/Gratis ongkir \(Rp0\) saat ini tersedia untuk: Kabupaten Bogor/)).toBeVisible();
+  await expect(page.getByText(/Kota pengiriman terisi otomatis/)).toBeVisible();
   await page.getByRole("button", { name: "📍 Aktifkan lokasi saya" }).click();
 
   await expect(page.getByRole("textbox", { name: "Alamat lengkap" })).toHaveValue(/Cibinong/);
-  await expect(page.getByRole("combobox", { name: "Kota", exact: true })).toHaveValue("Kabupaten Bogor");
   await expect(page.getByRole("textbox", { name: "Kode pos" })).toHaveValue("16911");
   await expect(page.getByText(/Lokasi terdeteksi \(±30 m\)/)).toBeVisible();
+  // City has no manual field: the free-ongkir hint proves it resolved to the
+  // approved coverage string ("Kabupaten Bogor") from the GPS preview.
+  await expect(page.getByText(/🚚 Gratis ongkir — pengiriman ke Kabupaten Bogor gratis \(Rp0\)/)).toBeVisible();
   await expect(page.getByText(/Gratis ongkir ke Kabupaten Bogor/)).toBeVisible();
 });
 
-test("picking the covered city from the dropdown selects free shipping without geolocation", async ({ page }) => {
+test("an uncovered GPS city prices honestly without a manual city field", async ({ page }) => {
+  await page.route("**/api/locations/reverse-geocode", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      ok: true,
+      data: {
+        label: "Jl. Margonda Raya No. 1, Depok, Kota Bogor, Jawa Barat 16423",
+        latitude: -6.4, longitude: 106.8,
+        address: { province: "Jawa Barat", city: "Kota Bogor", district: "Beji", postalCode: "16423" },
+      },
+    }) });
+  });
   await page.goto("/products");
   await page.getByRole("button", { name: "Tambah", exact: true }).first().click();
   await page.goto("/checkout");
-  await page.getByRole("combobox", { name: "Kota", exact: true }).selectOption("Kabupaten Bogor");
-  await expect(page.getByRole("combobox", { name: "Kota", exact: true })).toHaveValue("Kabupaten Bogor");
-  await expect(page.getByText(/🚚 Gratis ongkir — pengiriman ke Kabupaten Bogor gratis \(Rp0\)/)).toBeVisible();
+  await page.getByRole("button", { name: "📍 Aktifkan lokasi saya" }).click();
+
+  await expect(page.getByRole("textbox", { name: "Alamat lengkap" })).toHaveValue(/Margonda/);
+  await expect(page.getByRole("textbox", { name: "Kode pos" })).toHaveValue("16423");
+  // No city combobox exists at all; the uncovered destination shows the honest
+  // coverage list and the courier pricing note (Biteship inert in this tier).
+  await expect(page.getByRole("combobox", { name: "Kota", exact: true })).toHaveCount(0);
+  await expect(page.getByText(/Gratis ongkir \(Rp0\) saat ini tersedia untuk: Kabupaten Bogor\. Di luar area itu/)).toBeVisible();
 });

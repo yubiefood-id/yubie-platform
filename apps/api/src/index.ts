@@ -412,6 +412,27 @@ async function routeRequest(request: Request, requestId: string): Promise<Respon
     if (!body.ok) return tooLarge();
     const parsed = b2bLeadSchema.safeParse(body.value);
     if (!parsed.success) return json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    // Honeypot: the real form never renders a fillable "website" field, so a
+    // filled value means a bot — quiet 201, nothing persisted, nothing emailed.
+    if (parsed.data.website && parsed.data.website.trim().length > 0) {
+      logEvent("api.b2b_honeypot_hit", { requestId });
+      return json({ ok: true, data: { outcome: "created" } }, { status: 201 });
+    }
+    // Outbound-email budget (rolling hour): every accepted lead now fans out
+    // into emails, so submissions are capped per mailbox and globally by
+    // counting durable leads — schema-free, no PII stored beyond the lead row
+    // itself. Races may slightly overrun; the hard internal recipient makes
+    // that acceptable. A broken count must not block the durable submission —
+    // the write below still fails closed if storage is down.
+    try {
+      const since = new Date(Date.now() - 3_600_000).toISOString();
+      const perEmail = await ctx.tx.run("growth.b2b_rate_limit", (repos) => repos.growth.countRecentB2bLeads(since, parsed.data.email));
+      if (perEmail >= 3) return json({ ok: false, code: "RATE_LIMITED" }, { status: 429, headers: { "retry-after": "3600" } });
+      const globally = await ctx.tx.run("growth.b2b_rate_limit", (repos) => repos.growth.countRecentB2bLeads(since));
+      if (globally >= 50) return json({ ok: false, code: "RATE_LIMITED" }, { status: 429, headers: { "retry-after": "600" } });
+    } catch {
+      logEvent("api.b2b_rate_limit_unavailable", { requestId });
+    }
     const result = await submitB2bLead(
       {
         name: parsed.data.name,

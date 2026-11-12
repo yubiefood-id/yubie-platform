@@ -1,8 +1,8 @@
 import PgBoss from "pg-boss";
 import { inspectServiceRuntimeConfig } from "@yubie/config";
 import { checkListingHealth, SystemClock, purgePhoneChallenges, purgeAddressPins } from "@yubie/application";
-import { createSupportProvider, HttpLinkHealthChecker } from "@yubie/integrations";
-import { closeDatabase, createWorkerRepositories, PostgresAssistantWorkRepository, PostgresTransactionManager, PostgresOperationsOutbox } from "@yubie/persistence";
+import { createSupportProvider, HttpLinkHealthChecker, SmtpEmailSender } from "@yubie/integrations";
+import { closeDatabase, createWorkerRepositories, PostgresAssistantWorkRepository, PostgresTransactionManager, PostgresOperationsOutbox, PostgresGrowthRepository, PostgresAuditRepository } from "@yubie/persistence";
 import { processOperationsOutbox } from "./operations-outbox-handler.js";
 import { processGrowthCrm } from "./growth-crm-handler.js";
 import { processOutboundWhatsapp } from "./outbound-whatsapp-handler.js";
@@ -16,6 +16,7 @@ import { runPaymentNotifications } from "./payment-notification-handler.js";
 import { runShipmentDispatch } from "./shipment-dispatch-handler.js";
 import { runShipmentNotifications } from "./shipment-notification-handler.js";
 import { runPhoneDelivery } from "./phone-delivery-handler.js";
+import { GROWTH_EMAIL_EVENT_TYPES, processGrowthEmail } from "./growth-email-handler.js";
 
 // Fail closed before any queue starts processing: an invalid runtime
 // configuration (unknown provider, missing Zammad values in
@@ -36,6 +37,10 @@ if (!startupConfig.ok) {
 // dormant. Any queued support delivery is held (never faked, never dropped) —
 // it flows again when a real support provider is configured.
 const supportDisabled = startupConfig.config.supportProvider === "disabled";
+// ADR-016: B2B enquiry email delivery. Null while B2B_EMAIL_DELIVERY is
+// disabled (the default) — no queue, no SMTP connection, pending outbox
+// events simply wait for activation.
+const b2bEmailConfig = startupConfig.config.email ?? null;
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -147,6 +152,20 @@ async function start() {
   });
   await boss.schedule("outbound.whatsapp", "* * * * *", {});
   await boss.send("outbound.whatsapp", {});
+  // ADR-016: B2B enquiry email drain. Created only when the SMTP config is
+  // enabled, so the feature stays fully inert until the owner activates it.
+  if (b2bEmailConfig) {
+    const growthEmailSender = new SmtpEmailSender(b2bEmailConfig);
+    const growthEmailOutbox = new PostgresOperationsOutbox(repos.database, GROWTH_EMAIL_EVENT_TYPES);
+    const growthEmailRepos = { growth: new PostgresGrowthRepository(repos.database), audit: new PostgresAuditRepository(repos.database) };
+    await boss.createQueue("growth.email");
+    await boss.work("growth.email", { batchSize: 1 }, async () => {
+      const result = await processGrowthEmail(growthEmailOutbox, { email: growthEmailSender, config: b2bEmailConfig, ...growthEmailRepos });
+      if (result.failed) throw new Error("GROWTH_EMAIL_RETRY_PENDING");
+    });
+    await boss.schedule("growth.email", "* * * * *", {});
+    await boss.send("growth.email", {});
+  }
   // ADR-014 shipping execution: dispatch leases + provider notifications.
   // The dispatch handler self-gates on SHIPPING_EXECUTION_MODE (disabled and
   // shadow never book; pilot stays inside explicit operator bounds).

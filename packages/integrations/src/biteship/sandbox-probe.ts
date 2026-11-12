@@ -10,6 +10,10 @@ export interface BiteshipSandboxProbeOptions {
   items: Array<{ name: string; valueIdr: number; quantity: number; weightGrams: number }>;
   fetchFn?: FetchLike;
   timeoutMs?: number;
+  /** "book" keeps the order open for DASHBOARD status simulation (the
+   *  Delivered/Cancelled activation pair); "book_and_cancel" is the legacy
+   *  repeatable cleanup run. Default: book_and_cancel. */
+  mode?: "book" | "book_and_cancel";
 }
 
 export interface BiteshipSandboxProbeResult {
@@ -30,6 +34,8 @@ export interface BiteshipSandboxProbeResult {
  * rates -> booking (pickup) -> retrieve -> cancel. Gated by
  * YUBIE_BITESHIP_SANDBOX_E2E=1 and REFUSED for production keys; it never
  * touches first-party data and never proves payment or physical delivery.
+ * Mode "book" leaves the order open so the owner can drive the dashboard
+ * status simulation (Delivered / Cancelled activation pair).
  */
 export function biteshipSandboxProbeDecision(env: Record<string, string | undefined>): { run: boolean; reason: string } {
   if (env.YUBIE_BITESHIP_SANDBOX_E2E !== "1") return { run: false, reason: "not requested" };
@@ -75,10 +81,34 @@ export async function runBiteshipSandboxProbe(options: BiteshipSandboxProbeOptio
   result.trackingId = orderBody.courier?.tracking_id ?? null;
   if (!result.orderId) return err({ code: "unavailable", message: "Sandbox order create returned no id.", retryable: false, requestId: "biteship-probe" });
 
+  if ((options.mode ?? "book_and_cancel") === "book") {
+    // Keep the order open: its final status is driven from the Biteship
+    // dashboard (Simulate -> Delivered/Cancelled) for the activation pair.
+    result.finalStatus = result.orderStatus;
+    return ok(result);
+  }
+
   // Always clean up: cancel the sandbox order so the probe is repeatable.
   const cancelResponse = await fetchFn(`https://api.biteship.com/v1/orders/${encodeURIComponent(result.orderId)}/cancel`, { method: "POST", headers, signal: AbortSignal.timeout(timeoutMs), body: "{}" });
   const cancelBody = (await cancelResponse.json().catch(() => ({}))) as { status?: string };
   result.cancelled = cancelResponse.ok;
   result.finalStatus = cancelBody.status ?? null;
   return ok(result);
+}
+
+/** Independent final-status verification (ADR-014 activation evidence):
+ *  retrieves the sandbox order straight from the provider — the same source
+ *  of truth the dashboard shows — and never trusts local state. */
+export async function verifyBiteshipSandboxOrder(options: { apiKey: string; orderId: string; fetchFn?: FetchLike; timeoutMs?: number }): Promise<UseCaseResult<{ orderId: string; status: string | null; waybillId: string | null; courierCompany: string | null }>> {
+  const fetchFn = options.fetchFn ?? (fetch as unknown as FetchLike);
+  const headers = { authorization: `Bearer ${options.apiKey}`, accept: "application/json" };
+  try {
+    const response = await fetchFn(`https://api.biteship.com/v1/orders/${encodeURIComponent(options.orderId)}`, { method: "GET", headers, signal: AbortSignal.timeout(options.timeoutMs ?? 20_000) });
+    if (!response.ok) return err({ code: "unavailable", message: `Biteship sandbox order retrieve rejected (HTTP ${response.status}).`, retryable: true, requestId: "biteship-verify" });
+    const body = (await response.json()) as { id?: string; status?: string; courier?: { waybill_id?: string; company?: string } };
+    if (body.id !== options.orderId) return err({ code: "validation", message: "Retrieved order id does not match the requested order.", retryable: false, requestId: "biteship-verify" });
+    return ok({ orderId: body.id, status: body.status ?? null, waybillId: body.courier?.waybill_id ?? null, courierCompany: body.courier?.company ?? null });
+  } catch {
+    return err({ code: "unavailable", message: "Biteship sandbox order retrieve failed.", retryable: true, requestId: "biteship-verify" });
+  }
 }

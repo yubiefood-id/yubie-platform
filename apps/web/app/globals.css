@@ -376,6 +376,24 @@ h1, h2, h3, p { margin-top: 0; }
 .checkout-form fieldset:disabled, .checkout-form fieldset:disabled input, .checkout-form fieldset:disabled textarea, .checkout-form fieldset:disabled button { cursor: progress; }
 .checkout-form small { color: #a32626; }
 .checkout-form .city-hint { color: var(--green); font-weight: 700; line-height: 1.5; }
+.checkout-form small.city-hint { grid-column: 1 / -1; display: block; }
+.checkout-note.strong { font-weight: 800; }
+
+/* Saved-address picker at checkout (logged-in customers) */
+.saved-addresses { grid-column: 1 / -1; display: grid; gap: .5rem; margin-bottom: .4rem; }
+.saved-address-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
+.saved-address-option { display: grid; gap: .3rem; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 12px; padding: .8rem .9rem; background: white; cursor: pointer; font-size: .88rem; line-height: 1.45; }
+.saved-address-option:hover { background: var(--lilac); }
+.saved-address-list li.selected .saved-address-option { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+.saved-address-label { font-weight: 750; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.saved-address-meta { color: color-mix(in srgb, var(--ink) 72%, transparent); font-size: .78rem; }
+
+/* Address search (Places autocomplete) — GPS alternative at checkout */
+.address-search { display: grid; gap: .4rem; }
+.address-search input { border: 1px solid var(--line); padding: .8rem; background: white; width: 100%; font-size: 1rem; font-weight: 500; }
+.address-suggestions { list-style: none; margin: 0; padding: .35rem; border: 1px solid var(--line); border-radius: 12px; background: white; display: grid; gap: .2rem; max-height: 16rem; overflow-y: auto; }
+.address-suggestions button { text-align: left; padding: .6rem .7rem; border-radius: 8px; font-size: .88rem; line-height: 1.45; cursor: pointer; background: transparent; border: 0; }
+.address-suggestions button:hover { background: var(--lilac); }
 .checkout-note { font-size: .78rem; line-height: 1.6; opacity: .7; }
 .checkout-error { color: #a32626; font-size: .85rem; font-weight: 700; }
 .account-grid { width: var(--container); margin: 0 auto; display: grid; grid-template-columns: 1.4fr .6fr; gap: 4rem; align-items: start; }

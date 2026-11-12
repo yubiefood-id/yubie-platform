@@ -20,6 +20,7 @@ export * from "./policies/erp-authority.js";
 export * from "./use-cases/erp-shadow-reconcile.js";
 export * from "./use-cases/reconcile-payments.js";
 export * from "./use-cases/growth-forms.js";
+export * from "./b2b-enquiry-email.js";
 export * from "./use-cases/auth.js";
 export * from "./auth/session-tokens.js";
 export * from "./auth/unavailable-storage.js";
