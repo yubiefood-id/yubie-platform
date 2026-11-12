@@ -47,7 +47,8 @@ test("B2B transport failure keeps the enquiry and consent available for retry", 
   await form.getByRole("button", { name: "Tinjau enquiry" }).click();
   await expect(page.getByRole("heading", { name: "Tinjau enquiry Anda" })).toBeVisible();
   await page.getByRole("button", { name: "Kirim enquiry" }).click();
-  await expect(form.getByRole("alert")).toBeVisible();
+  await expect(page.locator(".b2b-review").getByRole("alert")).toBeVisible();
+  await page.getByRole("button", { name: "Ubah jawaban" }).click();
   await expect(form.getByLabel("Nama bisnis")).toHaveValue("Synthetic Bakery");
   await expect(form.getByRole("checkbox")).toBeChecked();
 });
