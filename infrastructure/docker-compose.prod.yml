@@ -153,6 +153,17 @@ services:
       ZAMMAD_GROUP_SALES_PARTNERSHIP: ${ZAMMAD_GROUP_SALES_PARTNERSHIP:-}
       ZAMMAD_GROUP_FOOD_SAFETY: ${ZAMMAD_GROUP_FOOD_SAFETY:-}
       ZAMMAD_PRIORITY_HIGH: ${ZAMMAD_PRIORITY_HIGH:-}
+      # ADR-016 B2B email: worker-only secret boundary. The previous compose
+      # omitted these variables, silently leaving SMTP delivery dormant even
+      # when the owner enabled it in /etc/yubie/production.env.
+      B2B_EMAIL_DELIVERY: ${B2B_EMAIL_DELIVERY:-disabled}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      B2B_ENQUIRY_EMAIL_FROM: ${B2B_ENQUIRY_EMAIL_FROM:-}
+      B2B_ENQUIRY_NOTIFY_TO: ${B2B_ENQUIRY_NOTIFY_TO:-hello@yubiefood.com}
+      B2B_ENQUIRY_ACK: ${B2B_ENQUIRY_ACK:-enabled}
       SHIPPING_EXECUTION_MODE: ${SHIPPING_EXECUTION_MODE:-disabled}
       SHIPPING_PROVIDER: ${SHIPPING_PROVIDER:-none}
       BITESHIP_ENV: ${BITESHIP_ENV:-}
