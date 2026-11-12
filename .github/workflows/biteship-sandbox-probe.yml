@@ -76,10 +76,10 @@ jobs:
           console.log('PROBE_OK', JSON.stringify(result.value));
           if (mode === 'book') {
             if (result.value.orderId === null) process.exit(1);
-            require('node:fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, '## Biteship sandbox order (open for dashboard simulation)' + String.fromCharCode(10) + 'orderId: ' + result.value.orderId + String.fromCharCode(10) + 'initialStatus: ' + result.value.orderStatus + String.fromCharCode(10) + 'referenceId lane: ' + process.env.PROBE_ORIGIN + ' -> ' + process.env.PROBE_DESTINATION + String.fromCharCode(10));
+            (await import('node:fs')).appendFileSync(process.env.GITHUB_STEP_SUMMARY, '## Biteship sandbox order (open for dashboard simulation)' + String.fromCharCode(10) + 'orderId: ' + result.value.orderId + String.fromCharCode(10) + 'initialStatus: ' + result.value.orderStatus + String.fromCharCode(10) + 'referenceId lane: ' + process.env.PROBE_ORIGIN + ' -> ' + process.env.PROBE_DESTINATION + String.fromCharCode(10));
           } else {
             if (result.value.orderId === null || !result.value.cancelled) process.exit(1);
-            require('node:fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, '## Biteship sandbox probe (rates->book->cancel)' + String.fromCharCode(10) + 'orderId: ' + result.value.orderId + ' finalStatus: ' + result.value.finalStatus + String.fromCharCode(10));
+            (await import('node:fs')).appendFileSync(process.env.GITHUB_STEP_SUMMARY, '## Biteship sandbox probe (rates->book->cancel)' + String.fromCharCode(10) + 'orderId: ' + result.value.orderId + ' finalStatus: ' + result.value.finalStatus + String.fromCharCode(10));
           }
           "
       - name: Persist sanitized evidence
