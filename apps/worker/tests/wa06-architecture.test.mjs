@@ -8,7 +8,11 @@ import {readFile} from 'node:fs/promises';
 // silently appear from this codebase.
 
 test('D22: exactly one inbound provider webhook route exists (no dual consumer)', async () => {
-  const botSource = await readFile(new URL('../../bot/dist/index.js', import.meta.url), 'utf8');
+  // Assert against the authoritative SOURCE, not a build artifact: the worker
+  // test script does not build the bot workspace, so apps/bot/dist does not
+  // exist in a fresh checkout (CI root cause, run 43084752180). Reading src
+  // keeps the invariant checkable from any clean installation.
+  const botSource = await readFile(new URL('../../bot/src/index.ts', import.meta.url), 'utf8');
   const zammadRoutes = botSource.match(/\/webhooks\/zammad/g) ?? [];
   assert.equal(zammadRoutes.length, 1, 'apps/bot exposes exactly one Zammad webhook route');
   assert.equal((botSource.match(/\/webhooks\/chatwoot-agentbot/g) ?? []).length, 1, 'legacy rollback route unchanged');
