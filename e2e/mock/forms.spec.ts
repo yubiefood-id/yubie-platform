@@ -109,6 +109,6 @@ test("B2B preview is a draft, not a server write, and editing preserves all fiel
   await form.getByRole("button", { name: "Tinjau enquiry" }).click();
   expect(posts).toBe(0);
   await page.getByRole("button", { name: "Kirim enquiry" }).click();
-  await expect(page.getByRole("status")).toContainText("Enquiry Anda telah kami terima");
+  await expect(page.getByRole("status").filter({ hasText: "Enquiry Anda telah kami terima" })).toBeVisible();
   expect(posts).toBe(1);
 });
