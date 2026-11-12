@@ -33,7 +33,13 @@
   "workers_dev": false,
   "preview_urls": false,
   "vars": {
-    "YUBIE_API_ORIGIN": "https://api.yubiefood.com"
+    "YUBIE_API_ORIGIN": "https://api.yubiefood.com",
+    // The production worker is served through Cloudflare custom domains, so
+    // cf-connecting-ip is set by Cloudflare itself (never client-forgeable at
+    // this hop). Trusting it lets the BFF forward x-yubie-client-ip, which the
+    // API requires for location endpoints (customer-locations fail closed
+    // without a client IP).
+    "WEB_TRUST_CLOUDFLARE_IP": "true"
   },
   // Existing apex and candidate custom domains; no DNS cutover is required.
   "routes": [
