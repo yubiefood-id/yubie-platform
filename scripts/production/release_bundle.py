@@ -22,7 +22,8 @@ PRIOR_COMPOSE_SHA256 = [
     "6d178eac90fdc455e2fd245c59ae433b6a1cc7ff67fe64a3cdd7b1a70dc533e9",  # rendered by release 667f9ab59e3349cf6247ec58efb5f4e7f23a894d
     "ad292f5d303ba4aeeb1c17c78ea9eae8ec08af30311f9c4927dcde5bc96de681",  # rendered by release b23890073a9eb05be8f1d8149eabce556e88db78
     "7befdcf8332861ea8620ca731721a921aa07100032ae7d1d3fc53f0b997b7c4c",  # live immediately before the d8a660d deployment
-    "127a3810613d724fc643266a1b026290afecdd8ac674991370fb7a1e9283a1aa",  # rendered by release d8a660db96f2f781ad0c4eb091be10034dea6ad6 (currently live)
+    "127a3810613d724fc643266a1b026290afecdd8ac674991370fb7a1e9283a1aa",  # rendered by release d8a660db96f2f781ad0c4eb091be10034dea6ad6
+    "dee843001029c37853525d6461faf7ca421da8181cd1db7a538efda53ff774c6",  # rendered by release 4e799d90dcbd76d281bc0c484f3953606938acad (currently live)
 ]
 
 

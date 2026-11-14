@@ -14,13 +14,26 @@ on:
         description: "Destination postal code"
         required: true
         default: "40115"
+      mode:
+        description: "book = leave order open for dashboard status simulation; book_and_cancel = legacy cleanup; verify = retrieve final status of order_id"
+        required: true
+        default: "book_and_cancel"
+        type: choice
+        options:
+          - book
+          - book_and_cancel
+          - verify
+      order_id:
+        description: "Biteship order id (verify mode only)"
+        required: false
+        default: ""
 
 jobs:
   probe:
     runs-on: ubuntu-latest
     environment: biteship-sandbox
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677267
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
@@ -35,13 +48,25 @@ jobs:
           BITESHIP_COURIERS: ${{ vars.BITESHIP_COURIERS }}
           PROBE_ORIGIN: ${{ github.event.inputs.origin_postal_code }}
           PROBE_DESTINATION: ${{ github.event.inputs.destination_postal_code }}
+          PROBE_MODE: ${{ github.event.inputs.mode }}
+          PROBE_ORDER_ID: ${{ github.event.inputs.order_id }}
         run: |
           node --input-type=module -e "
-          import { runBiteshipSandboxProbe } from '@yubie/integrations';
+          import { runBiteshipSandboxProbe, verifyBiteshipSandboxOrder } from '@yubie/integrations';
           const key = process.env.BITESHIP_API_KEY ?? '';
+          const mode = process.env.PROBE_MODE ?? 'book_and_cancel';
           if (!key.startsWith('biteship_test.')) { console.log('REFUSED: non-test credential'); process.exit(1); }
+          if (mode === 'verify') {
+            if (!process.env.PROBE_ORDER_ID) { console.log('VERIFY_FAILED: order_id input required'); process.exit(1); }
+            const verified = await verifyBiteshipSandboxOrder({ apiKey: key, orderId: process.env.PROBE_ORDER_ID });
+            if (!verified.ok) { console.log('VERIFY_FAILED', JSON.stringify(verified.error)); process.exit(1); }
+            console.log('VERIFY_OK', JSON.stringify(verified.value));
+            if (verified.value.status !== 'delivered' && verified.value.status !== 'cancelled') { console.log('VERIFY_PENDING status=' + verified.value.status); process.exit(2); }
+            process.exit(0);
+          }
           const result = await runBiteshipSandboxProbe({
             apiKey: key,
+            mode,
             couriers: process.env.BITESHIP_COURIERS || 'jne,jnt,sicepat',
             originPostalCode: Number(process.env.PROBE_ORIGIN),
             destinationPostalCode: Number(process.env.PROBE_DESTINATION),
@@ -49,5 +74,15 @@ jobs:
           });
           if (!result.ok) { console.log('PROBE_FAILED', JSON.stringify(result.error)); process.exit(1); }
           console.log('PROBE_OK', JSON.stringify(result.value));
-          if (result.value.orderId === null || !result.value.cancelled) process.exit(1);
+          if (mode === 'book') {
+            if (result.value.orderId === null) process.exit(1);
+            (await import('node:fs')).appendFileSync(process.env.GITHUB_STEP_SUMMARY, '## Biteship sandbox order (open for dashboard simulation)' + String.fromCharCode(10) + 'orderId: ' + result.value.orderId + String.fromCharCode(10) + 'initialStatus: ' + result.value.orderStatus + String.fromCharCode(10) + 'referenceId lane: ' + process.env.PROBE_ORIGIN + ' -> ' + process.env.PROBE_DESTINATION + String.fromCharCode(10));
+          } else {
+            if (result.value.orderId === null || !result.value.cancelled) process.exit(1);
+            (await import('node:fs')).appendFileSync(process.env.GITHUB_STEP_SUMMARY, '## Biteship sandbox probe (rates->book->cancel)' + String.fromCharCode(10) + 'orderId: ' + result.value.orderId + ' finalStatus: ' + result.value.finalStatus + String.fromCharCode(10));
+          }
           "
+      - name: Persist sanitized evidence
+        if: always()
+        run: |
+          echo "mode=${{ github.event.inputs.mode }} order_id=${{ github.event.inputs.order_id }} run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_STEP_SUMMARY"

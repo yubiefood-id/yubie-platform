@@ -89,4 +89,14 @@ test("b2b lead creates a durable row, own consent purpose, and an outbox event",
   const outbox = deps.outbox.events.find((event) => event.eventType === "growth.b2b_lead_created");
   assert.ok(outbox, "B2B lead emits an outbox event for downstream CRM");
   assert.ok(!outbox.payloadJson.includes("Monthly bulk order"), "free-text bodies never travel in outbox payloads");
+
+  const emailEvent = deps.outbox.events.find((event) => event.eventType === "growth.b2b_enquiry_email_requested");
+  const ackEvent = deps.outbox.events.find((event) => event.eventType === "growth.b2b_enquiry_ack_requested");
+  assert.ok(emailEvent, "B2B lead emits a dedicated email delivery event");
+  assert.ok(ackEvent, "B2B lead emits a dedicated customer acknowledgment event");
+  const leadId = deps.growth.b2bLeads[0].id;
+  assert.equal(emailEvent.dedupeKey, `b2b_enquiry_email:${leadId}`);
+  assert.equal(ackEvent.dedupeKey, `b2b_enquiry_ack:${leadId}`);
+  assert.deepEqual(JSON.parse(emailEvent.payloadJson), { leadId }, "email event payload carries the lead id only");
+  assert.deepEqual(JSON.parse(ackEvent.payloadJson), { leadId }, "ack event payload carries the lead id only");
 });

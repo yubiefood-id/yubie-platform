@@ -21,6 +21,12 @@ test.beforeEach(async ({ page, context }) => {
   await page.route("**/api/shipping/coverage", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { policies: [{ policy: "free_promotional", amount: 0, cities: ["Kabupaten Bogor"] }] } }) });
   });
+  await page.route("**/api/locations/autocomplete", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: [{ id: "place-1", label: "Jl. Raya Cibinong No. 1, Cibinong, Kabupaten Bogor, Jawa Barat" }] }) });
+  });
+  await page.route("**/api/locations/details", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { label: "Jl. Raya Cibinong No. 1, Cibinong, Kabupaten Bogor, Jawa Barat 16911", latitude: -6.4817, longitude: 106.8543, address: { province: "Jawa Barat", city: "Kabupaten Bogor", district: "Cibinong", postalCode: "16911" } } }) });
+  });
   await page.route("**/api/checkout/quote", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: { subtotalAmount: 9000, discountAmount: 0, shippingAmount: 0, totalAmount: 9000, currency: "IDR", stockAvailable: true, shippingAvailable: true } }) });
   });
@@ -38,9 +44,11 @@ test("inputs stay fillable when the checkout session probe fails", async ({ page
   await page.getByLabel("Email").fill("mobile-user@example.invalid");
   await page.getByLabel("No. WhatsApp").fill("080000000000");
   await page.getByLabel("Alamat lengkap").fill("Jl. Raya Cibinong No. 1");
-  await page.getByRole("combobox", { name: "Kota", exact: true }).selectOption("Kabupaten Bogor");
+  const search = page.getByRole("textbox", { name: "Cari alamat pengiriman" });
+  await search.fill("Jl. Raya Cibinong");
+  await page.getByRole("option").first().click();
   await expect(page.getByLabel("Email")).toHaveValue("mobile-user@example.invalid");
-  await expect(page.getByRole("combobox", { name: "Kota", exact: true })).toHaveValue("Kabupaten Bogor");
+  await expect(page.getByText(/🚚 Gratis ongkir — pengiriman ke Kabupaten Bogor gratis \(Rp0\)/)).toBeVisible();
   await expect(page.getByText(/Gratis ongkir ke Kabupaten Bogor/)).toBeVisible();
   // The pay button — not the fields — carries the admission gate.
   const pay = page.getByRole("button", { name: /^Bayar/ });
@@ -62,9 +70,10 @@ test("legacy mobile browsers (no Web Locks, no AbortSignal.timeout) can complete
   await page.getByLabel("Email").fill("legacy-ios@example.invalid");
   await page.getByLabel("No. WhatsApp").fill("080000000000");
   await page.getByLabel("Alamat lengkap").fill("Jl. Raya Cibinong No. 1");
-  await page.getByRole("combobox", { name: "Kota", exact: true }).selectOption("Kabupaten Bogor");
-  await expect(page.getByRole("combobox", { name: "Kota", exact: true })).toHaveValue("Kabupaten Bogor");
-  await expect(page.getByText(/Gratis ongkir ke Kabupaten Bogor/)).toBeVisible();
+  const search = page.getByRole("textbox", { name: "Cari alamat pengiriman" });
+  await search.fill("Jl. Raya Cibinong");
+  await page.getByRole("option").first().click();
+  await expect(page.getByText(/🚚 Gratis ongkir — pengiriman ke Kabupaten Bogor gratis \(Rp0\)/)).toBeVisible();
   await expect(page.getByRole("button", { name: /^Bayar Rp/ })).toBeEnabled();
   // The fallback timer must not abort the settled session/quote requests.
   await expect(page.getByText("Checkout belum tersedia.")).toHaveCount(0);
