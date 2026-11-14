@@ -8,6 +8,7 @@ export const siteConfig = {
   social: {
     instagram: "https://www.instagram.com/yubiefood.official/",
     tiktok: "https://www.tiktok.com/@yubiefood.official",
+    whatsappChat: "https://wa.me/6285282141733?text=Halo%20Yubie!%20Saya%20lihat%20di%20website%20dan%20ingin%20bertanya.",
     whatsappCommunity: "https://chat.whatsapp.com/IVpNHQOsn371YeTSdyX6q2",
     feedbackForm: "https://forms.gle/tdBw1f8KWjBRs96K8",
   },
