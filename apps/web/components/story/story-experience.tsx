@@ -48,18 +48,18 @@ const educationCards = [
 
 const team = [
   {
-    name: "Muhammad Asyam Jayanegara",
-    role: "Chief Technology Officer",
-    discipline: "Teknologi & Platform",
-    focus: "Arsitektur platform, pengembangan web dan integrasi, keamanan sistem, serta operasional teknologi Yubie.",
-    mark: "MA",
-  },
-  {
     name: "Ricter Pangestika",
     role: "Chief Executive Officer",
     discipline: "Bisnis & Strategi",
     focus: "Koordinasi tim, strategi bisnis, keputusan, dan kemitraan rantai pasok.",
     mark: "RP",
+  },
+  {
+    name: "Dr.agr. Eny Palupi, S.TP., M.Sc.",
+    role: "Pembimbing Teknis",
+    discipline: "Food Science and Nutrition · IPB University",
+    focus: "Pendampingan teknis untuk pengembangan pangan lokal, formulasi, dan jalur pembuktian ilmiah.",
+    mark: "EP",
   },
   {
     name: "Dewi Anggraini",
@@ -69,11 +69,11 @@ const team = [
     mark: "DA",
   },
   {
-    name: "Dr.agr. Eny Palupi, S.TP., M.Sc.",
-    role: "Pembimbing Teknis",
-    discipline: "Food Science and Nutrition · IPB University",
-    focus: "Pendampingan teknis untuk pengembangan pangan lokal, formulasi, dan jalur pembuktian ilmiah.",
-    mark: "EP",
+    name: "Muhammad Asyam Jayanegara",
+    role: "Chief Technology Officer",
+    discipline: "Teknologi & Platform",
+    focus: "Arsitektur platform, pengembangan web dan integrasi, keamanan sistem, serta operasional teknologi Yubie.",
+    mark: "MA",
   },
 ] as const;
 

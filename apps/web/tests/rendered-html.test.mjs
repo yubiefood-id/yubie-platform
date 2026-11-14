@@ -103,7 +103,7 @@ test("our story separates education, evidence status, and team facts", async () 
   assert.match(html, /FROM ROOT TO RELEVANCE[\s\S]*ONE ROOT · FOUR FORMATS/);
   assert.match(html, /THE EVIDENCE PIPELINE[\s\S]*Source[\s\S]*Specify[\s\S]*Verify[\s\S]*Approve[\s\S]*Publish/);
   assert.match(html, /Ubi jalar[\s\S]*Ipomoea batatas[\s\S]*Ube[\s\S]*Dioscorea alata/);
-  assert.match(html, /Muhammad Asyam Jayanegara[\s\S]*Ricter Pangestika[\s\S]*Dewi Anggraini[\s\S]*Eny Palupi/);
+  assert.match(html, /Ricter Pangestika[\s\S]*Eny Palupi[\s\S]*Dewi Anggraini[\s\S]*Muhammad Asyam Jayanegara/);
   assert.doesNotMatch(html, /menyembuhkan|mencegah diabetes|menurunkan berat badan/i);
 });
 
