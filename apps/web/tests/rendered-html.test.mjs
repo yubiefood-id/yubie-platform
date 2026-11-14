@@ -42,7 +42,7 @@ test("renders catalog, product, and supporting routes", async () => {
     ["/products", /Mulai/],
     ["/products/yubie-flour", /BELI RESMI|Memuat opsi beli/],
     ["/products/yubie-mie", /Add to Cart/i],
-    ["/our-story", /Yang tumbuh dekat[\s\S]*Ubi ≠ Ube[\s\S]*Nadhya Shafa/],
+    ["/our-story", /Yang tumbuh dekat[\s\S]*Ubi ≠ Ube[\s\S]*Ricter Pangestika/],
     ["/our-roots", /FIVE ROOTS[\s\S]*Purple Pancakes/],
     ["/b2b", /BUILD YOUR NEXT PRODUCT/],
     ["/impact", /Responsible evidence/],
@@ -103,7 +103,7 @@ test("our story separates education, evidence status, and team facts", async () 
   assert.match(html, /FROM ROOT TO RELEVANCE[\s\S]*ONE ROOT · FOUR FORMATS/);
   assert.match(html, /THE EVIDENCE PIPELINE[\s\S]*Source[\s\S]*Specify[\s\S]*Verify[\s\S]*Approve[\s\S]*Publish/);
   assert.match(html, /Ubi jalar[\s\S]*Ipomoea batatas[\s\S]*Ube[\s\S]*Dioscorea alata/);
-  assert.match(html, /Nadhya Shafa[\s\S]*Nadira Mumtaz Fauzia[\s\S]*Renata Azrarefa[\s\S]*Eny Palupi/);
+  assert.match(html, /Muhammad Asyam Jayanegara[\s\S]*Ricter Pangestika[\s\S]*Dewi Anggraini[\s\S]*Eny Palupi/);
   assert.doesNotMatch(html, /menyembuhkan|mencegah diabetes|menurunkan berat badan/i);
 });
 

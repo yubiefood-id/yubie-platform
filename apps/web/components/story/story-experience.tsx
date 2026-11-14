@@ -48,25 +48,25 @@ const educationCards = [
 
 const team = [
   {
-    name: "Nadhya Shafa",
+    name: "Muhammad Asyam Jayanegara",
+    role: "Chief Technology Officer",
+    discipline: "Teknologi & Platform",
+    focus: "Arsitektur platform, pengembangan web dan integrasi, keamanan sistem, serta operasional teknologi Yubie.",
+    mark: "MA",
+  },
+  {
+    name: "Ricter Pangestika",
     role: "Chief Executive Officer",
-    discipline: "Agribisnis · FEM IPB",
+    discipline: "Bisnis & Strategi",
     focus: "Koordinasi tim, strategi bisnis, keputusan, dan kemitraan rantai pasok.",
-    mark: "NS",
+    mark: "RP",
   },
   {
-    name: "Nadira Mumtaz Fauzia",
-    role: "Chief Production Officer",
-    discipline: "Ilmu Gizi · FKGiz IPB",
-    focus: "Pengembangan produk, standardisasi proses, kendali mutu, dan dokumentasi produksi.",
-    mark: "NM",
-  },
-  {
-    name: "Renata Azrarefa",
-    role: "Chief Marketing Officer",
-    discipline: "Manajemen Industri Jasa Makanan dan Gizi · SV IPB",
-    focus: "Riset pasar, brand, komunikasi produk, pemasaran B2C/B2B, dan validasi konsumen.",
-    mark: "RA",
+    name: "Dewi Anggraini",
+    role: "Chief Financial Officer",
+    discipline: "Keuangan & Pengendalian Biaya",
+    focus: "Perencanaan keuangan, biaya produksi dan harga, arus kas, serta pelaporan kesehatan bisnis.",
+    mark: "DA",
   },
   {
     name: "Dr.agr. Eny Palupi, S.TP., M.Sc.",
@@ -79,7 +79,7 @@ const team = [
 
 const journey = [
   ["01", "Melihat yang dekat", "Ubi jalar Indonesia sudah akrab, tetapi potensinya belum selalu hadir dalam format yang dekat dengan rutinitas modern."],
-  ["02", "Membaca peluang", "Tim lintas agribisnis, gizi, dan food service memetakan bahan, proses, pengguna, serta peluang nilai tambah."],
+  ["02", "Membaca peluang", "Kerja lintas agribisnis, gizi, dan food service memetakan bahan, proses, pengguna, serta peluang nilai tambah."],
   ["03", "Menguji bentuk", "Eksplorasi bergerak dari tepung menuju aplikasi—baking, minuman, ppang, mie, dan pengembangan untuk mitra pangan."],
   ["04", "Bertumbuh dengan bukti", "Produk, klaim, dan dampak dipisahkan dengan jelas: yang sudah terverifikasi dipublikasikan; yang masih diuji tetap menjadi agenda R&D."],
 ] as const;
@@ -476,8 +476,8 @@ export function StoryExperience() {
       <section className="story-team story-chapter" id="team" data-story-chapter aria-labelledby="team-title">
         <header className="story-section-heading" data-story-reveal>
           <span className="story-chapter-number">04</span>
-          <div><span className="eyebrow">OUR TEAM</span><h2 id="team-title">Three disciplines.<br /><em>One local-food mission.</em></h2></div>
-          <p>Yubie dibangun dari pertemuan agribisnis, ilmu gizi, pengembangan produk, dan komunikasi pasar—didampingi kepakaran food science and nutrition.</p>
+          <div><span className="eyebrow">OUR TEAM</span><h2 id="team-title">Three mandates.<br /><em>One local-food mission.</em></h2></div>
+          <p>Yubie dibangun dari kepemimpinan di teknologi, bisnis, dan keuangan—didampingi kepakaran food science and nutrition.</p>
         </header>
 
         <figure className="team-portrait" data-story-reveal>
